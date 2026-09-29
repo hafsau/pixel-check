@@ -1,0 +1,13 @@
+# secrets
+.env
+.env.*
+!.env.example
+# env / deps / outputs
+.venv/
+node_modules/
+out/
+__pycache__/
+*.pyc
+test.png
+# OS
+.DS_Store
