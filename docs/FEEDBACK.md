@@ -36,12 +36,17 @@ Status tags: **[confirmed]** = experienced first-hand · **[to verify]** = seen 
 **Worked well**
 - 2026-09-29 [confirmed] Fast: image import `python:3.12-slim` 9 s; `contree run` hello-world 3 s wall; API spawn→result 2.8 s with networking off.
 - 2026-09-29 [confirmed] `contree auth` read key + project from env and saved a profile in one step; `--help` pages have examples and a "for coding agents" section.
+- 2026-09-29 [confirmed] Checkpoint branching just works: 3 parallel forks from one checkpoint in 4.3 s, fully isolated, parent untouched. This is the feature that makes a multi-branch agent cheap.
+- 2026-09-29 [confirmed] A full Chromium render at 3 viewports (Playwright image, network off) runs in 4–5 s wall / ~1.1 s VM time, byte-identical across runs — deterministic enough to score against.
+- 2026-09-29 [confirmed] The CLI ships the full OpenAPI spec (`contree_client/spec_info.py`); it answered every question the web docs didn't.
 - 2026-09-29 [confirmed] API returns rich per-run resources (cpu, rss, cost, elapsed) — directly usable for our trace.
 
 **Needs work**
 - 2026-09-25 [confirmed] Beta access is granted per project and must be requested separately; waited ~3 days (requested Sep 25, granted Sep 28).
 - 2026-09-29 [confirmed] `contree run` (CLI 0.9.4) gives the sandbox internet access by default (`urlopen('https://example.com')` → 200) and has no flag to disable it; only the API's `networking: {"enabled": false}` blocks it (verified: `URLError`). For a product aimed at running untrusted agent code, network-off should be the default, or at least a CLI flag.
 - 2026-09-29 [confirmed] `-o json` is a global flag and must precede the subcommand (`contree -o json run …`); `contree run -o json` errors with "unrecognized arguments". Easy to trip on.
+- 2026-09-29 [confirmed] **stdout silently capped at 64 KiB.** `POST /instances` with `truncate_output_at: 10485760` echoes that value back, but `metadata.result.stdout` (and `GET /operations/{id}/subprocesses/1`) returns exactly 65,536 bytes with `truncated: false`. Two bugs: the cap ignores the setting, and the flag lies. Workaround: write outputs to files and fetch them via `GET /inspect/{image}/archive`.
+- 2026-09-29 [confirmed] `contree build`: `COPY render.mjs ./` after `WORKDIR /opt/pc` did not place the file in `/opt/pc` (Docker semantics would); absolute destinations work.
 - 2026-09-29 [to verify] Sandboxes are described as free in beta, yet every run reports `resources.cost` (e.g. 0.00217). Unclear whether this is billed; the docs should say.
 - [to verify] Short default execution timeout (30 s per MCP docs); a Chromium render at 3 viewports can exceed it. Suggest stating the default in the API reference next to `timeout`.
 - [to verify] Python SDK on PyPI didn't match the documented SDK surface (reported Sep 11 by another builder).
@@ -56,17 +61,31 @@ Status tags: **[confirmed]** = experienced first-hand · **[to verify]** = seen 
 
 ## 3. NVIDIA Nemotron 3 Super (via Token Factory)
 
-**Used for:** planning components, writing the React + Tailwind code, critiquing diff reports; reasoning modes chosen per step.
+**Used for:** critique (fix strategies from measured diffs), class-edit proposals (JSON), early code generation; reasoning modes chosen per step.
 
 **Worked well**
-- __
+- 2026-09-29 [confirmed] Structured output is reliable with reasoning off: 10/10 schema-valid JSON (G2), 0.7–1.2 s on short prompts; also valid in `low_effort` (3/3) and `reasoning_budget` 2048 (3/3) modes.
+- 2026-09-29 [confirmed] Cheap and fast for agent loops: median code call $0.0027, 8.6 s, ~1.7k output tokens (43 calls). `/v1/models?verbose=true` exposes the exact per-token price, so an app-level spend cap can use live prices.
 
 **Needs work**
-- __
+- 2026-09-29 [confirmed] Pixel-precise layout from a numeric spec is weak: single-shot responsive pages scored median ~15 (max 27) on our scorer vs 39–47 for Nemotron 3 Ultra on the same spec. Full-file revisions frequently regress parts that were already right (e.g. desktop 80 → 16 while fixing tablet), even with "keep every other line identical" and temperature 0.6.
+- 2026-09-29 [confirmed] With reasoning on (`reasoning_budget` 2048) and `max_tokens` 16,000, 1 of 3 code generations returned no code block (budget spent on reasoning). A documented guideline for sizing `max_tokens` vs `reasoning_budget` would help.
 
 **Onboarding (zero → hello world):** first valid JSON response: __ min
 
 **Build with it again? Why:** __
+
+---
+
+## 3b. NVIDIA Nemotron 3 Ultra (via Token Factory)
+
+**Used for:** writing the initial responsive App.jsx and from-scratch rewrites.
+
+**Worked well**
+- 2026-09-29 [confirmed] Clearly better layout reasoning than Super on the same spec: single-shot match 39.2 / 44.1 vs Super's median ~15; best first draft 47.1 (mobile 72, desktop 80). ~$0.024 and ~23 s per code call ($1/$3 per M tokens) — affordable for a 3-branch loop.
+
+**Needs work**
+- 2026-09-29 [confirmed] `low_effort` reasoning: 2 of 3 code generations returned no code within 16,000 max tokens.
 
 ---
 
@@ -81,12 +100,16 @@ Status tags: **[confirmed]** = experienced first-hand · **[to verify]** = seen 
 
 ---
 
-## 5. Vision model: __ (name from gate G3)
+## 5. Vision model: google/gemma-3-27b-it (via Token Factory)
 
 **Used for:** reading the 3 design frames once into a structured spec.
 
-**Worked well:** __
-**Needs work:** __ (note here whether an NVIDIA vision model was available on Token Factory serverless)
+**Worked well**
+- 2026-09-29 [confirmed] Gemma 3 27B read 95.8 % of visible text strings (181/189) across 10 UI screenshots (desktop + mobile) with essentially no invented text; 0/10 unparseable JSON replies; ~372 input tokens per image.
+
+**Needs work**
+- 2026-09-29 [confirmed] No NVIDIA vision model on Public endpoints; Nemotron-Nano-V2-12b and Cosmos3-Super-Reasoner are Dedicated-only — so a hackathon asking for NVIDIA models can't use one for vision without a dedicated deployment.
+- 2026-09-29 [confirmed] openbmb/MiniCPM-V-4_5 emits `<think>` reasoning by default and ran out of a 3,000-token budget on 3/10 images; 1/10 returned invalid JSON. Recall 64.6 % overall. The model card should document how to disable thinking.
 **Onboarding:** __
 **Build with it again? Why:** __
 

@@ -11,3 +11,7 @@ __pycache__/
 test.png
 # OS
 .DS_Store
+
+# dev-only captures of third-party pages (never commit)
+benchmarks-dev/
+var/

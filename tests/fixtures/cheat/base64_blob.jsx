@@ -1,0 +1,2 @@
+const BLOB = "wma4Ad/hXB/KJTuFJlqV5PcitqSjOr+Q92QgTGgRUOf+y9GdiC6o17OqfCksMh2DcoVSN2NM/HThT66ZjF2hgIhPM1HVZw143VE09mm95tjtlqpydXcWl62MOQKqQoIKjkxTW7tK/uM86CFdjSKpnI9JrEEMIVyDmpGK+araaFDrWY77aRTG9XTkMIJwQwxTlXpLwX3M9UmLP/D74S4XlQHqTU3geV2nLT98qspWYtvqho896+qd3GSRY6o+YoUibLe0nUK+lNKvX40oGdGaagf6gM8/fvQw5Lzm8xXBmViWoEWy5RBZ+K7LRmdDwSwdqCiA8igVUJ5gUTkc3rg5+83ovJ2OX+O0SLzFzX+fuzeyeR1mQH0GKvb51mH0hBXV30gSjM2XbI3ks/N5";
+export default function App() { return <div data-x={BLOB}>hi</div>; }

@@ -1,0 +1,111 @@
+"""Code: Nemotron writes / revises the single App.jsx from the spec (and critiques). Never sees images."""
+from __future__ import annotations
+
+import re
+
+from . import config
+from .perceive import spec_for_prompt
+from .tf_client import TFClient
+
+SYSTEM = """You are an expert front-end engineer. You write ONE responsive React component, App.jsx, styled only
+with Tailwind CSS v3 utility classes, that reproduces a design at three viewports from a precise text spec.
+
+Hard rules (violations score 0):
+- One file. `export default function App()`. Only import from "react" (if at all). No other imports.
+- No <img>, <svg>, <canvas>, <video>, <iframe>, <object>, <picture>, <style>, <link>; no url(), data:, background images,
+  dangerouslySetInnerHTML, fetch, matchMedia/innerWidth/resize listeners. Image placeholders are plain <div>s with a
+  solid background colour. Icons are small solid <div>s or omitted.
+- ONE DOM tree for all viewports. Do NOT build separate mobile/tablet/desktop copies toggled with hidden/md:block;
+  re-flow the same elements with responsive classes (flex/grid direction, columns, widths, gap, text size, order).
+  Hiding a genuinely desktop-only element (e.g. a side panel) with `hidden xl:block` is fine.
+- position:absolute/fixed on at most a few decorative elements; layout uses flex/grid.
+Breakpoints (Tailwind defaults, mobile-first): no prefix = mobile (390 px wide), `md:` = tablet (768 px), `xl:` = desktop
+(1280 px). The 3 frames are 390×844, 768×1024, 1280×800 and are captured at the top of the page (no scrolling).
+Fonts: `font-sans` is Inter (weights 400/500/600/700), `font-mono` is IBM Plex Mono. Use exact colours with arbitrary
+values (bg-[#e50914], text-[#737373]) and exact sizes (text-[13px], w-[440px], mt-[18px]) when the spec gives them.
+The page root must set the page background colour and min-h-screen.
+
+Reading the spec:
+- Each frame is the TOP of the page at that viewport, cropped to the viewport height. Content that appears in the taller
+  frames but is "not in frame" in a shorter one is normally BELOW THE FOLD there: keep it in the DOM and make sure the
+  content above it is tall enough (use the measured y positions / min-h) that it starts below that viewport's height.
+- Never vertically centre a block that also contains below-the-fold content (it would push the top content off-screen).
+  Place things with the measured y positions (top padding/margins) instead.
+- Blocks are the measured boxes of real elements (an input, a button, a card, a panel). Build each as the element
+  itself with that size and colour — do not add separate decorative overlay divs for them.
+- Boxes are [x, y, width, height] px, exact to ±3 px unless marked ~ (estimated). Sizes are font sizes in px; `on` is the
+  colour directly behind the text.
+Output: first the complete App.jsx in one ```jsx code block, then at most 5 short bullet notes."""
+
+CODE_RE = re.compile(r"```(?:jsx|tsx|javascript|js)?\s*\n(.*?)```", re.S)
+
+
+def extract_code(text: str) -> str | None:
+    blocks = CODE_RE.findall(text or "")
+    if not blocks:
+        return None
+    code = max(blocks, key=len).strip()
+    return code if "export default" in code else None
+
+
+def write_initial(client: TFClient, spec: dict, *, thinking: str = config.CODER_THINKING,
+                  temperature: float = config.CODER_TEMPERATURE, lessons: str = "", model: str | None = None) -> tuple[str | None, str]:
+    user = "Build App.jsx for this design.\n\n" + spec_for_prompt(spec)
+    if lessons:
+        user += ("\n\nA previous attempt made these mistakes; avoid them (rules learned from measuring it):\n" + lessons)
+    r = client.chat(model or config.MODEL_CODER, [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
+                    step="code initial", thinking=thinking, max_tokens=16000, temperature=temperature, top_p=0.95)
+    return extract_code(r.content), r.content
+
+
+def repair(client: TFClient, code: str, error: str) -> tuple[str | None, str]:
+    """One cheap fix-up call for build/parse errors (a broken file otherwise scores 0)."""
+    user = ("This App.jsx fails to build:\n```\n" + error[:1500] + "\n```\n\n```jsx\n" + code + "\n```\n"
+            "Fix ONLY the error; change nothing else. Return the complete App.jsx.")
+    r = client.chat(config.MODEL_CODER, [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
+                    step="code repair", thinking="off", max_tokens=16000, temperature=0.2)
+    return extract_code(r.content), r.content
+
+
+def revise(client: TFClient, spec: dict, code: str, strategy: str, feedback: str, *, step: str = "code revise") -> tuple[str | None, str]:
+    user = ("Current App.jsx:\n```jsx\n" + code + "\n```\n\n"
+            "Measured result against the design (render → design; every row is a real, measured error):\n" + feedback + "\n\n"
+            "Fix ALL listed position, size and missing-element errors, prioritising the worst breakpoint, without breaking "
+            "the breakpoints that are already right. Use this approach:\n" + strategy + "\n\n"
+            "Design spec for reference:\n" + spec_for_prompt(spec) + "\n\n"
+            "Change only what is needed for these fixes; keep every other line identical. Return the complete revised App.jsx.")
+    r = client.chat(config.MODEL_CODER, [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
+                    step=step, thinking=config.CODER_THINKING, max_tokens=16000, temperature=config.REVISE_TEMPERATURE, top_p=0.95)
+    return extract_code(r.content), r.content
+
+
+EDIT_SCHEMA = {
+    "type": "object",
+    "properties": {"edits": {"type": "array", "maxItems": 40, "items": {
+        "type": "object",
+        "properties": {"id": {"type": "integer"}, "bp": {"type": "string", "enum": ["mobile", "tablet", "desktop", "all"]},
+                       "add": {"type": "string"}, "remove": {"type": "string"}, "why": {"type": "string"}},
+        "required": ["id", "bp", "add", "remove", "why"], "additionalProperties": False}}},
+    "required": ["edits"], "additionalProperties": False,
+}
+
+EDIT_SYSTEM = """You fix a responsive React + Tailwind page by editing Tailwind classes ONLY — you cannot move, add or
+delete elements. Every element carries data-pc="N"; refer to it by that id.
+Each edit targets ONE breakpoint via "bp": "mobile" (390 px), "tablet" (768 px) or "desktop" (1280 px). Give plain,
+UNPREFIXED classes (e.g. "mt-[40px] text-[32px]"); the tool adds the right md:/xl: prefix, replaces the old value of
+the same property at that breakpoint, and automatically pins the other breakpoints to their current values — so a
+tablet fix cannot break mobile or desktop. Use "bp": "all" only for a change that must apply everywhere.
+Elements rendered inside .map() share one id: an edit changes all copies. "remove" takes exact existing classes.
+Use the measured errors (render → design, px) to compute exact values. Reply with JSON only."""
+
+
+def class_edits(client: TFClient, tagged_code: str, feedback: str, strategy: str, *, model: str | None = None,
+                temperature: float = 0.4) -> tuple[list[dict], str]:
+    user = ("Page (elements tagged with data-pc ids):\n```jsx\n" + tagged_code + "\n```\n\n"
+            "Measured errors (render → design):\n" + feedback + "\n\nFocus: " + strategy +
+            "\n\nReturn JSON {\"edits\": [{\"id\": N, \"bp\": \"tablet\", \"add\": \"classes\", \"remove\": \"\", \"why\": \"...\"}]}"
+            " that fixes as many measured errors as possible without breaking breakpoints that are already right.")
+    r = client.chat(model or config.MODEL_EDITOR, [{"role": "system", "content": EDIT_SYSTEM}, {"role": "user", "content": user}],
+                    step="class edits", schema=EDIT_SCHEMA, thinking="off", max_tokens=4000, temperature=temperature)
+    d = r.data if isinstance(r.data, dict) else None
+    return (d or {}).get("edits") or [], r.content

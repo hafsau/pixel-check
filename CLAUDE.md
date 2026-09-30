@@ -29,36 +29,35 @@ Handoff from a planning chat (Sep 22–29, 2026). This file is the **source of t
 
 Organiser tips (Sep 24): name Nebius Token Factory + NVIDIA Nemotron in the description, Built With, and **aloud** in the video; never commit API keys; treat the video as a pitch (problem → who → how it uses Nebius/NVIDIA → what it does).
 
-## 3. Current status (as of Sep 29)
+## 3. Current status (as of Sep 29, evening)
 
 | Item | Status |
 |---|---|
-| Nebius Token Factory account | ✅ Created (project "Pixel Check") |
-| Credits | Promo `NEBIUS-DEVPOST-GLOBAL26` applied → $50 reported; Builders Program +$25 announced (separate email). ⚠️ Console top bar shows **"Trial: $1.00 · 29 days"** — verify in Billing which balance is usable |
-| Billing alert | ❌ Not available in console → **app-level spend cap required** (§7) |
-| API keys | ✅ 2 created (`dev`, `demo`). ⚠️ The first `dev` key was pasted into a chat — confirm it was **revoked and replaced** |
-| GitHub repo | ✅ `github.com/hafsau/pixel-check` (private), cloned via `gh` |
-| Local env | macOS; `.venv` active (Homebrew Python, PEP 668 → always use the venv); `openai`, `python-dotenv` installed. Guide pins **Python 3.12** for the real build |
-| `.env` | Contains `NEBIUS_API_KEY`, `NEBIUS_AI_PROJECT`. Git-ignored |
-| Sandbox beta access | ✅ Granted (~3 days after request) |
-| `contree` CLI | ✅ Installed, `contree auth` succeeded (profile saved to `~/.config/contree/auth.ini`) |
-| **G1 models** | ✅ Done (§5) |
-| **G2 JSON / reasoning** | ✅ Done (§5) |
-| **G3 vision** | ⏳ Not run |
-| **G4 sandbox smoke** | ⏳ Next: import `python:3.12-slim`, run `print(2+2)` |
-| G5 render image, G6 branching | ⏳ After G4 |
-| Benchmark designs | ⏳ Hafsa to design (§9) |
-| `docs/FEEDBACK.md` | ✅ Template created; keep filling |
+| Credits | **$50 usable** (confirmed by Hafsa). App cap `SPEND_CAP_USD=40`, per run $0.75 — enforced in `orchestrator/tf_client.py` (G8) |
+| Real prices (`GET /v1/models?verbose=true`) | Super $0.30/$0.90 per M · Nano & Lightning $0.06/$0.24 · Gemma 3 27B $0.10/$0.30 · Ultra $1/$3. Est. **~$0.10–0.15 per full run** |
+| Python / tools | venv on **3.12.12**; gitleaks 8.30.1 + pre-commit hook (verified blocks a fake key) |
+| G1 models, G2 JSON | ✅ |
+| **G3 vision** | ✅ **Gemma 3 27B: 95.8 % text recall**; MiniCPM-V 64.6 % (4/10 unparseable) |
+| **G4 sandbox smoke** | ✅ CLI + API; CLI has network ON by default, API `networking.enabled:false` verified |
+| **G5 render image** | ✅ `pixel-check-runtime:v2`; 3 PNGs exact, Inter, deterministic, 4–5 s/render. stdout capped at 64 KiB (API bug) → outputs fetched via `/inspect/{image}/archive` |
+| **G6 branching** | ✅ 3 parallel forks in 4.3 s, isolated |
+| **G7 evaluate (new)** | ✅ render run (checkpoint) → disposable scoring run (targets only here); honest 100 / wrong page 9.5 / cheats 0 / broken JSX 0; ~10–15 s per candidate |
+| **G8 inference client (new)** | ✅ live prices, JSONL ledger, global + per-run caps refuse before request |
+| Scorer | **v4** (`docs/SCORING.md`) after 2 council red-team rounds: pixel-based text readability (text-transparent + colour-coded screenshots), position-aware text, text & colour multipliers, 2-axis offset. 389 attack candidates: hacks max 46.0, tricks gain nothing, honest never DQ. 213 tests pass. Image `pixel-check-runtime:v4` |
+| Anti-cheat | `lint.mjs` (static, Babel AST) + runtime integrity (duplicated per-breakpoint layouts, positioned ratio). 12 cheats caught, 2 legit pass |
+| Dev test pages | `benchmarks-dev/` (git-ignored, third-party captures — never commit/publish/report): netflix-signin, calcom-signup, vercel-pricing, lambda, lennysjobs. Capture tool `tools/capture/` forces Inter, blocks media, saves ground-truth text |
+| Benchmark designs (original, for submission) | ⏳ Hafsa, Figma — later; dev pages used to prove the loop first |
+| Perceive | ✅ Gemma (strings/roles) + Tesseract OCR & pixel measurement (boxes, colours, blocks) merged → median box error 4–6 px (Gemma alone ~100 px). Spec = cross-breakpoint element table + blocks + column/rhythm facts |
+| Loop | ✅ runs end-to-end (initial ×3 → critique → branches forked from parent checkpoint → keep best), trace per run in `out/runs/`. Branches: 2 × class-edit (Super proposes `{id, bp, add}`; `orchestrator/jsx_tool.mjs` applies them deterministically, **scoped to one breakpoint with the others pinned** — 19 property tests) + 1 rewrite (Ultra). Isolation verified in a live run (other breakpoints byte-identical scores). ⚠️ Convergence still weak: best run 28.4 → 39.8; edit values often don't fix the targeted breakpoint; structural errors (wrong column, footer placement) need restructure, not class tweaks. Pin defaults missing for text-size / space-y |
+| Coder model | Single-shot match on netflix: Super ~15–27, **Ultra (thinking off) 39–47** (~$0.024/call, 23 s). Thinking on/low → often "no code" (token budget) |
+| Spend | $0.41 of $40 cap (Sep 29) |
 
 ## 4. Immediate next steps (in order)
 
-1. **G4:** `contree images --help` → import `python:3.12-slim` → `contree run --use tag:<tag> --disposable -- python3 -c "print(2+2)"` → repeat with `-o json` to capture elapsed time and cost. Also read `contree agent` (recommended before automation). Optional: `contree skill install` to give Claude Code the Contree skill.
-2. **G3:** `python gates/gates_g1_g3.py --image test.png --vlm openbmb/MiniCPM-V-4_5`, then `--vlm google/gemma-3-27b-it`. Pass = ≥ 90% of text strings read correctly. `test.png` = any UI screenshot resized to 1280 wide (`sips --resampleWidth 1280 test.png`), git-ignored.
-3. **Vision decision:** check the per-hour price of **Dedicated** `Nemotron-Nano-V2-12b` (NVIDIA vision). If ≤ ~$2/hr and it starts in minutes → use it for dev/eval/video, public VLM as live-mode fallback. Else public VLM only.
-4. **Billing check:** confirm the usable balance ($50/$75 vs "$1 trial").
-5. **G5:** write `sandbox/Dockerfile`, `render.mjs`, `score.py`, `lint.mjs`, self-test; `contree build`; confirm 3 PNGs at exact sizes with Inter font.
-6. **G6:** fork 3 children from one checkpoint; confirm independence.
-7. Then the core loop (§8).
+1. Loop convergence: (a) inspect proposed edits vs measured errors (are values right?); (b) best-of-N initial drafts (N=6, cheap); (c) a per-breakpoint "restructure" branch for structural errors; (d) pin defaults for text-size/space-y/display.
+2. Then Gate A/B equivalents on netflix / calcom dev pages.
+3. Responsive on calcom-signup / vercel-pricing (Gate B).
+4. Price Dedicated Nemotron-Nano-V2-12b (NVIDIA vision) — nice-to-have for the "NVIDIA" story.
 
 ## 5. Verified platform facts
 
@@ -173,7 +172,7 @@ ui/  eval/  docs/ (BUILD_GUIDE, PLATFORM, FEEDBACK, PRIOR_ART, SCORING, ARCHITEC
 |---|---|---|
 | Sep 29–30 | G3, G4, G5, G6 | All pass |
 | Sep 28–30 | Hafsa: 7 screens × 3 frames (desktop first) — original designs, no logos, Inter/Plex only, content fits each frame, same copy on all 3 | — |
-| **Oct 1** | Loop on 1 desktop screen: +15 pts, final ≥ 85 | **Gate A** |
+| **Oct 3** (moved from Oct 1 by Hafsa, Sep 29) | Loop on 1 desktop screen: +15 pts, final ≥ 85 | **Gate A** |
 | **Oct 5** | Responsive, 1 easy screen: match ≥ 80, +15 pts | **Gate B** |
 | **Oct 8** | 3/5 screens match ≥ 80; median cost/run ≤ $0.60 | **Gate C** |
 | Oct 8–10 | Eval: A single-shot · B loop, 1 branch · C full · D desktop-only then scored at 3 sizes; 7 screens × 2 seeds | — |
