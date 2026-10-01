@@ -75,12 +75,17 @@ def _pairs(frame: dict, rendered: list[dict]) -> list[dict]:
             continue
         key = _norm(t["text"])
         best, score = None, 0.0
+        tx, ty = t["box"][0] + t["box"][2] / 2, t["box"][1] + t["box"][3] / 2
         for k, e in enumerate(rendered):
             if k in used:
                 continue
             r = difflib.SequenceMatcher(None, key, _norm(e["text"])).ratio()
             if key and key in _norm(e["text"]):
                 r = max(r, 0.9)
+            # duplicates ("Enterprise" in the nav and on a card): among equal text matches prefer the nearest one
+            b = e.get("box") or [0, 0, 0, 0]
+            dist = ((b[0] + b[2] / 2 - tx) ** 2 + (b[1] + b[3] / 2 - ty) ** 2) ** 0.5
+            r -= min(dist, 2000) / 1e5
             if r > score:
                 best, score = k, r
         if best is None or score < 0.75:
@@ -152,7 +157,8 @@ def flow_diff(spec: dict, dom: dict[str, list], max_rows: int = 24) -> str:
             if len(row) >= 2:
                 sig.setdefault(tuple(round(i["d"][0] / 8) for i in row), []).append(row)
         for xs, rows_ in sig.items():
-            if len(rows_) >= 2:
+            # only when the render does NOT already reproduce the grid (items of a design row split across render rows)
+            if len(rows_) >= 2 and any(len({rid[id(i)] for i in r}) > 1 for r in rows_):
                 lefts = [i["d"][0] for i in rows_[0]]
                 notes.append(f"design has a {len(lefts)}-column grid ({len(rows_)} rows) with columns at x={lefts}: "
                              f"{', '.join(_tag(r[0]) for r in rows_[:4])}…")

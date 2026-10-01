@@ -69,6 +69,7 @@ Status tags: **[confirmed]** = experienced first-hand · **[to verify]** = seen 
 
 **Needs work**
 - 2026-09-29 [confirmed] Pixel-precise layout from a numeric spec is weak: single-shot responsive pages scored median ~15 (max 27) on our scorer vs 39–47 for Nemotron 3 Ultra on the same spec. Full-file revisions frequently regress parts that were already right (e.g. desktop 80 → 16 while fixing tablet), even with "keep every other line identical" and temperature 0.6.
+- 2026-10-01 [confirmed] `response_format: json_schema` with an array of objects whose properties are mostly optional (a tool-call list) made Nemotron 3 Super return `{"calls": []}` on every attempt (7 output tokens), while the same prompt without the schema produced 18 well-formed calls. Constrained decoding seems to favour the empty array; worth documenting (or biasing against `[]` when `minItems` is absent).
 - 2026-09-29 [confirmed] With reasoning on (`reasoning_budget` 2048) and `max_tokens` 16,000, 1 of 3 code generations returned no code block (budget spent on reasoning). A documented guideline for sizing `max_tokens` vs `reasoning_budget` would help.
 
 **Onboarding (zero → hello world):** first valid JSON response: __ min

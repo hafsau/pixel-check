@@ -21,25 +21,11 @@ def _img(png: bytes) -> np.ndarray:
     return np.asarray(Image.open(io.BytesIO(png)).convert("RGB"), dtype=np.float32)
 
 
-def rules(img: np.ndarray, min_frac: float = 0.4) -> list[dict]:
-    """Thin horizontal lines (dividers, header underlines) spanning ≥ 40 % of the width."""
-    bg = background(img)
-    d = np.linalg.norm(img - bg, axis=-1) > 8
-    out = []
-    H, W = d.shape
-    rows = d.mean(axis=1)
-    y = 0
-    while y < H:
-        if rows[y] >= min_frac:
-            y0 = y
-            while y < H and rows[y] >= min_frac:
-                y += 1
-            if y - y0 <= 3:   # thin
-                xs = np.where(d[y0:y].any(axis=0))[0]
-                out.append({"box": [int(xs.min()), y0, int(xs.max() - xs.min() + 1), y - y0],
-                            "fill": _hex(img[y0:y][d[y0:y]].mean(axis=0))})
-        y += 1
-    return out
+from .measure import rules as _rules   # continuous, text-free dividers only (one implementation)
+
+
+def rules(img: np.ndarray, text_boxes: list | None = None) -> list[dict]:
+    return _rules(img, text_boxes=text_boxes)
 
 
 def _inside_text(box, text_boxes, frac=0.6) -> bool:
@@ -127,8 +113,8 @@ def block_diff(bp: str, design_png: bytes, render_png: bytes, nodes: list[dict],
     for rb in rbs:
         if _match(rb, dbs) is None and rb["box"][2] * rb["box"][3] > 400:
             findings.append(f"EXTRA block [{','.join(map(str, rb['box']))}] fill {rb['fill']} (not in design)")
-    for ln in rules(d_img):
-        if not any(abs(ln["box"][1] - r["box"][1]) <= 4 for r in rules(r_img)):
+    for ln in rules(d_img, design_text_boxes):
+        if not any(abs(ln["box"][1] - r["box"][1]) <= 4 for r in rules(r_img, render_text_boxes)):
             findings.append(f"MISSING horizontal rule at y={ln['box'][1]} x={ln['box'][0]}..{ln['box'][0] + ln['box'][2]} "
                             f"colour {ln['fill']} (e.g. a border-b on the header)")
     return findings, edits

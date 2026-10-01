@@ -27,3 +27,9 @@ def tag(code: str) -> tuple[str, list[dict]]:
 def apply(code: str, edits: list[dict]) -> tuple[str, int, list[dict]]:
     r = _call("apply", {"code": code, "edits": edits})
     return r["code"], r["applied"], r["skipped"]
+
+
+def structural(code: str, ops: list[dict]) -> tuple[str, int, list[dict]]:
+    """Nemotron's structural tool calls (set_layout / wrap / move / insert text-free / remove / set_tag)."""
+    r = _call("structural", {"code": code, "ops": ops})
+    return r["code"], r["applied"], r["skipped"]

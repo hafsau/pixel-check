@@ -127,3 +127,69 @@ def class_edits(client: TFClient, tagged_code: str, feedback: str, strategy: str
                     step="class edits", schema=EDIT_SCHEMA, thinking="off", max_tokens=4000, temperature=temperature)
     d = r.data if isinstance(r.data, dict) else None
     return (d or {}).get("edits") or [], r.content
+
+
+TOOLS_SCHEMA = {
+    "type": "object",
+    "properties": {"calls": {"type": "array", "maxItems": 12, "items": {
+        "type": "object",
+        "properties": {
+            "op": {"type": "string", "enum": ["set_layout", "wrap", "move", "insert", "remove", "set_tag"]},
+            "id": {"type": "integer"}, "ids": {"type": "array", "items": {"type": "integer"}},
+            "bp": {"type": "string", "enum": ["mobile", "tablet", "desktop", "all"]},
+            "layout": {"type": "string", "enum": ["grid", "flex-row", "flex-col", "block"]},
+            "cols": {"type": "integer"}, "gap_x": {"type": "integer"}, "gap_y": {"type": "integer"},
+            "before": {"type": "integer"}, "after": {"type": "integer"}, "into": {"type": "integer"},
+            "jsx": {"type": "string"}, "classes": {"type": "string"}, "tag": {"type": "string"},
+            "why": {"type": "string"}},
+        "required": ["op", "why"]}}},
+    "required": ["calls"],
+}
+
+TOOLS_SYSTEM = """You are the structural engineer in a responsive design-to-code agent. A React + Tailwind page already
+matches its design closely; what remains are STRUCTURAL problems that measurements found: elements arranged differently
+(stacked vs side by side, grids), missing visual elements (divider rules, icon boxes, borders), extra elements, wrong
+semantics. Fix them with TOOL CALLS — you never rewrite the file. Elements carry data-pc="N" ids.
+
+Tools (JSON objects in "calls"):
+- set_layout {id, bp, layout: grid|flex-row|flex-col|block, cols?, gap_x?, gap_y?}: make container N lay out its children
+  that way at breakpoint bp (mobile 390 / tablet 768 = md: / desktop 1280 = xl:; "all" for every size).
+- wrap {ids: [sibling ids, in order], classes}: put consecutive siblings into a new <div className=classes> (e.g. to
+  group items that the design shows as a grid: classes "grid grid-cols-2 gap-x-[24px] gap-y-[16px]", with md:/xl: prefixes
+  if only some breakpoints need it).
+- move {id, before|after: id}: reorder.
+- insert {after|before|into: id, jsx}: add TEXT-FREE elements only (e.g. '<div className="h-px w-full bg-[#1a1a1a]" />'
+  for a divider, '<div className="h-4 w-4 bg-[#d4d4d8]" />' for an icon box). Any text in jsx is rejected.
+- remove {id}: delete an element the design doesn't have.
+- set_tag {id, tag}: semantic tag (button, a, h1, nav, header, footer…), no visual change.
+Rules: only address the listed STRUCTURE / MISSING / EXTRA findings; use exact colours and px from them; prefer the fewest
+calls; every call needs a short "why". Reply with JSON only: {"calls": [...]}"""
+
+
+def structural_calls(client: TFClient, tagged_code: str, findings: str, *, model: str | None = None,
+                     temperature: float = 0.3) -> tuple[list[dict], str]:
+    user = ("Page (elements tagged with data-pc ids):\n```jsx\n" + tagged_code + "\n```\n\nMeasured findings:\n" + findings +
+            "\n\nReturn the tool calls as JSON {\"calls\": [...]}.")
+    # No json_schema here: with this schema (many optional fields) Token Factory's constrained decoding made Nemotron
+    # return {"calls": []} every time (7 tokens); free JSON gives real calls, normalised below.
+    r = client.chat(model or config.MODEL_EDITOR, [{"role": "system", "content": TOOLS_SYSTEM}, {"role": "user", "content": user}],
+                    step="structural tools", thinking="off", max_tokens=4000, temperature=temperature)
+    from .tf_client import parse_json
+    d = parse_json(r.content)
+    calls = d.get("calls") if isinstance(d, dict) else d if isinstance(d, list) else []
+    return [c for c in (normalise_call(x) for x in calls or []) if c], r.content
+
+
+OPS = ("set_layout", "wrap", "move", "insert", "remove", "set_tag")
+
+
+def normalise_call(c) -> dict | None:
+    """Accept {"op": "wrap", ...} and {"wrap": {...}, "why": ...} shapes."""
+    if not isinstance(c, dict):
+        return None
+    if c.get("op") in OPS:
+        return c
+    for op in OPS:
+        if isinstance(c.get(op), dict):
+            return {"op": op, **c[op], "why": c.get("why", "")}
+    return None

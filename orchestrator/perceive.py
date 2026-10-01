@@ -49,9 +49,29 @@ def _sim(a: str, b: str) -> float:
     a, b = _norm(a), _norm(b)
     if not a or not b:
         return 0.0
+    if len(a) <= 3 and (b == a or b.startswith(a + " ") or b.startswith(a + ".") or b.split()[0] == a):
+        return 0.95   # short strings ("$20") as the first word / prefix of an OCR line ("$20...")
     if len(a) > 3 and (a in b or b in a):
         return 0.95 * min(len(a), len(b)) / max(len(a), len(b)) + 0.05 if a != b else 1.0
     return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+INK_NO_DESC, INK_DESC = 0.785, 0.982       # Inter, calibrated in our renderer (sandbox/calib.mjs, Oct 1)
+
+
+def font_px(text: str, ink_w: float, ink_h: float, hint) -> int:
+    """Median of independent font-size estimates — ink height, ink width per character, the vision model's guess.
+    OCR boxes can include stray glyphs (an input caret read as '|'), and the vision model guesses sizes."""
+    t = re.sub(r"^\|\s*", "", text.strip())
+    desc = bool(re.search(r"[gjpqy,;]", t))
+    est = [ink_h / (INK_DESC if desc else INK_NO_DESC)]
+    if len(t) >= 3:
+        est.append(ink_w / (len(t) * (0.483 if desc else 0.552)))
+    if hint:
+        est.append(float(hint))
+    est.sort()
+    mid = est[len(est) // 2] if len(est) % 2 else (est[len(est) // 2 - 1] + est[len(est) // 2]) / 2
+    return max(8, int(round(mid)))
 
 
 def merge(vlm: dict, meas: dict) -> dict:
@@ -65,23 +85,44 @@ def merge(vlm: dict, meas: dict) -> dict:
     lines = meas["text_lines"]
     used: set[int] = set()
     texts = []
+    # candidates: single OCR lines and joins of 2–3 vertically consecutive lines (wrapped headings/paragraphs:
+    # OCR returns "Enter your info to sign" and "in" separately)
+    cands = [([i], l["text"], l["box"]) for i, l in enumerate(lines)]
+    for i, a in enumerate(lines):
+        group, box = [i], list(a["box"])
+        for j, b in enumerate(lines):
+            if j <= i or len(group) >= 3:
+                continue
+            gap = b["box"][1] - (box[1] + box[3])
+            if 0 <= gap <= max(a["box"][3], 8) * 1.2 and abs(b["box"][0] - a["box"][0]) <= max(40, a["box"][2] * 0.5):
+                group = group + [j]
+                x0, y0 = min(box[0], b["box"][0]), min(box[1], b["box"][1])
+                x1 = max(box[0] + box[2], b["box"][0] + b["box"][2])
+                y1 = max(box[1] + box[3], b["box"][1] + b["box"][3])
+                box = [x0, y0, x1 - x0, y1 - y0]
+                cands.append((list(group), " ".join(lines[k]["text"] for k in group), list(box)))
     for t in vlm.get("texts", []):
         best, score = None, 0.0
-        for i, l in enumerate(lines):
-            if i in used:
+        for c in cands:
+            if any(k in used for k in c[0]):
                 continue
-            s = _sim(t.get("text", ""), l["text"])
-            if s > score:
-                best, score = i, s
+            sc = _sim(t.get("text", ""), c[1])
+            if sc > score:
+                best, score = c, sc
         item = {"text": t.get("text", ""), "role": t.get("role", "other"),
                 "size_px": t.get("size_px"), "weight": t.get("weight")}
-        if best is not None and score >= 0.75:
-            l = lines[best]
-            if _norm(l["text"]) == _norm(t.get("text", "")) or score >= 0.95:
-                used.add(best)
-            item.update(box=l["box"], color=l["color"], on=l["backdrop"], measured=True)
-            # ink height ≈ 0.72–0.95 × font size for Inter depending on ascenders/descenders
-            item["size_px"] = item["size_px"] or round(l["box"][3] / 0.8)
+        # ≥ 0.9 (or containment, which _sim scores ≥ 0.95): "Continue with Google" vs an OCR line "Continue with
+        # Email" scored 0.8 and stole its box when OCR missed the white-on-dark Google label
+        if best is not None and score >= 0.9:
+            idxs, _, box = best
+            first = lines[idxs[0]]
+            if len(idxs) > 1 or _norm(first["text"]) == _norm(t.get("text", "")) or score >= 0.95:
+                used.update(idxs)
+            item.update(box=box, color=first["color"], on=first["backdrop"], measured=True, lines=len(idxs))
+            ty = first.get("typo") or {}
+            item["size_px"] = ty.get("size_px") or font_px(first["text"], first["box"][2], first["box"][3], t.get("size_px"))
+            if ty:
+                item.update(weight=ty["weight"], tracking_em=ty["tracking_em"], top_em=ty["top_em"])
         else:
             item.update(box=None, color=t.get("color"), measured=False)
         texts.append(item)

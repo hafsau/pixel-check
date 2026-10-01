@@ -88,9 +88,11 @@ def load(path) -> np.ndarray:
 
 
 def background(img: np.ndarray) -> np.ndarray:
-    """Most frequent colour (quantised to 8 levels/channel), refined to the mean of that bin."""
-    q = (img // 32).astype(np.int32)
-    keys = q[..., 0] * 64 + q[..., 1] * 8 + q[..., 2]
+    """Most frequent colour: mode over 64 levels/channel, refined to the mean of that bin. (8-level bins merged a
+    black page with its dark-grey footer band into one bin; the drifted mean put the band right on the content
+    threshold, so identical dark footers were 'content' in one image and background in the other.)"""
+    q = (img // 4).astype(np.int64)
+    keys = (q[..., 0] * 64 + q[..., 1]) * 64 + q[..., 2]
     mode = np.bincount(keys.ravel()).argmax()
     return np.clip(img[keys == mode].mean(axis=0, dtype=np.float64), 0, 255).astype(np.float32)   # float32 sums drifted to 255.4
 

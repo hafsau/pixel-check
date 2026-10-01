@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tsbuildinfo
+# replay bundles contain third-party dev captures: never commit
+public/runs/

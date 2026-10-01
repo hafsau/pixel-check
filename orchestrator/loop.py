@@ -14,7 +14,8 @@ from pathlib import Path
 
 from . import config
 from . import jsx_edit
-from .code import class_edits, repair, revise, write_initial
+from .scaffold import compile_scaffold
+from .code import class_edits, repair, revise, structural_calls, write_initial
 from .critique import auto_edits, critique, visual_checks, element_diff, feedback_text, flow_diff, visual_notes
 from .evaluate import Evaluation, evaluate
 from .sandbox import Sandbox
@@ -48,6 +49,7 @@ class LoopConfig:
     stop_match: float = config.STOP_MATCH
     plateau_rounds: int = 2
     plateau_gain: float = 1.0
+    scaffold: bool = True        # measured scaffold as an extra initial candidate (Hafsa, Oct 1: option 1)
     visual_notes: bool = False   # Gemma's diff notes hallucinated in the first runs; opt-in until an A/B shows value
     run_budget_usd: float = config.RUN_BUDGET_USD
 
@@ -100,10 +102,20 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
         cid = uuid.uuid4().hex[:8]
         title = (strategy or {}).get("title", "initial")
         try:
-            if parent is None:
+            if parent is None and (strategy or {}).get("mode") == "scaffold":
+                code = compile_scaffold(spec)   # measured scaffold: deterministic first draft, no model call
+            elif parent is None:
                 code, _ = write_initial(client, spec)
             elif (strategy or {}).get("mode") == "auto":
                 return auto_branch(parent, rnd, cid, title)
+            elif (strategy or {}).get("mode") == "tools":
+                calls, _ = structural_calls(client, parent.code, feedback, model=strategy.get("model"),
+                                            temperature=strategy.get("temperature", 0.3))
+                code, n_applied, skipped = jsx_edit.structural(parent.code, calls)
+                trace({"kind": "tool_calls", "round": rnd, "parent": parent.id, "requested": len(calls),
+                       "applied": n_applied, "calls": calls[:12], "skipped": skipped[:12]})
+                if n_applied == 0:
+                    return Candidate(cid, parent.id, rnd, title, None, None, "no applicable tool calls")
             elif (strategy or {}).get("mode") == "edit":
                 edits, _ = class_edits(client, parent.code, feedback, strategy["instructions"],
                                        temperature=strategy.get("temperature", 0.4))
@@ -207,7 +219,8 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
     stop_reason = "max rounds"
     ex = ThreadPoolExecutor(max(cfg.initial_samples, cfg.branches, len(config.BREAKPOINTS)))
     try:
-        for c in ex.map(lambda _: build(None, 0, None, ""), range(cfg.initial_samples)):
+        seeds = ([{"title": "scaffold", "mode": "scaffold"}] if cfg.scaffold else []) + [None] * cfg.initial_samples
+        for c in ex.map(lambda st: build(None, 0, st, ""), seeds):
             record(c)
             if _better(c, best):
                 best = c
@@ -239,11 +252,8 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
                 {"title": "auto", "mode": "auto", "instructions": "deterministic measurement fixes"},
                 {"title": "edit-all", "mode": "edit", "temperature": 0.7,
                  "instructions": "every breakpoint's largest measured errors (positions, widths, font sizes, colours)"},
-                ({"title": "restructure", "mode": "revise", "instructions":
-                    "Fix the STRUCTURE notes first (row/column arrangement via the parent's flex/grid classes and "
-                    "wrappers), then the largest row steps. Keep breakpoints that are already right unchanged."}
-                 if "STRUCTURE" in diff_text else
-                 {"title": "rewrite", "mode": "rewrite", "instructions": rewrite.get("instructions", "")}),
+                {"title": "nemotron-tools", "mode": "tools", "temperature": 0.3,
+                 "instructions": "structural fixes as tool calls"},
             ][: cfg.branches]
             parent = best
             for c in ex.map(lambda s: build(parent, rnd, s, fb), strategies):

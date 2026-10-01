@@ -15,3 +15,6 @@ test.png
 # dev-only captures of third-party pages (never commit)
 benchmarks-dev/
 var/
+
+# UI replay bundles built from dev runs contain third-party captures (never commit)
+ui/public/runs/

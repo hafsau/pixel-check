@@ -45,7 +45,7 @@ const DETERMINISM_CSS = `*,*::before,*::after{animation:none!important;transitio
 caret-color:transparent!important}html{scrollbar-width:none}::-webkit-scrollbar{display:none}
 body{margin:0;font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased}`;
 
-async function build(appPath, log) {
+export async function build(appPath, log) {
   const src = fs.readFileSync(appPath, "utf8");
   const entry = `import React from "react";import {createRoot} from "react-dom/client";` +
     `import App from ${JSON.stringify(appPath)};createRoot(document.getElementById("root")).render(React.createElement(App));`;

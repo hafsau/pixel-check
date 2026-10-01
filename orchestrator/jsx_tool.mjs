@@ -256,10 +256,117 @@ function apply(code, edits) {
   return { code: out, applied, skipped };
 }
 
+// ---- structural tools (Nemotron's tool calls) ----------------------------------------------------
+// Each op is applied to the source by AST ranges; elements are addressed by data-pc ids. Inserted JSX must
+// contain NO text (only text-free elements such as rules, icon boxes, wrappers) so tools can't fake content.
+function elementsById(code) {
+  const map = new Map();
+  for (const el of openings(code)) {
+    const a = attr(el.openingElement, "data-pc");
+    if (a?.value?.type === "StringLiteral") map.set(Number(a.value.value), el);
+  }
+  return map;
+}
+
+function parentOf(code, el) {
+  const ast = parse(code, { sourceType: "module", plugins: ["jsx"] });
+  let found = null;
+  walk(ast.program, (n) => {
+    if (n.type === "JSXElement" && n.children?.some((c) => c.start === el.start && c.end === el.end)) found = n;
+  });
+  return found;
+}
+
+function textFree(jsx) {
+  const ast = parse(`const x = (${jsx});`, { sourceType: "module", plugins: ["jsx"] });
+  let ok = true, count = 0;
+  walk(ast.program, (n) => {
+    if (n.type === "JSXText" && n.value.trim()) ok = false;
+    if (n.type === "StringLiteral" && n.extra?.parenthesized) ok = false;
+    if (n.type === "JSXExpressionContainer" && n.expression.type !== "JSXEmptyExpression" &&
+        !(n.expression.type === "StringLiteral" || n.expression.type === "TemplateLiteral")) ok = false;
+    if (n.type === "JSXElement") count++;
+  });
+  return ok && count >= 1 && count <= 8;
+}
+
+function structural(code, ops) {
+  const done = [], skipped = [];
+  let out = code;
+  for (const op of ops || []) {
+    try {
+      const els = elementsById(out);
+      let next = null;
+      if (op.op === "set_layout") {
+        const lay = { grid: `grid grid-cols-${Math.max(1, Math.min(12, op.cols || 2))}`, "flex-row": "flex flex-row flex-wrap",
+          "flex-col": "flex flex-col", block: "block" }[op.layout];
+        if (!lay) throw new Error("unknown layout");
+        const add = [lay, op.gap_x != null ? `gap-x-[${op.gap_x}px]` : "", op.gap_y != null ? `gap-y-[${op.gap_y}px]` : ""].join(" ").trim();
+        const r = apply(out, [{ id: op.id, bp: op.bp || "all", add }]);
+        if (!r.applied) throw new Error(r.skipped?.[0]?.why || "not applied");
+        next = r.code;
+      } else if (op.op === "wrap") {
+        const ids = (op.ids || []).map(Number);
+        const nodes = ids.map((i) => els.get(i));
+        if (nodes.some((n) => !n) || !nodes.length) throw new Error("unknown id");
+        const par = parentOf(out, nodes[0]);
+        if (!par || nodes.some((n) => parentOf(out, n)?.start !== par.start)) throw new Error("ids must be siblings");
+        nodes.sort((a, b) => a.start - b.start);
+        const cls = String(op.classes || "").replace(/["`{}\\]/g, "");
+        next = out.slice(0, nodes[0].start) + `<div className="${cls}">` + out.slice(nodes[0].start, nodes.at(-1).end) +
+          "</div>" + out.slice(nodes.at(-1).end);
+      } else if (op.op === "move") {
+        const el = els.get(Number(op.id)), ref = els.get(Number(op.before ?? op.after));
+        if (!el || !ref || el === ref) throw new Error("unknown id");
+        if (ref.start >= el.start && ref.end <= el.end) throw new Error("cannot move into itself");
+        const chunk = out.slice(el.start, el.end);
+        const without = out.slice(0, el.start) + out.slice(el.end);
+        const shift = ref.start > el.start ? el.end - el.start : 0;
+        const at = op.before != null ? ref.start - shift : ref.end - shift;
+        next = without.slice(0, at) + chunk + without.slice(at);
+      } else if (op.op === "insert") {
+        const jsx = String(op.jsx || "");
+        if (!textFree(jsx)) throw new Error("inserted JSX must be text-free elements only");
+        const ref = els.get(Number(op.after ?? op.before ?? op.into));
+        if (!ref) throw new Error("unknown id");
+        if (op.into != null) {
+          const close = ref.closingElement;
+          if (!close) throw new Error("into: self-closing element");
+          next = out.slice(0, close.start) + jsx + out.slice(close.start);
+        } else {
+          const at = op.after != null ? ref.end : ref.start;
+          next = out.slice(0, at) + jsx + out.slice(at);
+        }
+      } else if (op.op === "remove") {
+        const el = els.get(Number(op.id));
+        if (!el) throw new Error("unknown id");
+        next = out.slice(0, el.start) + out.slice(el.end);
+      } else if (op.op === "set_tag") {
+        const el = els.get(Number(op.id));
+        const tag = String(op.tag || "");
+        if (!el || !/^(div|section|header|footer|nav|main|button|a|h1|h2|h3|p|span|ul|li|label)$/.test(tag)) throw new Error("bad id/tag");
+        const o = el.openingElement, c = el.closingElement;
+        next = out;
+        if (c) next = next.slice(0, c.name.start) + tag + next.slice(c.name.end);
+        next = next.slice(0, o.name.start) + tag + next.slice(o.name.end);
+      } else {
+        throw new Error(`unknown op ${op.op}`);
+      }
+      parse(next, { sourceType: "module", plugins: ["jsx"] });
+      out = next;
+      done.push(op);
+    } catch (err) {
+      skipped.push({ op, why: String(err.message).slice(0, 160) });
+    }
+  }
+  return { code: out, applied: done.length, skipped };
+}
+
 const cmd = process.argv[2];
 const input = JSON.parse(fs.readFileSync(0, "utf8"));
 try {
-  const res = cmd === "tag" ? tag(input.code) : cmd === "apply" ? apply(input.code, input.edits) : { error: "unknown command" };
+  const res = cmd === "tag" ? tag(input.code) : cmd === "apply" ? apply(input.code, input.edits)
+    : cmd === "structural" ? structural(input.code, input.ops) : { error: "unknown command" };
   process.stdout.write(JSON.stringify(res));
 } catch (err) {
   process.stdout.write(JSON.stringify({ error: String(err.message).slice(0, 300) }));
