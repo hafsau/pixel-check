@@ -48,14 +48,14 @@ Organiser tips (Sep 24): name Nebius Token Factory + NVIDIA Nemotron in the desc
 | Dev test pages | `benchmarks-dev/` (git-ignored, third-party captures — never commit/publish/report): netflix-signin, calcom-signup, vercel-pricing, lambda, lennysjobs. Capture tool `tools/capture/` forces Inter, blocks media, saves ground-truth text |
 | Benchmark designs (original, for submission) | ⏳ Hafsa, Figma — later; dev pages used to prove the loop first |
 | Perceive | ✅ Gemma (strings/roles) + Tesseract OCR & pixel measurement (boxes, colours, blocks) merged → median box error 4–6 px (Gemma alone ~100 px). Spec = cross-breakpoint element table + blocks + column/rhythm facts |
-| Loop | ✅ runs end-to-end (initial ×3 → critique → branches forked from parent checkpoint → keep best), trace per run in `out/runs/`. Branches: 2 × class-edit (Super proposes `{id, bp, add}`; `orchestrator/jsx_tool.mjs` applies them deterministically, **scoped to one breakpoint with the others pinned** — 19 property tests) + 1 rewrite (Ultra). Isolation verified in a live run (other breakpoints byte-identical scores). ⚠️ Convergence still weak: best run 28.4 → 39.8; edit values often don't fix the targeted breakpoint; structural errors (wrong column, footer placement) need restructure, not class tweaks. Pin defaults missing for text-size / space-y |
+| Loop (Oct 1) | Branches per round: **auto** (deterministic, no model: row-step margins with computed values + `!`, `flow-root` for margin collapse, column padding, block width/height/fill/border, font weight from glyph stroke thickness; per-breakpoint acceptance; ≤ 3 apply→evaluate iterations) · **edit-all** (Super class edits, bp-scoped) · **restructure** (Ultra full revision when STRUCTURE notes exist, else rewrite). Feedback = flow diff (row steps top-to-top, row/column structure) + symmetric block/rule/weight measurement. Best-of-6 Ultra drafts. Selection: worst bp, or within 0.5 with mean +2. Netflix: auto lifts mobile ~51→66 and desktop ~58→72 per round; tablet stuck ~38 (footer = 2-col grid needs structure fix; LLM restructure unreliable) |
 | Coder model | Single-shot match on netflix: Super ~15–27, **Ultra (thinking off) 39–47** (~$0.024/call, 23 s). Thinking on/low → often "no code" (token budget) |
-| Spend | $0.41 of $40 cap (Sep 29) |
+| Spend | see `var/spend.jsonl` (≈ $1.6 by Oct 1) |
 
 ## 4. Immediate next steps (in order)
 
-1. Loop convergence: (a) inspect proposed edits vs measured errors (are values right?); (b) best-of-N initial drafts (N=6, cheap); (c) a per-breakpoint "restructure" branch for structural errors; (d) pin defaults for text-size/space-y/display.
-2. Then Gate A/B equivalents on netflix / calcom dev pages.
+1. Structure fixes (grid/flex arrangement, missing blocks/rules) — the remaining bottleneck; LLM restructure is unreliable.
+2. Gate A (Oct 3, desktop ≥ 85, +15) and Gate B equivalents on netflix / calcom dev pages.
 3. Responsive on calcom-signup / vercel-pricing (Gate B).
 4. Price Dedicated Nemotron-Nano-V2-12b (NVIDIA vision) — nice-to-have for the "NVIDIA" story.
 

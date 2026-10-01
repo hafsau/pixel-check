@@ -67,6 +67,289 @@ def element_diff(spec: dict, dom: dict[str, list], max_rows: int = 40) -> str:
     return "\n".join(lines)
 
 
+def _pairs(frame: dict, rendered: list[dict]) -> list[dict]:
+    """Measured design texts matched to render DOM entries: [{id, label, d: box, r: box, ...}]."""
+    out, used = [], set()
+    for t in frame["texts"]:
+        if not t.get("box") or t.get("approx"):
+            continue
+        key = _norm(t["text"])
+        best, score = None, 0.0
+        for k, e in enumerate(rendered):
+            if k in used:
+                continue
+            r = difflib.SequenceMatcher(None, key, _norm(e["text"])).ratio()
+            if key and key in _norm(e["text"]):
+                r = max(r, 0.9)
+            if r > score:
+                best, score = k, r
+        if best is None or score < 0.75:
+            out.append({"id": None, "label": t["text"][:40], "d": t["box"], "r": None, "size": t.get("size_px")})
+            continue
+        used.add(best)
+        e = rendered[best]
+        fs = float(re.sub(r"[^0-9.]", "", str(e.get("font_size", "0"))) or 0)
+        out.append({"id": e.get("pc"), "label": t["text"][:40], "d": t["box"], "r": e["box"], "size": t.get("size_px"),
+                    "rsize": fs, "role": t.get("role")})
+    return out
+
+
+def _rows(items: list[dict], key: str) -> list[list[dict]]:
+    """Group items into visual rows by vertical overlap of their boxes."""
+    rows: list[list[dict]] = []
+    for it in sorted(items, key=lambda i: i[key][1]):
+        y, h = it[key][1], it[key][3]
+        for row in rows:
+            ry0 = min(r[key][1] for r in row)
+            ry1 = max(r[key][1] + r[key][3] for r in row)
+            if min(ry1, y + h) - max(ry0, y) >= 0.5 * min(h, ry1 - ry0):
+                row.append(it)
+                break
+        else:
+            rows.append([it])
+    for row in rows:
+        row.sort(key=lambda i: i[key][0])
+    return rows
+
+
+def _tag(it) -> str:
+    return f"#{it['id']} '{it['label'][:24]}'" if it["id"] is not None else f"'{it['label'][:24]}'"
+
+
+def flow_diff(spec: dict, dom: dict[str, list], max_rows: int = 24) -> str:
+    """Flow-aware corrections per breakpoint: STRUCTURE (row/column arrangement differs), then per-row
+    GAP corrections (the margin change above each row — fixing a gap moves everything below it, so these
+    do not double-count the way absolute positions do), x offsets, and font-size / wrapping errors."""
+    out = []
+    for bp, frame in spec["breakpoints"].items():
+        rendered = [e for e in dom.get(bp, []) if e.get("text")]
+        items = _pairs(frame, rendered)
+        found = [i for i in items if i["r"] is not None]
+        lines = [f"{bp}:"]
+        for i in items:
+            if i["r"] is None:
+                lines.append(f"  MISSING {_tag(i)} (design x={i['d'][0]}, y={i['d'][1]})")
+        if not found:
+            out += lines + ["  (no matched text)"]
+            continue
+        drows = _rows(found, "d")
+        rid = {id(i): k for k, row in enumerate(_rows(found, "r")) for i in row}
+        # structure: items side by side in one but not the other
+        notes = []
+        for row in drows:
+            if len(row) >= 2 and len({rid[id(i)] for i in row}) > 1:
+                xs = ", ".join(f"x={i['d'][0]}" for i in row)
+                notes.append(f"design puts {', '.join(_tag(i) for i in row)} SIDE BY SIDE ({xs}); render stacks them")
+        rrows = _rows(found, "r")
+        drow_of = {id(i): k for k, row in enumerate(drows) for i in row}
+        for row in rrows:
+            if len(row) >= 2 and len({drow_of[id(i)] for i in row}) > 1:
+                notes.append(f"render puts {', '.join(_tag(i) for i in row[:6])} side by side; design stacks them "
+                             f"(design x: {sorted({i['d'][0] for i in row})})")
+        # columns: repeated design rows with the same x set = a grid
+        sig = {}
+        for row in drows:
+            if len(row) >= 2:
+                sig.setdefault(tuple(round(i["d"][0] / 8) for i in row), []).append(row)
+        for xs, rows_ in sig.items():
+            if len(rows_) >= 2:
+                lefts = [i["d"][0] for i in rows_[0]]
+                notes.append(f"design has a {len(lefts)}-column grid ({len(rows_)} rows) with columns at x={lefts}: "
+                             f"{', '.join(_tag(r[0]) for r in rows_[:4])}…")
+        if notes:
+            lines.append("  STRUCTURE (fix with the parent's flex/grid, not per-item margins):")
+            lines += [f"   - {n}" for n in notes[:6]]
+        # vertical gaps between consecutive design rows (only rows the render keeps together)
+        lines.append("  ROWS top→bottom (step = distance from the previous row's top to this row's top; change the space ABOVE this row by Δ — everything below moves with it):")
+        prev_d = prev_r = None
+        for k, row in enumerate(drows[:max_rows]):
+            d_top = min(i["d"][1] for i in row)
+            r_top = min(i["r"][1] for i in row)
+            head = _tag(row[0]) + (f" +{len(row) - 1} more" if len(row) > 1 else "")
+            if prev_d is None:
+                dg, rg = d_top, r_top
+                what = "top of page"
+            else:
+                dg, rg = d_top - prev_d, r_top - prev_r
+                what = "step"
+            parts = []
+            if abs(dg - rg) > 4:
+                parts.append(f"{what} {rg}→{dg} (Δ {dg - rg:+d}px)")
+            dx = row[0]["d"][0] - row[0]["r"][0]
+            if abs(dx) > 6:
+                parts.append(f"x {row[0]['r'][0]}→{row[0]['d'][0]} (Δ {dx:+d}px)")
+            for i in row:
+                if i.get("size") and i.get("rsize") and abs(i["rsize"] - i["size"]) >= 2:
+                    parts.append(f"{_tag(i)} font {i['rsize']:.0f}→{i['size']}px")
+                # wrapping = different number of lines (height), not a different box width: block elements span
+                # their container, so comparing widths flagged wrapping that wasn't there
+                dh, rh = i["d"][3], i["r"][3]
+                if i.get("size") and max(dh, rh) > 1.6 * min(dh, rh) and max(dh, rh) - min(dh, rh) > 0.8 * i["size"]:
+                    parts.append(f"{_tag(i)} wraps differently: {round(rh / (1.25 * i['size'])) or 1}→"
+                                 f"{round(dh / (1.25 * i['size'])) or 1} lines (adjust its width / font size)")
+            lines.append(f"   {k + 1}. {head}: " + ("; ".join(parts) if parts else "ok"))
+            prev_d, prev_r = d_top, r_top   # top-to-top: robust to odd element heights (e.g. 1 px input boxes)
+        out += lines
+    return "\n".join(out)
+
+
+def _block_anchor(pc, nodes: list[dict]) -> dict | None:
+    """The element whose margin really moves a row: the OUTERMOST block-level ancestor-or-self of the text
+    element `pc` that starts at the same y (vertical margins on inline elements do nothing). None if the id
+    is rendered more than once (inside a .map — one id, many rows: that is a structure fix, not a margin)."""
+    idxs = [i for i, n in enumerate(nodes) if n.get("pc") == str(pc)]
+    if len(idxs) != 1:
+        return None
+    i = idxs[0]
+    top = (nodes[i].get("b") or [0, 0, 0, 0])[1]
+    best = None if nodes[i].get("inl") else i
+    j = nodes[i].get("par", -1)
+    while j is not None and j >= 0:
+        n = nodes[j]
+        if abs((n.get("b") or [0, -999, 0, 0])[1] - top) > 2:
+            break
+        if not n.get("inl") and n.get("pc") is not None and sum(1 for m in nodes if m.get("pc") == n.get("pc")) == 1:
+            best = j
+        j = n.get("par", -1)
+    return nodes[best] if best is not None else None
+
+
+def computed_pins(edits: list[dict], dom: dict, nodes: dict) -> list[dict]:
+    """Attach the OTHER breakpoints' computed values for inherited / parent-set properties, so scoping can pin
+    them exactly (class-derived defaults were wrong for space-y margins and inherited font weight/size)."""
+    order = {"mobile": ["tablet", "desktop"], "tablet": ["desktop"], "desktop": []}
+    for e in edits:
+        if e.get("bp") not in order:
+            continue
+        add = e.get("add", "")
+        pins = {}
+        for other in order[e["bp"]]:
+            n = next((x for x in nodes.get(other, []) if x.get("pc") == str(e["id"])), None)
+            d = next((x for x in dom.get(other, []) if str(x.get("pc")) == str(e["id"])), None)
+            vals = []
+            if "mt-" in add and n is not None:
+                v = int(n.get("mt", 0))
+                vals.append(f"!mt-[{v}px]" if v >= 0 else f"!-mt-[{-v}px]")
+            if "font-" in add and d is not None and d.get("font_weight"):
+                w = min((400, 500, 600, 700), key=lambda x: abs(x - int(float(d["font_weight"]))))
+                vals.append({400: "font-normal", 500: "font-medium", 600: "font-semibold", 700: "font-bold"}[w])
+            if "text-[" in add and "px]" in add and n is not None and n.get("fs"):
+                vals.append(f"text-[{int(n['fs'])}px]")
+            if vals:
+                pins[other] = vals
+        if pins:
+            e["pins"] = pins
+    return edits
+
+
+def auto_edits(spec: dict, dom: dict[str, list], nodes: dict[str, list], min_step: int = 4) -> list[dict]:
+    """Deterministic fixes from measurements (no model): per breakpoint, each row's step error becomes a
+    margin delta on the element that really moves that row; font-size errors become text-[Npx]."""
+    edits = []
+    # margin collapse: the first child's margin-top escaped through the root, so the page (and its background)
+    # starts below y=0 → flow-root on the root contains it (seen in a live run: white band above a dark page)
+    for bp in spec["breakpoints"]:
+        roots = [n for n in nodes.get(bp, []) if n.get("par", -1) == -1 and n.get("pc") is not None]
+        if roots and (roots[0].get("b") or [0, 0])[1] > 0 and not any(e.get("add") == "flow-root" for e in edits):
+            edits.append({"id": int(roots[0]["pc"]), "bp": "all", "add": "flow-root", "why": "root margin collapse"})
+    for bp, frame in spec["breakpoints"].items():
+        found = [i for i in _pairs(frame, [e for e in dom.get(bp, []) if e.get("text")]) if i["r"] is not None]
+        if not found:
+            continue
+        drows = _rows(found, "d")
+        rrow = {id(i): k for k, row in enumerate(_rows(found, "r")) for i in row}
+        drow = {id(i): k for k, row in enumerate(drows) for i in row}
+        prev_d = prev_r = None
+        for row in drows:
+            d_top, r_top = min(i["d"][1] for i in row), min(i["r"][1] for i in row)
+            delta = (d_top - r_top) if prev_d is None else (d_top - prev_d) - (r_top - prev_r)
+            first = min(row, key=lambda i: i["r"][1])
+            anchor = _block_anchor(first["id"], nodes.get(bp, [])) if first["id"] is not None else None
+            # rows whose arrangement differs between design and render are a STRUCTURE fix (moving them with
+            # margins pulled grid rows on top of each other in a live run → overlap → DQ)
+            same_render_row = len({rrow[id(i)] for i in row}) == 1
+            mixed = any(drow[id(j)] != drow[id(row[0])] for j in found if rrow[id(j)] == rrow[id(row[0])])
+            if abs(delta) > min_step and anchor is not None and same_render_row and not mixed:
+                # computed margin from the browser (parent space-y / gap rules don't show in the child's classes);
+                # "!" so the new value wins over a parent's space-y selector
+                v = int(anchor.get("mt", 0)) + int(delta)
+                cls = f"!mt-[{v}px]" if v >= 0 else f"!-mt-[{-v}px]"
+                edits.append({"id": int(anchor["pc"]), "bp": bp, "add": cls, "why": f"row step {delta:+d}px"})
+            for i in row:
+                if i["id"] is not None and i.get("size") and i.get("rsize") and abs(i["rsize"] - i["size"]) >= 2:
+                    edits.append({"id": int(i["id"]), "bp": bp, "add": f"text-[{int(i['size'])}px]", "why": "font size"})
+            prev_d, prev_r = d_top, r_top
+        edits += _column_fix(bp, drows, found, rrow, drow, nodes.get(bp, []))
+    return computed_pins(edits, dom, nodes)
+
+
+def _ancestors(nodes: list[dict], i: int) -> list[int]:
+    out = []
+    while i is not None and i >= 0 and len(out) < 64:
+        out.append(i)
+        i = nodes[i].get("par", -1)
+    return out
+
+
+def _column_fix(bp, drows, found, rrow, drow, nodes) -> list[dict]:
+    """If ≥ 2 consistent rows share the same x error, the column container is off (padding/margin), not each
+    row: shift the content of their lowest common block ancestor by Δ via its padding (both sides, so a centred,
+    fixed-width container stays centred)."""
+    groups: dict[int, list] = {}
+    for row in drows:
+        if len({rrow[id(i)] for i in row}) != 1:
+            continue
+        first = row[0]
+        dx = first["d"][0] - first["r"][0]
+        if abs(dx) > 6 and first["id"] is not None:
+            groups.setdefault(round(dx / 4), []).append((first, dx))
+    out = []
+    for _, items in groups.items():
+        if len(items) < 2:
+            continue
+        idxs = []
+        for it, _dx in items:
+            m = [k for k, n in enumerate(nodes) if n.get("pc") == str(it["id"])]
+            if len(m) == 1:
+                idxs.append(m[0])
+        if len(idxs) < 2:
+            continue
+        common = set(_ancestors(nodes, idxs[0]))
+        for k in idxs[1:]:
+            common &= set(_ancestors(nodes, k))
+        lca = next((a for a in _ancestors(nodes, idxs[0]) if a in common and not nodes[a].get("inl")
+                    and nodes[a].get("pc") is not None and sum(1 for n in nodes if n.get("pc") == nodes[a]["pc"]) == 1), None)
+        if lca is None:
+            continue
+        dx = round(sum(d for _, d in items) / len(items))
+        n = nodes[lca]
+        pl, pr = int(n.get("pl", 0)) + dx, int(n.get("pr", 0)) - dx if False else int(n.get("pr", 0))
+        if pl < 0:
+            continue
+        out.append({"id": int(n["pc"]), "bp": bp, "add": f"!pl-[{pl}px]", "why": f"column x {dx:+d}px"})
+    return out
+
+
+def visual_checks(spec: dict, targets: dict, renders: dict, dom: dict, nodes: dict) -> tuple[str, list[dict]]:
+    """Blocks / borders / rules / font weight, measured on both images (see visual_diff.py)."""
+    from .visual_diff import block_diff, weight_diff
+    lines, edits = [], []
+    for bp, frame in spec["breakpoints"].items():
+        if f"{bp}.png" not in renders or bp not in targets:
+            continue
+        dtb = [t["box"] for t in frame["texts"] if t.get("box")]
+        rtb = [e["box"] for e in dom.get(bp, []) if e.get("text") and e.get("box")]
+        f1, e1 = block_diff(bp, targets[bp], renders[f"{bp}.png"], nodes.get(bp, []), dtb, rtb)
+        pairs = _pairs(frame, [e for e in dom.get(bp, []) if e.get("text")])
+        f2, e2 = weight_diff(bp, targets[bp], renders[f"{bp}.png"], pairs, dom.get(bp, []))
+        if f1 or f2:
+            lines.append(f"{bp}:")
+            lines += [f"  - {x}" for x in (f1 + f2)[:14]]
+        edits += e1 + e2
+    edits = computed_pins(edits, dom, nodes)
+    return ("BLOCKS / RULES / WEIGHT (measured on both images):\n" + "\n".join(lines)) if lines else "", edits
+
+
 def report_summary(report: dict) -> str:
     if report.get("disqualified"):
         why = report.get("reason") or report.get("integrity_failures") or report.get("lint", {}).get("violations")

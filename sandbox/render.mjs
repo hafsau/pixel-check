@@ -147,7 +147,9 @@ function integrityDump() {
       b: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
       par: index.has(el.parentElement) ? index.get(el.parentElement) : -1,
       ga: cs.gridRowStart !== "auto" && cs.gridColumnStart !== "auto" ? `${cs.gridRowStart}/${cs.gridColumnStart}` : "",
-      inl: cs.display === "inline" };
+      inl: cs.display === "inline", pc: el.getAttribute("data-pc"),
+      mt: Math.round(parseFloat(cs.marginTop) || 0), fs: Math.round(parseFloat(cs.fontSize) || 0),
+      pl: Math.round(parseFloat(cs.paddingLeft) || 0), pr: Math.round(parseFloat(cs.paddingRight) || 0) };
   });
 }
 

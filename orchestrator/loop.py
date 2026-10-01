@@ -15,7 +15,7 @@ from pathlib import Path
 from . import config
 from . import jsx_edit
 from .code import class_edits, repair, revise, write_initial
-from .critique import critique, element_diff, feedback_text, visual_notes
+from .critique import auto_edits, critique, visual_checks, element_diff, feedback_text, flow_diff, visual_notes
 from .evaluate import Evaluation, evaluate
 from .sandbox import Sandbox
 from .tf_client import SpendCapExceeded, TFClient
@@ -75,7 +75,13 @@ class Trace:
 
 
 def _better(a: Candidate, b: Candidate | None) -> bool:
-    return b is None or (a.match, a.mean) > (b.match, b.mean)
+    """Worst breakpoint first; but a candidate within 0.5 of the parent's worst score that improves the mean by
+    > 2 also wins (a −0.4 tablet wobble was blocking +11 mean from scoped mobile/desktop fixes)."""
+    if b is None:
+        return True
+    if a.match > b.match:
+        return True
+    return a.match >= b.match - 0.5 and a.mean > b.mean + 2.0
 
 
 def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *, run_id: str | None = None,
@@ -96,6 +102,8 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
         try:
             if parent is None:
                 code, _ = write_initial(client, spec)
+            elif (strategy or {}).get("mode") == "auto":
+                return auto_branch(parent, rnd, cid, title)
             elif (strategy or {}).get("mode") == "edit":
                 edits, _ = class_edits(client, parent.code, feedback, strategy["instructions"],
                                        temperature=strategy.get("temperature", 0.4))
@@ -133,6 +141,57 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
         except Exception as e:  # a failed branch is not a failed run
             return Candidate(cid, parent and parent.id, rnd, title, None, None, f"{type(e).__name__}: {e}"[:300])
 
+    def renders_of(ev):
+        dom = {bp: json.loads(ev.renders[f"{bp}.dom.json"]) for bp in config.BREAKPOINTS if f"{bp}.dom.json" in ev.renders}
+        nodes = {bp: json.loads(ev.renders[f"{bp}.nodes.json"]) for bp in config.BREAKPOINTS if f"{bp}.nodes.json" in ev.renders}
+        return dom, nodes
+
+    def auto_branch(parent: Candidate, rnd: int, cid: str, title: str) -> Candidate:
+        """Deterministic measurement → margin/font fixes, up to 3 apply-evaluate iterations (no model calls).
+        Rows whose step error doesn't change after a fix are 'stuck' (centring / mt-auto / space-y) and dropped."""
+        code, ev, best_c = parent.code, parent.ev, None
+        last: dict[tuple, int] = {}
+        stuck: set[tuple] = set()
+        for it in range(3):
+            dom, nodes = renders_of(ev)
+            _, vis_edits = visual_checks(spec, targets, ev.renders, dom, nodes)
+            edits = [e for e in auto_edits(spec, dom, nodes) + vis_edits if (e["bp"], e["id"], e["why"][:3]) not in stuck]
+            for e in edits:
+                k = (e["bp"], e["id"], e["why"][:3])
+                if k in last and e["why"] == last[k]:
+                    stuck.add(k)
+                last[k] = e["why"]
+            edits = [e for e in edits if (e["bp"], e["id"], e["why"][:3]) not in stuck]
+            if not edits:
+                break
+            base_code, base_ev = code, ev
+            code, n_applied, skipped = jsx_edit.apply(base_code, edits)
+            if n_applied == 0:
+                break
+            ev = evaluate(sb, code, targets, target_texts, base_image=base_ev.checkpoint)
+            # per-breakpoint acceptance: scoped edits only change their own breakpoint, so a breakpoint whose
+            # score dropped has its edits discarded while the others are kept (one bad tablet fix used to sink
+            # good mobile + desktop fixes, because Match = worst breakpoint)
+            before = {bp: v["score"] for bp, v in (base_ev.report.get("breakpoints") or {}).items()}
+            after = {bp: v["score"] for bp, v in (ev.report.get("breakpoints") or {}).items()}
+            worse = {bp for bp in before if after.get(bp, 0) < before[bp] - 0.3} | ({"all"} if ev.report.get("disqualified") else set())
+            if worse:
+                keep = [e for e in edits if e["bp"] not in worse and not (e["bp"] == "all" and worse)]
+                code, n_applied, skipped = jsx_edit.apply(base_code, keep) if keep else (base_code, 0, [])
+                ev = evaluate(sb, code, targets, target_texts, base_image=base_ev.checkpoint) if n_applied else base_ev
+                for e in edits:
+                    if e not in keep:
+                        stuck.add((e["bp"], e["id"], e["why"][:3]))
+            trace({"kind": "auto_edits", "round": rnd, "iter": it, "parent": parent.id, "applied": n_applied,
+                   "rejected_bps": sorted(worse), "edits": [(e["id"], e["bp"], e.get("add")) for e in edits][:40],
+                   "stuck": sorted(map(str, stuck))[:20], "skipped": skipped[:5]})
+            if n_applied == 0:
+                continue
+            c = Candidate(cid, parent.id, rnd, f"{title}#{it}", code, ev)
+            if best_c is None or _better(c, best_c):
+                best_c = c
+        return best_c or Candidate(cid, parent.id, rnd, title, None, None, "no auto edits")
+
     def record(c: Candidate):
         trace.save_candidate(c)
         r = c.ev.report if c.ev else {}
@@ -162,7 +221,10 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
                 stop_reason = f"match ≥ {cfg.stop_match}"
                 break
             dom = {bp: json.loads(best.ev.renders[f"{bp}.dom.json"]) for bp in config.BREAKPOINTS if f"{bp}.dom.json" in best.ev.renders}
-            diff_text = element_diff(spec, dom)
+            diff_text = flow_diff(spec, dom)
+            vis_text, _ = visual_checks(spec, targets, best.ev.renders, dom, renders_of(best.ev)[1])
+            if vis_text:
+                diff_text += "\n\n" + vis_text
             notes = {}
             if cfg.visual_notes and not best.ev.report.get("disqualified"):
                 bps = list(config.BREAKPOINTS)
@@ -174,11 +236,14 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
             rewrite = next((st for st in crit["strategies"] if "rewrite" in (st.get("title") or "").lower()), crit["strategies"][-1])
             worst = best.ev.report.get("worst", "mobile")
             strategies = [
-                {"title": "edit-worst", "mode": "edit", "temperature": 0.3,
-                 "instructions": f"the worst breakpoint ({worst}): fix its measured errors"},
+                {"title": "auto", "mode": "auto", "instructions": "deterministic measurement fixes"},
                 {"title": "edit-all", "mode": "edit", "temperature": 0.7,
                  "instructions": "every breakpoint's largest measured errors (positions, widths, font sizes, colours)"},
-                {"title": "rewrite", "mode": "rewrite", "instructions": rewrite.get("instructions", "")},
+                ({"title": "restructure", "mode": "revise", "instructions":
+                    "Fix the STRUCTURE notes first (row/column arrangement via the parent's flex/grid classes and "
+                    "wrappers), then the largest row steps. Keep breakpoints that are already right unchanged."}
+                 if "STRUCTURE" in diff_text else
+                 {"title": "rewrite", "mode": "rewrite", "instructions": rewrite.get("instructions", "")}),
             ][: cfg.branches]
             parent = best
             for c in ex.map(lambda s: build(parent, rnd, s, fb), strategies):

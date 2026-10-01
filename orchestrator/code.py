@@ -35,6 +35,15 @@ Reading the spec:
   itself with that size and colour — do not add separate decorative overlay divs for them.
 - Boxes are [x, y, width, height] px, exact to ±3 px unless marked ~ (estimated). Sizes are font sizes in px; `on` is the
   colour directly behind the text.
+Layout contract (so the page can be corrected precisely by measurement afterwards):
+- Vertical rhythm: stack blocks in normal flow and set each block's distance from the block above with margin-top
+  per breakpoint (mt-[Npx] md:mt-[Npx] xl:mt-[Npx]), using the measured y gaps. Do NOT use vertical centring
+  (items-center/justify-center on a column, place-content-center), mt-auto, space-y-*, or gap for vertical stacking.
+- Horizontal: containers with max-w/w + mx-auto or padding for the content column; flex-row / grid grid-cols-N for
+  things side by side; these may change per breakpoint (e.g. md:grid-cols-2).
+- Put a stable wrapper element around every visual row (heading, input, button, footer…) so it can be moved as a unit.
+- Give the page root `flow-root` (and min-h-screen + the page background): without it the first block's margin-top
+  collapses through the root and the page background starts below the top of the viewport.
 Output: first the complete App.jsx in one ```jsx code block, then at most 5 short bullet notes."""
 
 CODE_RE = re.compile(r"```(?:jsx|tsx|javascript|js)?\s*\n(.*?)```", re.S)
@@ -95,8 +104,17 @@ Each edit targets ONE breakpoint via "bp": "mobile" (390 px), "tablet" (768 px) 
 UNPREFIXED classes (e.g. "mt-[40px] text-[32px]"); the tool adds the right md:/xl: prefix, replaces the old value of
 the same property at that breakpoint, and automatically pins the other breakpoints to their current values — so a
 tablet fix cannot break mobile or desktop. Use "bp": "all" only for a change that must apply everywhere.
-Elements rendered inside .map() share one id: an edit changes all copies. "remove" takes exact existing classes.
-Use the measured errors (render → design, px) to compute exact values. Reply with JSON only."""
+Elements rendered inside .map() share one id: an edit changes all copies. You rarely need "remove" (adding a class
+already replaces the old value of that property at that breakpoint); leave it "".
+What to fix — ONLY the listed measurements, nothing else (no colour, rounding or font changes unless a listed error asks):
+- STRUCTURE notes: change the PARENT container of those items (find it in the code), e.g. "grid grid-cols-2 gap-x-[..]"
+  or "flex-row"/"flex-col" at that breakpoint. Do not fake a grid with per-item margins.
+- ROWS "step … (Δ +Npx)": the row's top must move by Δ relative to the row above. Change the space above that row's
+  FIRST element (its margin-top, or the previous element's margin-bottom / a spacer's height) by exactly Δ, starting from
+  its CURRENT value at that breakpoint (read it from the classes). Rows below move with it — do not also move them.
+- "x … (Δ)": change the horizontal offset of that row/container (padding/margin/width of its container).
+- "font a→b px" / "width a→b (wrapping)": set text-[b px] or the container width.
+Reply with JSON only."""
 
 
 def class_edits(client: TFClient, tagged_code: str, feedback: str, strategy: str, *, model: str | None = None,

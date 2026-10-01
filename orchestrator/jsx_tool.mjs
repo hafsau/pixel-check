@@ -84,7 +84,7 @@ function key(cls) {
   const i = cls.lastIndexOf(":");
   const variant = i >= 0 ? cls.slice(0, i + 1) : "";
   let base = i >= 0 ? cls.slice(i + 1) : cls;
-  base = base.replace(/^-/, "");
+  base = base.replace(/^!/, "").replace(/^-/, "");
   const groups = [
     /^(m[trblxy]?)-/, /^(p[trblxy]?)-/, /^(w)-/, /^(h)-/, /^(min-w)-/, /^(min-h)-/, /^(max-w)-/, /^(max-h)-/,
     /^(gap(-[xy])?)-/, /^(space-[xy])-/, /^(top|left|right|bottom|inset(-[xy])?)-/, /^(rounded(-[trbl]{1,2})?)(-|$)/,
@@ -113,9 +113,11 @@ const PREFIX = { mobile: "", tablet: "md:", desktop: "xl:" };
 const DEFAULTS = { m: "m-0", mt: "mt-0", mb: "mb-0", ml: "ml-0", mr: "mr-0", mx: "mx-0", my: "my-0",
   p: "p-0", pt: "pt-0", pb: "pb-0", pl: "pl-0", pr: "pr-0", px: "px-0", py: "py-0", gap: "gap-0", "gap-x": "gap-x-0",
   "gap-y": "gap-y-0", w: "w-auto", h: "h-auto", "max-w": "max-w-none", "min-h": "min-h-0", "text-align": "text-left",
-  "flex-dir": "flex-row", "grid-cols": "grid-cols-none", order: "order-none", rounded: "rounded-none" };
+  "flex-dir": "flex-row", "grid-cols": "grid-cols-none", order: "order-none", rounded: "rounded-none",
+  "text-size": "text-base", "space-y": "space-y-0", "space-x": "space-x-0", leading: "leading-normal", font: "font-normal",
+  tracking: "tracking-normal", "min-w": "min-w-0", "max-h": "max-h-none" };
 
-function bare(c) { return c.replace(RESP, ""); }
+function bare(c) { return c.replace(RESP, ""); }   // keeps a leading "!" (important) — key() ignores it
 
 function effective(classes, bp, k) {
   for (const pre of CHAIN[bp]) {
@@ -125,26 +127,68 @@ function effective(classes, bp, k) {
   return null;
 }
 
-function scopedEdit(classes, bp, addList) {
+function scopedEdit(classes, bp, addList, pins) {
   const notes = [];
   let out = [...classes];
   for (const raw of addList) {
     const b = bare(raw), k = key(b), pre = PREFIX[bp];
     const before = { tablet: effective(out, "tablet", k), desktop: effective(out, "desktop", k) };
     out = out.filter((c) => !((c.match(RESP)?.[0] ?? "") === pre && key(bare(c)) === k));
+    if (b.startsWith("!")) {
+      // an important class beats every non-important class of the property at ANY breakpoint: promote the
+      // others to important (same values; Tailwind orders md:/xl: after base, so they still win where they apply)
+      out = out.map((c) => {
+        const p = c.match(RESP)?.[0] ?? "";
+        return p !== pre && key(bare(c)) === k && !bare(c).startsWith("!") ? p + "!" + bare(c) : c;
+      });
+    }
     out.push(pre + b);
     const pin = (level, lvlPre) => {
       const has = out.some((c) => CHAIN[level].slice(0, CHAIN[level].indexOf(pre) >= 0 ? CHAIN[level].indexOf(pre) : undefined)
         .includes(c.match(RESP)?.[0] ?? "") && (c.match(RESP)?.[0] ?? "") !== pre && key(bare(c)) === k);
-      if (has) return;   // that breakpoint has its own, more specific value: unaffected
+      if (has && !(pins || {})[level]) return;   // that breakpoint has its own, more specific value: unaffected
+      // explicit pins (computed values from the render) beat class-derived guesses: inherited properties and
+      // parent-set margins (space-y) don't appear in the element's own classes (a leak found in a live run)
+      const explicit = (pins || {})[level];
+      const pinned = explicit ? [].concat(explicit).find((c) => key(bare(c)) === k) : null;
+      if (pinned) { out = out.filter((c) => !((c.match(RESP)?.[0] ?? "") === lvlPre && key(bare(c)) === k)); out.push(lvlPre + pinned); notes.push(`pinned ${lvlPre}${pinned} (computed)`); return; }
       const old = before[level] ?? DEFAULTS[k.replace(/^.*:/, "")] ?? null;
-      if (old && old !== b) { out.push(lvlPre + old); notes.push(`pinned ${lvlPre}${old}`); }
+      // an important (!) class beats non-important md:/xl: classes, so the pin must be important too
+      const imp = b.startsWith("!") && old && !old.startsWith("!") ? "!" : "";
+      if (old && old !== b) { out.push(lvlPre + imp + old); notes.push(`pinned ${lvlPre}${imp}${old}`); }
       else if (!old) notes.push(`could not pin ${level} for ${k}`);
     };
     if (bp === "mobile") pin("tablet", "md:");
+    if (bp === "mobile" && (pins || {}).desktop) pin("desktop", "xl:");
     if (bp === "tablet") pin("desktop", "xl:");
   }
   return { classes: out, notes };
+}
+
+// Tailwind spacing class → px ("mt-4" 16, "mt-[13px]" 13, "-mt-2" -8, "mt-px" 1); null if not a px length
+function spacingPx(cls) {
+  if (!cls) return 0;
+  const neg = cls.startsWith("-") ? -1 : 1;
+  const v = cls.replace(/^-/, "").replace(/^[a-z-]+?-(?=\[|\d|px$)/, "");
+  if (v === "px") return neg;
+  let m = v.match(/^\[(-?\d+(?:\.\d+)?)px\]$/);
+  if (m) return neg * Number(m[1]);
+  m = v.match(/^(\d+(?:\.\d+)?)$/);
+  if (m) return neg * Number(m[1]) * 4;
+  return null;
+}
+
+// delta edit: {id, bp, delta: {mt: +14}} → read the current value of that property at bp, write current+Δ
+function deltaToAdd(classes, bp, delta) {
+  const adds = [], notes = [];
+  for (const [prop, d] of Object.entries(delta || {})) {
+    const cur = effective(classes, bp, prop);
+    const px = cur ? spacingPx(cur) : 0;
+    if (px === null) { notes.push(`${prop}: current ${cur} is not a px length`); continue; }
+    const v = Math.round(px + Number(d));
+    adds.push(v < 0 ? `-${prop}-[${-v}px]` : `${prop}-[${v}px]`);
+  }
+  return { adds, notes };
 }
 
 function apply(code, edits) {
@@ -155,28 +199,48 @@ function apply(code, edits) {
     if (a?.value?.type === "StringLiteral") byId.set(Number(a.value.value), el);
   });
   const patches = [], skipped = [];
+  // group by element: several edits to one element (e.g. mobile + tablet + desktop) must compose into ONE
+  // patch of its class list — separate patches over the same range corrupted the file (found in a live run)
+  const groups = new Map();
   for (const e of edits || []) {
-    const el = byId.get(Number(e.id));
-    if (!el) { skipped.push({ id: e.id, why: "no such element" }); continue; }
+    const id = Number(e.id);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(e);
+  }
+  for (const [id, group] of groups) {
+    const el = byId.get(id);
+    if (!el) { skipped.push({ id, why: "no such element" }); continue; }
     const op = el.openingElement;
     const lit = classLiteral(op);
-    const add = String(e.add || "").split(/\s+/).filter(Boolean);
-    const remove = new Set(String(e.remove || "").split(/\s+/).filter(Boolean));
-    if (lit?.dynamic) { skipped.push({ id: e.id, why: "className is dynamic" }); continue; }
-    let classes = (lit?.value || "").split(/\s+/).filter(Boolean).filter((c) => !remove.has(c));
-    if (e.bp && e.bp !== "all" && PREFIX[e.bp] !== undefined) {
-      const r = scopedEdit(classes, e.bp, add);
-      classes = r.classes;
-      if (r.notes.some((n) => n.startsWith("could not"))) skipped.push({ id: e.id, why: r.notes.join("; "), partial: true });
-    } else {
-      const addKeys = new Set(add.map(key));
-      classes = classes.filter((c) => !addKeys.has(key(c)));
-      for (const c of add) if (!classes.includes(c)) classes.push(c);
+    if (lit?.dynamic) { skipped.push({ id, why: "className is dynamic" }); continue; }
+    let classes = (lit?.value || "").split(/\s+/).filter(Boolean);
+    for (const e of group) {
+      let add = String(e.add || "").split(/\s+/).filter(Boolean);
+      const remove = new Set(String(e.remove || "").split(/\s+/).filter(Boolean));
+      if (e.delta && e.bp && PREFIX[e.bp] !== undefined) {
+        const d = deltaToAdd(classes, e.bp, e.delta);
+        add = add.concat(d.adds);
+        if (d.notes.length) skipped.push({ id, why: d.notes.join("; "), partial: true });
+      }
+      if (e.bp && e.bp !== "all" && PREFIX[e.bp] !== undefined) {
+        const pre = PREFIX[e.bp];
+        const addKeys = new Set(add.map((c) => key(bare(c))));
+        const resets = [...remove].filter((c) => (c.match(RESP)?.[0] ?? "") === pre && !addKeys.has(key(bare(c))))
+          .map((c) => DEFAULTS[key(bare(c)).replace(/^.*:/, "")]).filter(Boolean);
+        const r = scopedEdit(classes, e.bp, [...add, ...resets], e.pins);
+        classes = r.classes;
+        if (r.notes.some((n) => n.startsWith("could not"))) skipped.push({ id, why: r.notes.join("; "), partial: true });
+      } else {
+        classes = classes.filter((c) => !remove.has(c));
+        const addKeys = new Set(add.map(key));
+        classes = classes.filter((c) => !addKeys.has(key(c)));
+        for (const c of add) if (!classes.includes(c)) classes.push(c);
+      }
     }
     const value = classes.join(" ");
-    if (/["`\\{}]/.test(value)) { skipped.push({ id: e.id, why: "unsafe characters" }); continue; }
-    if (lit) patches.push({ id: e.id, start: lit.start, end: lit.end, text: value });
-    else patches.push({ id: e.id, start: op.name.end, end: op.name.end, text: ` className="${value}"` });
+    if (/["`\\{}]/.test(value)) { skipped.push({ id, why: "unsafe characters" }); continue; }
+    if (lit) patches.push({ id, start: lit.start, end: lit.end, text: value });
+    else patches.push({ id, start: op.name.end, end: op.name.end, text: ` className="${value}"` });
   }
   patches.sort((a, b) => b.start - a.start);   // back to front: earlier offsets stay valid
   let out = code, applied = 0;
