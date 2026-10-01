@@ -78,10 +78,23 @@ def _collect(spec: dict) -> list[Item]:
             seen[k] = seen.get(k, 0) + 1
             key = f"t:{k}#{seen[k]}"
             it = items.setdefault(key, Item(key, "text"))
-            it.text, it.role = t["text"], t.get("role", "other")
+            # roles vary per frame (the same placeholder was "input-placeholder" on mobile, "label" on desktop): keep the
+            # most specific one seen
+            role = t.get("role", "other")
+            if ROLE_RANK.get(role, 0) > ROLE_RANK.get(it.role, 0):
+                it.role = role
+            it.text = t["text"]
             x, y, w, h = t["box"]
             fs = int(t.get("size_px") or _font_px(t["text"], w, h, None))   # calibrated in perceive.merge
+            if t.get("approx") and t.get("inside_block"):
+                # OCR missed it (e.g. white on dark): real width from Inter metrics, centred in its block
+                from .typography import metrics
+                ib = t["inside_block"]
+                tw = max(8, round(metrics(t["text"], _weight(t.get("weight") or 500))[1] * fs))
+                th = round(0.75 * fs)
+                x, y, w, h = ib[0] + (ib[2] - tw) // 2, ib[1] + (ib[3] - th) // 2, tw, th
             it.at[bp] = {"ink": [x, y, w, h], "fs": fs, "lines": int(t.get("lines") or 1), "color": t.get("color") or "#000000",
+                         "underline": bool(t.get("underline")),
                          "weight": _weight(t.get("weight")), "approx": bool(t.get("approx")),
                          "tracking": float(t.get("tracking_em") or 0.0), "top_em": t.get("top_em")}
         ranks: dict[str, int] = {}
@@ -100,7 +113,8 @@ def _collect(spec: dict) -> list[Item]:
                 ranks[cls] = ranks.get(cls, 0) + 1
                 key = f"b:{cls}#{ranks[cls]}"
             it = items.setdefault(key, Item(key, "block"))
-            it.at[bp] = {"box": list(b["box"]), "fill": b.get("fill"), "border": b.get("border")}
+            it.at[bp] = {"box": list(b["box"]), "fill": b.get("fill"), "border": b.get("border"), "radius": b.get("radius"),
+                         "shadow": bool(b.get("shadow"))}
     return list(items.values())
 
 
@@ -253,6 +267,8 @@ def _layout(children: list[Item], origin: dict[str, tuple], view_h: dict[str, in
     return plan
 
 
+ROLE_RANK = {"button": 9, "input-placeholder": 8, "link": 7, "nav": 6, "heading": 5, "subheading": 4, "label": 3,
+             "body": 2, "caption": 2, "other": 0}
 TAGS = {"heading": "h1", "subheading": "p", "body": "p", "caption": "p", "label": "span", "link": "a", "nav": "a",
         "button": "span", "input-placeholder": "span", "other": "span"}
 
@@ -284,10 +300,30 @@ def _emit(children: list[Item], origin, view_h, indent: int) -> list[str]:
                 _resp({bp: (f"tracking-[{a[bp]['tracking']}em]" if a[bp].get("tracking") else "tracking-normal") for bp in BPS}),
                 _resp({bp: f"w-[{_elem_box(c, bp)[2] if bp in c.at else _elem_box(c, next(iter(c.at)))[2]}px]" for bp in BPS}),
                 "leading-none" if all(c.at.get(bp, {}).get("lines", 1) == 1 for bp in c.at) else "leading-tight",
+                _resp({bp: ("underline" if a[bp].get("underline") else "no-underline") for bp in BPS}),
                 "whitespace-nowrap" if all(c.at.get(bp, {}).get("lines", 1) == 1 for bp in c.at) else "",
             ]
+            if c.role == "input-placeholder":
+                # a real, typeable input whose placeholder is the design's text (not a styled div)
+                ph = [x.replace("text-[#", "placeholder:text-[#") if x and "text-[#" in x else x for x in cls]
+                ph = [" ".join((("placeholder:" + t[3:]) if t.startswith("md:text-[#") or t.startswith("xl:text-[#") else t)
+                               .replace("placeholder:text-[#", "placeholder:text-[#") for t in x.split()) if x else x for x in ph]
+                ph = [" ".join(_placeholder_variant(t) for t in x.split()) if x else x for x in ph]
+                label = _attr(c.text)
+                out.append(f'{pad}<input type="text" aria-label="{label}" placeholder="{label}" '
+                           f'className="{" ".join(x for x in ph if x)} bg-transparent border-0 outline-none p-0 h-[1em]" />')
+                continue
             tag = TAGS.get(c.role, "span")
-            out.append(f'{pad}<{tag} className="{" ".join(x for x in cls if x)}">{_jsx_text(c.text)}</{tag}>')
+            extra = ' href="#"' if tag == "a" else ""
+            if MENU and c.key in MENU.get("links", ()):
+                # hidden on mobile until the hamburger opens it; tablet/desktop unchanged
+                vis = next((x for x in cls if x and x.startswith("hidden ")), "")
+                rest = " ".join(x for x in cls if x and x != vis)
+                vis_rest = vis[len("hidden "):]
+                out.append(f'{pad}<{tag}{extra} className={{`${{menuOpen ? "block" : "hidden"}} {vis_rest} {rest}`}}>'
+                           f'{_jsx_text(c.text)}</{tag}>')
+                continue
+            out.append(f'{pad}<{tag}{extra} className="{" ".join(x for x in cls if x)}">{_jsx_text(c.text)}</{tag}>')
         else:
             boxes = {bp: c.at.get(bp, c.at[next(iter(c.at))])["box"] for bp in BPS}
             fills = {bp: c.at.get(bp, c.at[next(iter(c.at))]).get("fill") for bp in BPS}
@@ -296,13 +332,41 @@ def _emit(children: list[Item], origin, view_h, indent: int) -> list[str]:
                             _resp({bp: f"w-[{boxes[bp][2]}px]" for bp in BPS}),
                             _resp({bp: f"h-[{boxes[bp][3]}px]" for bp in BPS}),
                             _resp({bp: f"bg-[{fills[bp]}]" if fills[bp] else "bg-transparent" for bp in BPS}),
-                            _resp({bp: f"border border-[{borders[bp]}]" if borders[bp] else "border-0" for bp in BPS})]
+                            _resp({bp: f"border border-[{borders[bp]}]" if borders[bp] else "border-0" for bp in BPS}),
+                            _resp({bp: (f"rounded-[{c.at.get(bp, c.at[next(iter(c.at))]).get('radius')}px]"
+                                        if c.at.get(bp, c.at[next(iter(c.at))]).get("radius") else "rounded-none") for bp in BPS}),
+                            _resp({bp: ("shadow-sm" if c.at.get(bp, c.at[next(iter(c.at))]).get("shadow") else "shadow-none") for bp in BPS})]
             tag = "button" if any(ch.role == "button" for ch in c.children) else "div"
+            if tag == "button":
+                cls.append("cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2")
             inner_origin = {bp: tuple(boxes[bp][:2]) for bp in BPS}
-            out.append(f'{pad}<{tag} className="{" ".join(x for x in cls if x)}">')
-            out += _emit(c.children, inner_origin, view_h, indent + 1)
+            if MENU and c.key == MENU.get("trigger"):
+                tag = "button"
+                cls.append("cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2")
+            btype = ' type="button"' if tag == "button" else ""
+            if MENU and c.key == MENU.get("trigger"):
+                btype += ' aria-label="Open menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}'
+
+            out.append(f'{pad}<{tag}{btype} className="{" ".join(x for x in cls if x)}">')
+            # blocks get the same recursive X-Y cut as the page (a bordered row holding three cards)
+            if len(c.children) >= 4:
+                out += _emit_split(c.children, inner_origin, {bp: boxes[bp][2] for bp in BPS}, view_h, indent + 1, depth=1)
+            else:
+                out += _emit(c.children, inner_origin, view_h, indent + 1)
             out.append(f"{pad}</{tag}>")
     return out
+
+
+def _placeholder_variant(t: str) -> str:
+    """text colour → placeholder colour, keeping the breakpoint prefix (md:text-[#x] → md:placeholder:text-[#x])."""
+    for pre in ("md:", "xl:", ""):
+        if t.startswith(pre + "text-[#") or t.startswith(pre + "placeholder:text-[#"):
+            return pre + "placeholder:" + t[len(pre):].replace("placeholder:", "")
+    return t
+
+
+def _attr(t: str) -> str:
+    return t.replace("&", "&amp;").replace('"', "&quot;").replace("{", "").replace("}", "")
 
 
 def _jsx_text(t: str) -> str:
@@ -331,53 +395,197 @@ def _split(children: list[Item], bp: str):
         overlap = min(ly1, ry1) - max(ly0, ry0)
         if overlap < 0.5 * min(ly1 - ly0, ry1 - ry0):
             continue
+        # only split when flat flex-wrap lines would FAIL: an item on one side spans ≥ 2 vertically stacked items on
+        # the other (a form beside a tall panel). Side-by-side rows of small items (3 feature columns) lay out fine flat,
+        # and splitting them broke a correct 3-column row in a live comparison.
+        def spans_two(a_side, b_side):
+            for a in a_side:
+                ay0, ay1 = boxes[id(a)][1], boxes[id(a)][1] + boxes[id(a)][3]
+                hit = sorted((boxes[id(b)][1], boxes[id(b)][1] + boxes[id(b)][3]) for b in b_side
+                             if min(ay1, boxes[id(b)][1] + boxes[id(b)][3]) - max(ay0, boxes[id(b)][1]) > 0)
+                if any(hit[k + 1][0] >= hit[k][1] - 2 for k in range(len(hit) - 1)):
+                    return True
+            return False
+        if not (spans_two(left, right) or spans_two(right, left)):
+            continue
         if best is None or s1 - s0 > best[1] - best[0]:
             best = (s0, s1, left, right)
     return best
 
 
-def _emit_root(roots: list[Item], view_h) -> list[str]:
-    splits = {bp: _split(roots, bp) for bp in BPS}
+def _bands(children: list[Item], bp: str) -> list[list[Item]] | None:
+    """X-Y cut, horizontal step: split into bands wherever a vertical gap runs across all items at bp."""
+    present = sorted([c for c in children if bp in c.at], key=lambda c: _elem_box(c, bp)[1])
+    if len(present) < 3:
+        return None
+    bands, cur, bottom = [], [], None
+    for c in present:
+        y0, h = _elem_box(c, bp)[1], _elem_box(c, bp)[3]
+        if cur and y0 > bottom:
+            bands.append(cur)
+            cur = []
+        cur.append(c)
+        bottom = y0 + h if bottom is None or not cur[:-1] else max(bottom, y0 + h)
+    bands.append(cur)
+    return bands if len(bands) >= 2 else None
+
+
+def _bands_consistent(bands: list[list[Item]], tol: int = 4) -> bool:
+    for bp in BPS:
+        spans = []
+        for band in bands:
+            present = [c for c in band if bp in c.at]
+            if present:
+                spans.append((min(_elem_box(c, bp)[1] for c in present),
+                              max(_elem_box(c, bp)[1] + _elem_box(c, bp)[3] for c in present)))
+        if any(spans[k][1] > spans[k + 1][0] + tol for k in range(len(spans) - 1)):
+            return False
+    return True
+
+
+SEGMENTS: list[dict] = []   # filled during compile: [{"id", "kind", "texts", "boxes"}] for the semantic pass
+_SEG_STACK: list[str] = []
+
+
+def _seg(kind: str, members: list[Item], depth: int = 0) -> str:
+    sid = f"S{len(SEGMENTS) + 1}"
+    texts = []
+    def walk(its):
+        for it in its:
+            if it.kind == "text":
+                texts.append(it.text[:40])
+            walk(it.children)
+    walk(members)
+    boxes = {}
+    for bp in BPS:
+        bs = [_elem_box(c, bp) for c in members if bp in c.at]
+        if bs:
+            x0, y0 = min(b[0] for b in bs), min(b[1] for b in bs)
+            boxes[bp] = [x0, y0, max(b[0] + b[2] for b in bs) - x0, max(b[1] + b[3] for b in bs) - y0]
+    SEGMENTS.append({"id": sid, "kind": kind, "depth": depth, "texts": texts[:8], "n_texts": len(texts), "boxes": boxes,
+                     "members": {id(m) for m in members}})
+    return sid
+
+
+def _link_segments():
+    """Parent = the smallest other segment whose members include all of this segment's members."""
+    for sg in SEGMENTS:
+        cands = [o for o in SEGMENTS if o is not sg and sg["members"] <= o["members"] and len(o["members"]) > len(sg["members"])]
+        sg["parent"] = min(cands, key=lambda o: len(o["members"]))["id"] if cands else None
+
+
+def _emit_bands(bands: list[list[Item]], children: list[Item], ref: str, origin: dict, width: dict, view_h,
+                indent: int, depth: int) -> list[str]:
+    """Each band is a full-width wrapper stacked in flow; its contents are laid out relative to its own top."""
+    # items absent at the reference breakpoint join the band of the item just before them in reading order
+    member = {id(c): k for k, band in enumerate(bands) for c in band}
+    order = sorted(children, key=lambda c: min(_elem_box(c, bp)[1] / SIZES[bp][1] for bp in c.at))
+    last = 0
+    for c in order:
+        if id(c) in member:
+            last = member[id(c)]
+        else:
+            member[id(c)] = last
+    groups = [[c for c in children if member[id(c)] == k] for k in range(len(bands))]
+    pad = "  " * indent
+    out = [f'{pad}<div className="flex flex-col items-start {_resp({bp: f"w-[{width[bp]}px]" for bp in BPS})} shrink-0">']
+    prev_bottom = {bp: origin[bp][1] for bp in BPS}
+    for g in groups:
+        g_origin = {bp: (origin[bp][0], prev_bottom[bp]) for bp in BPS}
+        inner = _emit_split(g, g_origin, width, view_h, indent + 1, depth + 1, allow_bands=False)
+        inner[0] = inner[0].replace("<div ", f'<div data-seg="{_seg("band", g, depth)}" ', 1)
+        out += inner
+        for bp in BPS:
+            present = [c for c in g if bp in c.at]
+            if present:
+                prev_bottom[bp] = max(prev_bottom[bp], max(_elem_box(c, bp)[1] + _elem_box(c, bp)[3] for c in present))
+    return out + [f"{pad}</div>"]
+
+
+def _emit_split(children: list[Item], origin: dict, width: dict, view_h, indent: int, depth: int = 0,
+                allow_bands: bool = True) -> list[str]:
+    """Recursive X-Y cut: horizontal bands (header / hero / cards), then side-by-side columns inside a band (three
+    cards; a form beside a panel). At breakpoints without a column split the columns stack."""
+    pad = "  " * indent
+    if allow_bands and depth < 4:
+        ref_b = max(BPS, key=lambda bp: sum(1 for c in children if bp in c.at))
+        bands = _bands(children, ref_b)
+        if bands and not _bands_consistent(bands):
+            bands = None   # bands must keep their vertical order at EVERY breakpoint (a desktop side panel stacks last on mobile)
+        if bands:
+            return _emit_bands(bands, children, ref_b, origin, width, view_h, indent, depth)
+    splits = {bp: (_split(children, bp) if depth < 6 else None) for bp in BPS}
     ref = next((bp for bp in ("desktop", "tablet", "mobile") if splits[bp]), None)
     if ref is None:
-        return (['      <div className="flex flex-wrap content-start items-start w-full">'] +
-                _emit(roots, {bp: (0, 0) for bp in BPS}, view_h, 4) + ['      </div>'])
+        return ([f'{pad}<div className="flex flex-wrap content-start items-start {_resp({bp: f"w-[{width[bp]}px]" for bp in BPS})}">'] +
+                _emit(children, origin, view_h, indent + 1) + [f"{pad}</div>"])
     s0, s1, left, right = splits[ref]
     W = {bp: SIZES[bp][0] for bp in BPS}
-    for c in roots:   # items absent at the reference breakpoint: side by relative x elsewhere
+    for c in children:   # items absent at the reference breakpoint: side by relative x elsewhere
         if c not in left and c not in right:
             bp = next(iter(c.at))
-            (right if _elem_box(c, bp)[0] / W[bp] >= s1 / W[ref] else left).append(c)
-    left = [c for c in roots if c in left]
-    right = [c for c in roots if c in right]
+            (right if (_elem_box(c, bp)[0] - origin[bp][0]) / max(width[bp], 1) >= (s1 - origin[ref][0]) / max(width[ref], 1) else left).append(c)
+    left = [c for c in children if c in left]
+    right = [c for c in children if c in right]
     side = {bp: bool(splits[bp]) and {id(c) for c in splits[bp][2]} <= {id(c) for c in left} for bp in BPS}
-    l_origin, r_origin, lw, rw = {}, {}, {}, {}
+    l_origin, r_origin, lw, rw, r_ml = {}, {}, {}, {}, {}
     for bp in BPS:
-        l_origin[bp] = (0, 0)
+        ox, oy = origin[bp]
+        l_origin[bp] = (ox, oy)
         if side[bp]:
             a, b = splits[bp][0], splits[bp][1]
-            lw[bp], rw[bp], r_origin[bp] = f"w-[{a}px]", f"w-[{W[bp] - b}px] ml-[{b - a}px]", (b, 0)
+            lw[bp], rw[bp], r_ml[bp], r_origin[bp] = a - ox, ox + width[bp] - b, b - a, (b, oy)
         else:
-            bottom = max((_elem_box(c, bp)[1] + _elem_box(c, bp)[3] for c in left if bp in c.at), default=0)
-            lw[bp], rw[bp], r_origin[bp] = "w-full", "w-full ml-0", (0, bottom)
-    out = [f'      <div className="flex {_resp({bp: "flex-row" if side[bp] else "flex-col" for bp in BPS})} items-start w-full">',
-           f'        <div className="flex flex-wrap content-start items-start shrink-0 {_resp(lw)}">']
-    out += _emit(left, l_origin, view_h, 5)
-    out += ['        </div>', f'        <div className="flex flex-wrap content-start items-start shrink-0 {_resp(rw)}">']
-    out += _emit(right, r_origin, view_h, 5)
-    out += ['        </div>', '      </div>']
+            bottom = max((_elem_box(c, bp)[1] + _elem_box(c, bp)[3] for c in left if bp in c.at), default=oy)
+            lw[bp], rw[bp], r_ml[bp], r_origin[bp] = width[bp], width[bp], 0, (ox, bottom)
+    out = [f'{pad}<div className="flex {_resp({bp: "flex-row" if side[bp] else "flex-col" for bp in BPS})} items-start '
+           f'{_resp({bp: f"w-[{width[bp]}px]" for bp in BPS})} shrink-0">']
+    left_out = _emit_split(left, l_origin, lw, view_h, indent + 1, depth + 1)
+    left_out[0] = left_out[0].replace("<div ", f'<div data-seg="{_seg("column", left, depth)}" ', 1)
+    out += left_out
+    inner = _emit_split(right, r_origin, rw, view_h, indent + 1, depth + 1)   # columns may band again
+    inner[0] = inner[0].replace("<div ", f'<div data-seg="{_seg("column", right, depth)}" ', 1)
+    # right column's offset from the left one (only where they sit side by side)
+    inner[0] = inner[0].replace('className="', f'className="{_resp({bp: _px("ml", r_ml[bp]) for bp in BPS})} ', 1)
+    out += inner + [f"{pad}</div>"]
     return out
 
 
+def _emit_root(roots: list[Item], view_h) -> list[str]:
+    W = {bp: SIZES[bp][0] for bp in BPS}
+    return _emit_split(roots, {bp: (0, 0) for bp in BPS}, W, view_h, 3)
+
+
+MENU: dict = {}   # {"trigger": item key, "links": {item keys}} when a mobile hamburger is detected
+
+
+def _detect_menu(items: list[Item]) -> dict:
+    """Links in the top area visible on tablet/desktop but hidden on mobile + a small icon near the top on mobile only
+    (the ☰) → a working hamburger: the icon toggles those links on mobile."""
+    links = [i for i in items if i.kind == "text" and i.role in ("link", "nav") and "mobile" not in i.at
+             and ("tablet" in i.at or "desktop" in i.at) and min(_elem_box(i, b)[1] for b in i.at) < 120]
+    icons = [i for i in items if i.kind == "block" and "mobile" in i.at and "desktop" not in i.at
+             and i.at["mobile"]["box"][1] < 100 and max(i.at["mobile"]["box"][2:]) <= 48]
+    if len(links) >= 2 and icons:
+        trig = max(icons, key=lambda i: i.at["mobile"]["box"][0])   # rightmost: hamburgers sit top-right
+        return {"trigger": trig.key, "links": {l.key for l in links}}
+    return {}
+
+
 def compile_scaffold(spec: dict) -> str:
+    SEGMENTS.clear()
     items = _collect(spec)
+    MENU.clear()
+    MENU.update(_detect_menu(items))
     roots = _tree(items)
     _synthesize_blocks(roots)
     view_h = {bp: SIZES[bp][1] for bp in BPS}
     bgs = {bp: spec["breakpoints"].get(bp, {}).get("background", "#ffffff") for bp in BPS}
     body = _emit_root(roots, view_h)
+    _link_segments()
     root_cls = f"flow-root min-h-screen font-sans {_resp({bp: f'bg-[{bgs[bp]}]' for bp in BPS})}"
-    return ("export default function App() {\n  return (\n"
-            f'    <div className="{root_cls}">\n'
+    head = ('import { useState } from "react";\n\nexport default function App() {\n'
+            '  const [menuOpen, setMenuOpen] = useState(false);\n  return (\n') if MENU else "export default function App() {\n  return (\n"
+    return (head + f'    <div className="{root_cls}">\n'
             + "\n".join(body) +
             "\n    </div>\n  );\n}\n")

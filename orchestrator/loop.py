@@ -103,7 +103,15 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
         title = (strategy or {}).get("title", "initial")
         try:
             if parent is None and (strategy or {}).get("mode") == "scaffold":
-                code = compile_scaffold(spec)   # measured scaffold: deterministic first draft, no model call
+                code = compile_scaffold(spec)   # measured scaffold: deterministic geometry (X-Y cut + measurements)
+                from .scaffold import SEGMENTS
+                from .structure import apply_semantics, semantic_tags
+                try:                            # Nemotron names the regions (header / nav / section / article / footer…)
+                    tags = semantic_tags(client, list(SEGMENTS))
+                    code, n_tags = apply_semantics(code, tags)
+                    trace({"kind": "structure_plan", "tags": tags, "applied": n_tags, "segments": len(SEGMENTS)})
+                except (ValueError, KeyError) as err:
+                    trace({"kind": "structure_plan", "error": str(err)[:200]})
             elif parent is None:
                 code, _ = write_initial(client, spec)
             elif (strategy or {}).get("mode") == "auto":

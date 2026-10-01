@@ -31,6 +31,7 @@ def project_id() -> str:
 
 # --- Models (IDs only here; override via env when models are deprecated) ---
 MODEL_CODER = os.environ.get("MODEL_CODER", "nvidia/nemotron-3-super-120b-a12b")
+MODEL_PLANNER = os.environ.get("MODEL_PLANNER", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_EDITOR = os.environ.get("MODEL_EDITOR", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_CRITIC = os.environ.get("MODEL_CRITIC", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_FAST = os.environ.get("MODEL_FAST", "nvidia/Nemotron-3_5-Lightning")

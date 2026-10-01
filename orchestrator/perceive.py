@@ -122,7 +122,8 @@ def merge(vlm: dict, meas: dict) -> dict:
             ty = first.get("typo") or {}
             item["size_px"] = ty.get("size_px") or font_px(first["text"], first["box"][2], first["box"][3], t.get("size_px"))
             if ty:
-                item.update(weight=ty["weight"], tracking_em=ty["tracking_em"], top_em=ty["top_em"])
+                item.update(weight=ty["weight"], tracking_em=ty["tracking_em"], top_em=ty["top_em"],
+                            underline=ty.get("underline", False))
         else:
             item.update(box=None, color=t.get("color"), measured=False)
         texts.append(item)

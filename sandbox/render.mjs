@@ -250,6 +250,38 @@ async function renderHtml(html, outDir) {
       result.breakpoints[bp] = { width: w, height: h, elements: dom.length, fonts_ok: fontsOk, ...health };
       await ctx.close();
     }
+    // functional controls (reported, not scored): inputs accept typing; buttons/links are keyboard-reachable
+    {
+      const { ctx, page } = await open(...BREAKPOINTS.mobile);
+      const inputs = page.locator("#root input, #root textarea");
+      const n = await inputs.count();
+      let typed = 0;
+      for (let i = 0; i < n; i++) {
+        try { await inputs.nth(i).fill("pixel-check", { timeout: 1000 }); if ((await inputs.nth(i).inputValue()) === "pixel-check") typed++; } catch {}
+      }
+      const c = await page.evaluate(() => {
+        const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const btn = [...document.querySelectorAll("#root button")];
+        const lnk = [...document.querySelectorAll("#root a")];
+        return { buttons: btn.length, buttons_focusable: btn.filter((b) => !b.disabled && b.tabIndex >= 0).length,
+                 links: lnk.length, links_with_href: lnk.filter((a) => a.hasAttribute("href")).length,
+                 clickable_divs: [...document.querySelectorAll("#root div[onclick], #root span[onclick]")].length };
+      });
+      // hamburger: click it on mobile and count links that become visible
+      const menuBtn = page.locator('#root button[aria-label*="menu" i]');
+      if (await menuBtn.count()) {
+        const visibleLinks = () => page.evaluate(() => [...document.querySelectorAll("#root a")].filter((a) => {
+          const r = a.getBoundingClientRect(); return r.width > 0 && r.height > 0; }).length);
+        const before = await visibleLinks();
+        try { await menuBtn.first().click({ timeout: 1000 }); } catch {}
+        const after = await visibleLinks();
+        c.hamburger = { found: true, links_before: before, links_after: after, works: after > before };
+      } else {
+        c.hamburger = { found: false };
+      }
+      result.controls = { inputs: n, inputs_typeable: typed, ...c };
+      await ctx.close();
+    }
     for (const w of BETWEEN_WIDTHS) {
       const { ctx, page } = await open(w, 900);
       result.between[w] = await page.evaluate(layoutHealth);

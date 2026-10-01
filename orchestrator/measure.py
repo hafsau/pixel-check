@@ -22,7 +22,8 @@ BG_THRESHOLD = 24.0
 
 
 def _hex(rgb) -> str:
-    return "#{:02x}{:02x}{:02x}".format(*[int(round(c)) for c in rgb])
+    # clamp: a mean of 255.000x rounded to 256 printed "#100100100" (invalid Tailwind colour)
+    return "#{:02x}{:02x}{:02x}".format(*[min(255, max(0, int(round(float(c))))) for c in rgb])
 
 
 def background(img: np.ndarray) -> np.ndarray:
@@ -106,7 +107,7 @@ def solid_blocks(img: np.ndarray, text_boxes: list, min_area: int = 600) -> list
     for v in vals[counts >= min_area]:
         m = keys == v
         colour = img[m].mean(axis=0)
-        if np.linalg.norm(colour - bg) <= BG_THRESHOLD:
+        if np.linalg.norm(colour - bg) <= 8:     # subtle fills count (white buttons/cards on light grey differ by ~14)
             continue
         lab, n = ndimage.label(ndimage.binary_closing(m, np.ones((5, 5), bool)))
         for i, sl in enumerate(ndimage.find_objects(lab), 1):
@@ -182,12 +183,65 @@ def rules(img: np.ndarray, min_frac: float = 0.4, text_boxes: list | None = None
                 col = d[y0:y].any(axis=0)
                 xs = np.where(col)[0]
                 box = [int(xs.min()), y0, int(xs.max() - xs.min() + 1), y - y0]
-                continuous = col[xs.min():xs.max() + 1].mean() >= 0.95
-                crosses_text = any(_frac_inside(box, [tb[0], tb[1] - 2, tb[2], tb[3] + 4]) > 0 for tb in (text_boxes or []))
-                if continuous and not crosses_text:
-                    out.append({"box": box, "fill": _hex(img[y0:y][d[y0:y]].mean(axis=0))})
+                # columns covered by a text box crossing this row don't count (a divider interrupted by "or");
+                # a line of text itself leaves almost nothing once its own box is masked out
+                keep = np.ones(xs.max() - xs.min() + 1, bool)
+                for tb in (text_boxes or []):
+                    if tb[1] - 2 <= y0 <= tb[1] + tb[3] + 2:
+                        a0, a1 = max(tb[0] - 4, xs.min()), min(tb[0] + tb[2] + 4, xs.max() + 1)
+                        if a1 > a0:
+                            keep[a0 - xs.min():a1 - xs.min()] = False
+                seg = col[xs.min():xs.max() + 1][keep]
+                if keep.mean() >= 0.6 and seg.size and seg.mean() >= 0.95:
+                    fill = _hex(img[y0:y][d[y0:y]].mean(axis=0))
+                    if keep.all():
+                        out.append({"box": box, "fill": fill})
+                    else:   # interrupted by text ("— or —"): one rule per visible segment, so layout can flow around it
+                        run = np.flatnonzero(np.diff(np.concatenate([[0], (col[xs.min():xs.max() + 1] & keep).astype(int), [0]])))
+                        for a0, a1 in zip(run[::2], run[1::2]):
+                            if a1 - a0 >= 16:
+                                out.append({"box": [int(xs.min() + a0), y0, int(a1 - a0), y - y0], "fill": fill})
         y += 1
     return out
+
+
+def _border_and_radius(img: np.ndarray, b: dict, bg: np.ndarray) -> None:
+    """1 px ring just outside the block: uniform and distinct from fill and page → border (box grows by 1).
+    Corner radius: steps along the top-left diagonal until the fill colour starts, × 1/(1 − 1/√2)."""
+    H, W, _ = img.shape
+    x, y, w, h = b["box"]
+    fill = np.array([int(b["fill"][i:i + 2], 16) for i in (1, 3, 5)], np.float32)
+    if x >= 3 and y >= 3 and x + w + 3 < W and y + h + 3 < H and not b.get("border") and min(w, h) >= 8:
+        e = 10 if min(w, h) > 30 else 2   # skip rounded corners
+        sides = [img[y - 1, x + e:x + w - e], img[y + h, x + e:x + w - e], img[y + e:y + h - e, x - 1], img[y + e:y + h - e, x + w]]
+        beyond = [img[y - 3, x + e:x + w - e], img[y + h + 2, x + e:x + w - e], img[y + e:y + h - e, x - 3], img[y + e:y + h - e, x + w + 2]]
+        good = []
+        for sd, by in zip(sides, beyond):
+            if len(sd) < 3:
+                continue
+            med = np.median(sd, axis=0)
+            if (np.mean(np.linalg.norm(sd - med, axis=1) < 15) >= 0.8 and np.linalg.norm(med - fill) > 10
+                    and np.linalg.norm(med - np.median(by, axis=0)) > 10):
+                good.append(med)
+        if len(good) >= 3 and max(np.linalg.norm(a - c) for a in good for c in good) < 40:
+            b["border"] = _hex(np.median(np.array(good), axis=0))   # a drop shadow darkens the bottom side
+            # shadow: the 2 rows below the bottom border fade back to the page colour
+            below = [np.median(img[y + h + k, x + e:x + w - e], axis=0) for k in (1, 2)]
+            if all(np.linalg.norm(v - bg) > 4 for v in below[:1]) and np.linalg.norm(below[-1] - bg) < np.linalg.norm(below[0] - bg):
+                b["shadow"] = True
+            b["box"] = [x - 1, y - 1, w + 2, h + 2]
+            x, y, w, h = b["box"]
+    k = 0
+    while k < min(w, h) // 2 and np.linalg.norm(img[y + k, x + k] - fill) > 12:
+        k += 1
+    r = int(round(k / (1 - 2 ** -0.5))) if k else 0
+    side = min(w, h)
+    if r > side // 2:             # the walk ran past the corner: a pill if small, otherwise a measurement failure
+        r = side // 2 if side <= 60 else 0
+    if r > 32 and side > 120:     # large cards with radii > 32 px are implausible here; treat as failed
+        r = 0
+    if r >= 2:
+        b["radius"] = r
 
 
 def _inside(inner, outer, slack=2) -> bool:
@@ -203,7 +257,8 @@ def drop_caret(img: np.ndarray, line: dict) -> dict:
     x, y, w, h = line["box"]
     patch = img[max(0, y):y + h, max(0, x):x + w]
     ring = np.concatenate([patch[0], patch[-1], patch[:, 0], patch[:, -1]])
-    ink = np.linalg.norm(patch - np.median(ring, axis=0), axis=-1) > BG_THRESHOLD
+    dist = np.linalg.norm(patch - np.median(ring, axis=0), axis=-1)
+    ink = dist >= 0.5 * np.percentile(dist, 99)   # same 50 %-contrast rule as typography (halos made boxes 2 px tall)
     lab, n = ndimage.label(ink)
     comps = ndimage.find_objects(lab)
     if not comps:
@@ -239,6 +294,9 @@ def measure(png: bytes) -> dict:
         else:
             o["contains_text"] = [t["text"] for t in lines if _inside(t["box"], o["box"])][:4]
             blocks.append(o)
+    bg_c = background(img)
+    for b in blocks:                  # borders and corner radius, measured on every block
+        _border_and_radius(img, b, bg_c)
     for r in rules(img, text_boxes=text_boxes):   # thin horizontal dividers (a header's border-b)
         if all(_iou(r["box"], b["box"]) < 0.5 for b in blocks):
             blocks.append({"box": r["box"], "fill": r["fill"], "rule": True, "contains_text": []})

@@ -89,6 +89,26 @@ def infer(text: str, box, img: np.ndarray | None = None, weight_hint=None) -> di
     x, y, bw, bh = box
     if len(t) < 1 or bh <= 0:
         return {}
+    underline = False
+    if img is not None and bh >= 8:
+        # underline: a near-full-width ink run in the bottom rows, separate from the glyphs → measure without it
+        xi, yi = int(x), int(y)
+        patch = img[max(0, yi - 1):yi + int(bh) + 2, max(0, xi - 1):xi + int(bw) + 2]
+        ring = np.concatenate([patch[0], patch[-1], patch[:, 0], patch[:, -1]])
+        d = np.linalg.norm(patch - np.median(ring, axis=0), axis=-1)
+        ink = d >= 0.5 * np.percentile(d, 99) if d.max() > 30 else np.zeros(d.shape, bool)
+        rows = ink.mean(axis=1)
+        bottom = [k for k in range(len(rows) - 1, max(len(rows) - 5, 0), -1) if rows[k] >= 0.8]
+        if bottom:
+            top_of_line = min(bottom)
+            gap = top_of_line - 1
+            while gap > 0 and rows[gap] < 0.05:
+                gap -= 1
+            new_h = gap - 0 + 1 - 1   # rows above the gap, relative to the patch (patch starts 1 px above)
+            if new_h >= 5:
+                bh = new_h
+                underline = True
+                box = [x, y, bw, bh]
     observed = stroke_in_image(img, box) if img is not None and len(t) >= 2 else None
     best = None
     for w in WEIGHTS:
@@ -110,4 +130,5 @@ def infer(text: str, box, img: np.ndarray | None = None, weight_hint=None) -> di
     tracking = float(np.clip(tracking, -0.08, 0.15))
     if abs(tracking) < 0.006:
         tracking = 0.0
-    return {"size_px": int(round(fs)), "weight": w, "tracking_em": round(tracking, 3), "top_em": round(top, 3)}
+    return {"size_px": int(round(fs)), "weight": w, "tracking_em": round(tracking, 3), "top_em": round(top, 3),
+            "underline": underline}

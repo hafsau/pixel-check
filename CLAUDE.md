@@ -11,6 +11,10 @@ Handoff from a planning chat (Sep 22–29, 2026). This file is the **source of t
 - **What it does (simple version):** you give it three design images of one screen — mobile (390×844), tablet (768×1024), desktop (1280×800). An AI agent writes **one** React + Tailwind codebase, renders it at all three sizes inside a Nebius Token Factory Sandbox, compares each render to its design, and keeps fixing the code until all three match. The score is the **worst** of the three.
 - **Who it's for:** designers and front-end developers handing off responsive designs.
 - **Why it's different:** single-screenshot visual loops already exist (imugi, VisRefiner, UI2Code^N). None found that verify **multiple breakpoints from one codebase**. Never claim to be "the first agent that checks its work visually" — that's false.
+- **Scope (agreed Oct 1):** static responsive layout from design frames, with **functional basic controls** (real
+  `<input>`/`<button>`/`<a>`, a mobile hamburger that toggles the nav, default hover/focus styles), verified in the sandbox.
+  Interactions beyond basic controls (animations, designed open/hover states) are out of scope unless state frames are given
+  (stretch, see §4). Say this plainly in README, video and UI.
 - **Entrant:** Hafsa (solo), GitHub `hafsau`. Portfolio goal: AI Product Builder / Design Engineer. The UI and video are her edge — Design is 25% of the score.
 
 ## 2. The hackathon (hard requirements)
@@ -53,7 +57,8 @@ Organiser tips (Sep 24): name Nebius Token Factory + NVIDIA Nemotron in the desc
 | Web app (Oct 1) | `ui/`: Vite + React + TS + Tailwind, replay mode from `tools/export_run.py` bundles (`ui/public/runs/`, git-ignored; prod build strips them unless `PC_INCLUDE_RUNS=1`). Screens: Home (runs, live-mode placeholder), Run view (playback, 3 rows design/render/compare slider + difference, score chart, branch tree, agent log, sandbox log, critique), Result (code viewer, live resizable preview 320–1440). Tokens in `ui/src/styles/tokens.css`. `npm run build` clean |
 | Typography (Oct 1) | `orchestrator/typography.py`: size / weight / letter-spacing per OCR line from Inter's real glyph metrics (calibrated: OCR = 1.01× ink h, 0.99× ink w). On known renders: size ±1 px 98.5 %, weight 90 % |
 | Nemotron structural tools (Oct 1) | `jsx_tool.mjs structural`: set_layout / wrap / move / insert (text-free only) / remove / set_tag, 4 tests. Branch "nemotron-tools" replaces full rewrites. json_schema mode made Super return `{"calls": []}` always → free JSON + normaliser. Tools apply cleanly but have NOT improved scaffold code yet (vercel 44 → 10–24): the scaffold's flex-wrap/order structure is synthetic, so LLM restructuring breaks it |
-| Latest runs | netflix **82.1** (tablet 90.5, desktop 87.1), calcom **66.2** (desktop 88.0), vercel 44.1 (scaffold; cards not detected), lambda 29 |
+| Structure (Oct 1 pm) | Scaffold layout = recursive **X-Y cut** (horizontal bands consistent across breakpoints → side-by-side columns only when a tall item spans ≥ 2 stacked items; also inside blocks). **Nemotron names the regions** (header/nav/main/section/article/aside/footer) from an indented segment tree → applied with deterministic set_tag. (Nemotron grouping raw elements directly was unreliable — merged cards.) Functional controls: real `<input>` (typeable), `<button type=button>`, `<a href>`; renderer reports `controls` (inputs typeable, buttons focusable). Perception: subtle fills, borders (side-wise, shadow-tolerant), corner radius, shadow, interrupted dividers split, underline-aware typography. Regression guard `tests/test_scaffold_regression.py` |
+| Latest runs (Oct 1 pm) | netflix **82.7**, calcom **62.1**, vercel **55.0** (desktop 18 → 55) — $0.04–0.06/run. Lambda: perception JSON failure (Gemma), not re-run |
 | Scorer fix (Oct 1) | background = mode over 64-level bins (8-level bins merged black page + dark footer → false 0.26 layout). Attack regression re-run: all pass |
 | Coder model | Single-shot match on netflix: Super ~15–27, **Ultra (thinking off) 39–47** (~$0.024/call, 23 s). Thinking on/low → often "no code" (token budget) |
 | Spend | see `var/spend.jsonl` (≈ $1.6 by Oct 1) |
