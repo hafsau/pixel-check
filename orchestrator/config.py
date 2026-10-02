@@ -53,7 +53,8 @@ FALLBACK_PRICE = (1.0e-6, 3.0e-6)  # USD/token if a model is missing from the ca
 LEDGER_PATH = Path(os.environ.get("LEDGER_PATH", Path(__file__).resolve().parents[1] / "var" / "spend.jsonl"))
 
 # --- Loop ---
-INITIAL_SAMPLES = int(os.environ.get("INITIAL_SAMPLES", "3"))
+# Step D ablation (Oct 2): Ultra drafts and editing rounds added 0 points at 7–10× the cost → opt-in
+INITIAL_SAMPLES = int(os.environ.get("INITIAL_SAMPLES", "0"))
 BRANCHES = int(os.environ.get("BRANCHES", "3"))
-MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", "6"))
+MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", "0"))
 STOP_MATCH = float(os.environ.get("STOP_MATCH", "92"))

@@ -18,6 +18,12 @@ const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? pro
 const OUT_ROOT = path.resolve(arg("--out") || path.resolve(HERE, "../../benchmarks-dev"));
 const FONT_DIR = arg("--fonts");
 const ORACLE = process.argv.includes("--oracle");
+// state frames (interactions): --state <name> --click "<css selector>" [--bps mobile,tablet] — after the base page is
+// normalised, click the trigger and capture <bp>.<name>.{png,text.json,oracle.json,notext.png}; the trigger's box
+// (before the click) is stored in meta-<name>.json so the pipeline can find it in the base frame
+const STATE = arg("--state");
+const CLICK = arg("--click");
+const ONLY = (arg("--bps") || "").split(",").filter(Boolean);
 const BPS = { mobile: [390, 844], tablet: [768, 1024], desktop: [1280, 800] };
 
 const [slug, url] = process.argv.slice(2);
@@ -66,6 +72,7 @@ function replaceMedia() {
     const cs = getComputedStyle(n);
     if (decorative(n)) { n.style.setProperty("visibility", "hidden", "important"); continue; }
     const d = document.createElement("div");
+    d.dataset.pcMedia = "1";
     d.style.cssText = `display:${cs.display === "inline" ? "inline-block" : cs.display};` +
       `width:${r.width}px;height:${r.height}px;background:#d4d4d8;` +
       `border-radius:${cs.borderRadius};flex-shrink:0;margin:${cs.margin};vertical-align:middle;` +
@@ -102,6 +109,30 @@ function oracleDom([vw, vh]) {
   const dpath = (el) => { const parts = []; for (let a = el; a && a !== document.body; a = a.parentElement) {
     const sib = a.parentElement ? [...a.parentElement.children].indexOf(a) : 0; parts.push(`${a.tagName.toLowerCase()}:${sib}`); }
     return parts.reverse().join("/"); };
+  // visible = not clipped away by an overflow:hidden ancestor (collapsed submenus) and not under an OPAQUE layer at
+  // every sample point (an open menu over the hero). A transparent layer on top (a label over its input, a stretched
+  // link over a card) does not hide anything.
+  const clippedOut = (el, r) => {
+    const cx = r[0] + r[2] / 2, cy = r[1] + r[3] / 2;
+    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (cs.overflow === "visible" && cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+      const b = a.getBoundingClientRect();
+      if (cx < b.left - 1 || cx > b.right + 1 || cy < b.top - 1 || cy > b.bottom + 1) return true;
+    }
+    return false;
+  };
+  const coveredAt = (el, x, y) => {
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || hit === el || el.contains(hit)) return false;
+    for (let a = hit; a && !a.contains(el); a = a.parentElement) {
+      const c = rgb(getComputedStyle(a).backgroundColor);
+      if ((c && c.a > 0.5) || a.dataset.pcMedia) return true;
+    }
+    return false;
+  };
+  const onTop = (el, r) => !clippedOut(el, r) &&
+    [[0.5, 0.5], [0.2, 0.5], [0.8, 0.5]].some(([fx, fy]) => !coveredAt(el, r[0] + r[2] * fx, r[1] + r[3] * fy));
   const role = (el) => {
     const tag = (t) => el.closest(t);
     if (el.closest("button,[role=button],input[type=submit]")) return "button";
@@ -120,7 +151,7 @@ function oracleDom([vw, vh]) {
     const t = tt === "uppercase" ? raw.toUpperCase() : tt === "lowercase" ? raw.toLowerCase()
       : tt === "capitalize" ? raw.replace(/\b\w/g, (m) => m.toUpperCase()) : raw;
     const range = document.createRange(); range.selectNodeContents(n);
-    const lines = [...range.getClientRects()].map(clip).filter(Boolean);
+    const lines = [...range.getClientRects()].map(clip).filter(Boolean).filter((r) => onTop(el, r));
     if (!lines.length) continue;
     const cs = getComputedStyle(el); const c0 = rgb(cs.color);
     if (!c0 || c0.a < 0.05) continue;
@@ -132,7 +163,7 @@ function oracleDom([vw, vh]) {
   }
   for (const el of document.querySelectorAll("input,textarea")) {
     if (!visible(el) || el.value || !el.placeholder) continue;
-    const r = clip(el.getBoundingClientRect()); if (!r) continue;
+    const r = clip(el.getBoundingClientRect()); if (!r || !onTop(el, r)) continue;
     const ps = getComputedStyle(el, "::placeholder"); const cs = getComputedStyle(el); const c = rgb(ps.color) || rgb(cs.color);
     texts.push({ text: el.placeholder.replace(/\s+/g, " ").trim(), lines: [r], size_px: parseFloat(cs.fontSize),
       weight: Number(cs.fontWeight) || 400, color: c ? hex(c) : "#757575", letter_spacing_px: 0, underline: false,
@@ -143,6 +174,10 @@ function oracleDom([vw, vh]) {
     if (!visible(el)) continue;
     const cs = getComputedStyle(el); const R = el.getBoundingClientRect(); const box = clip(R);
     if (!box) continue;
+    // a box under an opaque layer everywhere we look (page content under an open menu) is not in the frame
+    const covered = clippedOut(el, box) || [[0.5, 0.5], [0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]]
+      .every(([fx, fy]) => coveredAt(el, box[0] + box[2] * fx, box[1] + box[3] * fy));
+    if (covered) continue;
     const bg = rgb(cs.backgroundColor); const under = beneath(el);
     const fill = bg && bg.a * opac(el) > 0.15 ? hex(seen(bg, el, under)) : null;
     // a translucent border (Tailwind black/10 on white) is visible: judge it by its blend over what is beneath
@@ -191,15 +226,27 @@ const browser = await chromium.launch();
 const meta = { slug, url, captured_at: new Date().toISOString(), dev_only: true, breakpoints: {} };
 try {
   for (const [bp, [w, h]] of Object.entries(BPS)) {
+    if (ONLY.length && !ONLY.includes(bp)) continue;
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
     const page = await ctx.newPage();
-    await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
+    // "networkidle" never comes on some pages (lambda.ai: background requests) — load, then idle if it comes
+    await page.goto(url, { waitUntil: "load", timeout: 60000 });
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
     await page.addStyleTag({ content: NORMALISE_CSS + (hideCss ? `${hideCss}{display:none!important}` : "") });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(extraWait);
     const replaced = await page.evaluate(replaceMedia);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(300);
+    const suffix = STATE ? `.${STATE}` : "";
+    if (STATE) {
+      const el = page.locator(CLICK).first();
+      const tb = await el.boundingBox();
+      meta.trigger = meta.trigger || {};
+      meta.trigger[bp] = { selector: CLICK, box: tb && [Math.round(tb.x), Math.round(tb.y), Math.round(tb.width), Math.round(tb.height)] };
+      await el.click();
+      await page.waitForTimeout(700);
+    }
     // Ground-truth visible text inside the viewport (for scorer tests and VLM accuracy in G3).
     const texts = await page.evaluate(([vw, vh]) => {
       const out = [];
@@ -217,16 +264,16 @@ try {
       }
       return out;
     }, [w, h]);
-    fs.writeFileSync(path.join(outDir, `${bp}.text.json`), JSON.stringify(texts, null, 1));
-    const file = path.join(outDir, `${bp}.png`);
+    fs.writeFileSync(path.join(outDir, `${bp}${suffix}.text.json`), JSON.stringify(texts, null, 1));
+    const file = path.join(outDir, `${bp}${suffix}.png`);
     await page.screenshot({ path: file, fullPage: false });
     if (ORACLE) {
       const dom = await page.evaluate(oracleDom, [w, h]);
-      fs.writeFileSync(path.join(outDir, `${bp}.oracle.json`), JSON.stringify(dom));
+      fs.writeFileSync(path.join(outDir, `${bp}${suffix}.oracle.json`), JSON.stringify(dom));
       await page.addStyleTag({ content: "*,*::before,*::after{color:transparent!important;-webkit-text-fill-color:transparent!important;" +
         "text-shadow:none!important;text-decoration-color:transparent!important}::placeholder{color:transparent!important}" });
       await page.waitForTimeout(150);
-      await page.screenshot({ path: path.join(outDir, `${bp}.notext.png`), fullPage: false });
+      await page.screenshot({ path: path.join(outDir, `${bp}${suffix}.notext.png`), fullPage: false });
     }
     meta.breakpoints[bp] = { width: w, height: h, media_replaced: replaced };
     console.log(`${slug} ${bp} ${w}x${h} media_replaced=${replaced}`);
@@ -235,4 +282,4 @@ try {
 } finally {
   await browser.close();
 }
-fs.writeFileSync(path.join(outDir, "meta.json"), JSON.stringify(meta, null, 2));
+fs.writeFileSync(path.join(outDir, STATE ? `meta-${STATE}.json` : "meta.json"), JSON.stringify(meta, null, 2));

@@ -43,12 +43,14 @@ def _background(img: np.ndarray) -> str:
     return "#" + "".join(f"{int(v):02x}" for v in c)
 
 
-def frame(slug: str, bp: str) -> dict:
+def frame(slug: str, bp: str, state: str | None = None) -> dict:
+    """state: an interaction state frame captured with capture.mjs --state (files <bp>.<state>.*)."""
     d = ROOT / "benchmarks-dev" / slug
-    img = np.asarray(Image.open(d / f"{bp}.png").convert("RGB")).astype(int)
-    nt = np.asarray(Image.open(d / f"{bp}.notext.png").convert("RGB")).astype(int)
+    sfx = f".{state}" if state else ""
+    img = np.asarray(Image.open(d / f"{bp}{sfx}.png").convert("RGB")).astype(int)
+    nt = np.asarray(Image.open(d / f"{bp}{sfx}.notext.png").convert("RGB")).astype(int)
     mask = np.abs(img - nt).sum(axis=2) > 40
-    dom = json.loads((d / f"{bp}.oracle.json").read_text())
+    dom = json.loads((d / f"{bp}{sfx}.oracle.json").read_text())
     texts = []
     for t in dom["texts"]:
         rects = sorted(t["lines"], key=lambda r: r[1])

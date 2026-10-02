@@ -17,13 +17,18 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "tools/capture/capture.mjs").read_bytes()
 
 
-def capture(sb: Sandbox, slug: str) -> Path:
+def capture(sb: Sandbox, slug: str, state: str | None = None, click: str | None = None, bps: str | None = None) -> Path:
+    """state/click/bps: capture an interaction state frame (tools/capture/capture.mjs --state)."""
     meta = json.loads((ROOT / "benchmarks-dev" / slug / "meta.json").read_text())
     hide = f' --hide "{meta["hide"]}"' if meta.get("hide") else ""
+    st = f' --state {state} --click \'{click}\'' + (f" --bps {bps}" if bps else "") if state else ""
     cmd = (f'cd /opt/pc && node /opt/pc/capture.mjs {slug}-lx "{meta["url"]}" --out /work/cap --fonts /opt/pc/fonts '
-           f'--oracle --wait 2000{hide}')
-    r = sb.run(cmd, files={"/opt/pc/capture.mjs": SCRIPT}, timeout_s=420, networking=True)
-    print(slug, r.status, r.exit_code, f"${r.cost}", r.stdout[-400:], r.stderr[-600:])
+           f'--oracle --wait 2000{hide}{st}')
+    for attempt in range(2):     # live pages time out now and then (lambda.ai ~1 in 4): one retry
+        r = sb.run(cmd, files={"/opt/pc/capture.mjs": SCRIPT}, timeout_s=420, networking=True)
+        print(slug, r.status, r.exit_code, f"${r.cost}", r.stdout[-400:], r.stderr[-600:] if r.exit_code else "")
+        if r.exit_code == 0 and r.result_image:
+            break
     if r.exit_code != 0 or not r.result_image:
         raise RuntimeError(f"capture failed for {slug}")
     out = ROOT / "benchmarks-dev" / f"{slug}-lx"
@@ -35,5 +40,7 @@ def capture(sb: Sandbox, slug: str) -> Path:
 
 if __name__ == "__main__":
     sb = Sandbox()
-    for s in sys.argv[1:]:
-        print(capture(sb, s))
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    opt = lambda k: next((a.split("=", 1)[1] for a in sys.argv if a.startswith(k + "=")), None)
+    for s in args:
+        print(capture(sb, s, opt("--state"), opt("--click"), opt("--bps")))
