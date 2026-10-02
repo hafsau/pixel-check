@@ -69,11 +69,13 @@ class Sandbox:
         raise RuntimeError("file upload failed after retries")
 
     def run(self, command: str, *, image: str = config.RUNTIME_IMAGE, files: dict[str, bytes] | None = None,
-            disposable: bool = False, timeout_s: int = config.SANDBOX_TIMEOUT_S) -> RunResult:
+            disposable: bool = False, timeout_s: int = config.SANDBOX_TIMEOUT_S, networking: bool = False) -> RunResult:
+        """networking stays OFF for every render/score run; only the dev capture tool turns it on (to load the page
+        being captured in the scoring image's Linux Chromium)."""
         mapped = {path: {"uuid": self.upload(data), "mode": "0644"} for path, data in (files or {}).items()}
         body = {
             "image": image, "command": command, "shell": True,
-            "networking": {"enabled": False},
+            "networking": {"enabled": bool(networking)},
             "timeout": timeout_s, "disposable": disposable,
             "truncate_output_at": config.SANDBOX_OUTPUT_CAP, "files": mapped,
         }

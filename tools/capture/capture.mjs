@@ -2,14 +2,22 @@
 // so the sandbox can fairly reproduce it (Inter/Plex fonts forced, media → solid blocks,
 // animations off). Output is git-ignored; never commit, publish or report these.
 //
-// Usage: node capture.mjs <slug> <url> [--wait ms] [--hide "<css selectors>"]
+// Usage: node capture.mjs <slug> <url> [--wait ms] [--hide "<css selectors>"] [--out dir] [--fonts dir] [--oracle]
+//   --out    output root (default benchmarks-dev/)
+//   --fonts  directory holding inter-latin-<w>-normal.woff2 etc. (default: @fontsource in node_modules; the sandbox
+//            runtime image has them in /opt/pc/fonts)
+//   --oracle also dump <bp>.oracle.json (exact text lines + computed styles + painted boxes from the live DOM) and
+//            <bp>.notext.png (text made transparent) — the oracle spec for error attribution (tools/oracle_spec.py)
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const OUT_ROOT = path.resolve(HERE, "../../benchmarks-dev");
+const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
+const OUT_ROOT = path.resolve(arg("--out") || path.resolve(HERE, "../../benchmarks-dev"));
+const FONT_DIR = arg("--fonts");
+const ORACLE = process.argv.includes("--oracle");
 const BPS = { mobile: [390, 844], tablet: [768, 1024], desktop: [1280, 800] };
 
 const [slug, url] = process.argv.slice(2);
@@ -24,7 +32,7 @@ if (!slug || !url) {
 }
 
 const font = (pkg, file) =>
-  fs.readFileSync(path.join(HERE, "node_modules/@fontsource", pkg, "files", file)).toString("base64");
+  fs.readFileSync(FONT_DIR ? path.join(FONT_DIR, file) : path.join(HERE, "node_modules/@fontsource", pkg, "files", file)).toString("base64");
 const face = (family, pkg, w) =>
   `@font-face{font-family:'${family}';font-weight:${w};font-style:normal;` +
   `src:url(data:font/woff2;base64,${font(pkg, `${pkg}-latin-${w}-normal.woff2`)}) format('woff2');}`;
@@ -68,6 +76,89 @@ function replaceMedia() {
   return nodes.length;
 }
 
+// Oracle: what the frame shows, from the DOM (runs in the page). Text: one item per text node (or input placeholder),
+// per-line rects, computed font size / weight / colour / letter-spacing / underline, a role from the element.
+// Boxes: elements that paint (background different from what is beneath, a border, or a shadow), clipped to the
+// viewport; one-sided borders become thin rules.
+function oracleDom([vw, vh]) {
+  // any CSS colour (rgb, oklch, lab, color(...) — Tailwind v4 uses oklch) → sRGB via a 1×1 canvas
+  const cv = document.createElement("canvas"); cv.width = cv.height = 1;
+  const cx = cv.getContext("2d", { willReadFrequently: true });
+  const rgb = (c) => { if (!c || c === "transparent") return null;
+    cx.clearRect(0, 0, 1, 1); cx.fillStyle = "#000"; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = cx.getImageData(0, 0, 1, 1).data; return a ? { r, g, b, a: a / 255 } : null; };
+  const hex = (c) => "#" + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
+  const visible = (el) => { for (let a = el; a && a !== document.documentElement; a = a.parentElement) {
+    const cs = getComputedStyle(a); if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) < 0.05) return false; } return true; };
+  const beneath = (el) => { for (let a = el.parentElement; a; a = a.parentElement) {
+    const c = rgb(getComputedStyle(a).backgroundColor); if (c && c.a > 0.5) return hex(c); } return "#ffffff"; };
+  const clip = (r) => { const x0 = Math.max(0, r.left), y0 = Math.max(0, r.top), x1 = Math.min(vw, r.right), y1 = Math.min(vh, r.bottom);
+    return x1 - x0 >= 1 && y1 - y0 >= 1 ? [Math.round(x0), Math.round(y0), Math.round(x1 - x0), Math.round(y1 - y0)] : null; };
+  const role = (el) => {
+    const tag = (t) => el.closest(t);
+    if (el.closest("button,[role=button],input[type=submit]")) return "button";
+    if (/^H[1-3]$/.test(el.tagName) || el.closest("h1,h2,h3")) return "heading";
+    if (el.closest("h4,h5,h6")) return "subheading";
+    if (el.closest("a")) return el.closest("nav,header") ? "nav" : "link";
+    if (el.closest("label")) return "label";
+    return "body";
+  };
+  const texts = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = n.textContent.replace(/\s+/g, " ").trim(); const el = n.parentElement;
+    if (!t || !el || !visible(el)) continue;
+    const range = document.createRange(); range.selectNodeContents(n);
+    const lines = [...range.getClientRects()].map(clip).filter(Boolean);
+    if (!lines.length) continue;
+    const cs = getComputedStyle(el); const c = rgb(cs.color);
+    if (!c || c.a < 0.05) continue;
+    texts.push({ text: t, lines, size_px: parseFloat(cs.fontSize), weight: Number(cs.fontWeight) || 400, color: hex(c),
+      letter_spacing_px: cs.letterSpacing === "normal" ? 0 : parseFloat(cs.letterSpacing) || 0,
+      underline: (cs.textDecorationLine || "").includes("underline"), role: role(el), tag: el.tagName.toLowerCase(),
+      align: cs.textAlign });
+  }
+  for (const el of document.querySelectorAll("input,textarea")) {
+    if (!visible(el) || el.value || !el.placeholder) continue;
+    const r = clip(el.getBoundingClientRect()); if (!r) continue;
+    const ps = getComputedStyle(el, "::placeholder"); const cs = getComputedStyle(el); const c = rgb(ps.color) || rgb(cs.color);
+    texts.push({ text: el.placeholder.replace(/\s+/g, " ").trim(), lines: [r], size_px: parseFloat(cs.fontSize),
+      weight: Number(cs.fontWeight) || 400, color: c ? hex(c) : "#757575", letter_spacing_px: 0, underline: false,
+      role: "input-placeholder", tag: el.tagName.toLowerCase(), placeholder: true });
+  }
+  const blocks = [];
+  for (const el of document.body.querySelectorAll("*")) {
+    if (!visible(el)) continue;
+    const cs = getComputedStyle(el); const R = el.getBoundingClientRect(); const box = clip(R);
+    if (!box) continue;
+    const bg = rgb(cs.backgroundColor); const under = beneath(el);
+    const fill = bg && bg.a > 0.5 ? hex(bg) : null;
+    const side = (s) => { const w = parseFloat(cs[`border${s}Width`]); const c = rgb(cs[`border${s}Color`]);
+      return w >= 0.5 && cs[`border${s}Style`] !== "none" && c && c.a > 0.3 ? { w, c: hex(c) } : null; };
+    const sides = { Top: side("Top"), Right: side("Right"), Bottom: side("Bottom"), Left: side("Left") };
+    // a bordered box cut by the viewport edge is still a bordered box (not three loose rules)
+    const cut = { Top: R.top < 0, Right: R.right > vw, Bottom: R.bottom > vh, Left: R.left < 0 };
+    const nSides = Object.values(sides).filter(Boolean).length;
+    const all = nSides >= 2 && Object.keys(sides).every((k) => sides[k] || cut[k]) ? (sides.Top || sides.Left || sides.Right || sides.Bottom) : null;
+    const shadow = cs.boxShadow && cs.boxShadow !== "none";
+    const paintsFill = fill && fill !== under;
+    if (paintsFill || all || shadow) {
+      blocks.push({ box, fill: paintsFill || all || shadow ? fill : null, border: all ? all.c : null,
+        radius: Math.round(parseFloat(cs.borderTopLeftRadius) || 0), shadow: !!shadow, tag: el.tagName.toLowerCase() });
+    }
+    if (!all) for (const [s, v] of Object.entries(sides)) {
+      if (!v) continue;
+      const r = s === "Top" ? [R.left, R.top, R.width, v.w] : s === "Bottom" ? [R.left, R.bottom - v.w, R.width, v.w]
+        : s === "Left" ? [R.left, R.top, v.w, R.height] : [R.right - v.w, R.top, v.w, R.height];
+      const rb = clip({ left: r[0], top: r[1], right: r[0] + r[2], bottom: r[1] + r[3] });
+      if (rb && (rb[2] >= 8 || rb[3] >= 8)) blocks.push({ box: rb, fill: v.c, rule: true, tag: el.tagName.toLowerCase() });
+    }
+  }
+  const pageBg = rgb(getComputedStyle(document.body).backgroundColor);
+  const htmlBg = rgb(getComputedStyle(document.documentElement).backgroundColor);
+  return { texts, blocks, background: pageBg && pageBg.a > 0.5 ? hex(pageBg) : htmlBg && htmlBg.a > 0.5 ? hex(htmlBg) : "#ffffff" };
+}
+
 const outDir = path.join(OUT_ROOT, slug);
 fs.mkdirSync(outDir, { recursive: true });
 const browser = await chromium.launch();
@@ -103,6 +194,14 @@ try {
     fs.writeFileSync(path.join(outDir, `${bp}.text.json`), JSON.stringify(texts, null, 1));
     const file = path.join(outDir, `${bp}.png`);
     await page.screenshot({ path: file, fullPage: false });
+    if (ORACLE) {
+      const dom = await page.evaluate(oracleDom, [w, h]);
+      fs.writeFileSync(path.join(outDir, `${bp}.oracle.json`), JSON.stringify(dom));
+      await page.addStyleTag({ content: "*,*::before,*::after{color:transparent!important;-webkit-text-fill-color:transparent!important;" +
+        "text-shadow:none!important;text-decoration-color:transparent!important}::placeholder{color:transparent!important}" });
+      await page.waitForTimeout(150);
+      await page.screenshot({ path: path.join(outDir, `${bp}.notext.png`), fullPage: false });
+    }
     meta.breakpoints[bp] = { width: w, height: h, media_replaced: replaced };
     console.log(`${slug} ${bp} ${w}x${h} media_replaced=${replaced}`);
     await ctx.close();
