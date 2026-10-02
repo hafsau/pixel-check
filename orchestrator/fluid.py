@@ -659,7 +659,7 @@ def _container(u, bp, intent):
     The design width is reproduced either way; the choice only matters between / beyond the frames.
     intent (desktop only, from the planner): "full" = stretch edge to edge beyond 1280; "centred" = the 1280 column
     stays centred (the band keeps its own gutters inside it)."""
-    lg, rg = u[0], W[bp] - (u[0] + u[2])
+    lg, rg = max(0, u[0]), W[bp] - (u[0] + u[2])   # content a pixel left of the frame (a shifted panel): no negative pad
     centred = abs(lg - rg) <= max(12, 0.04 * W[bp])
     c = lambda maxw, mx, pl, pr: {"maxw": maxw, "mx": mx, "pl": _px("pl", pl), "pr": _px("pr", pr)}
     if centred and u[2] < 0.8 * W[bp] and min(lg, rg) > 24:   # narrow centred column: its width is a maximum
@@ -1058,7 +1058,11 @@ def _apply_triggers(items: list[Item], triggers: dict | None) -> dict:
             target = min(holders, key=lambda c: min(c.at[bp]["box"][2] * c.at[bp]["box"][3] for bp in c.at), default=None)
         if target is None:
             inside = [c for c in items if any(bp in c.at and _centre(_box(c, bp), b, 0) for bp, b in boxes.items())]
-            if inside:
+            if len(inside) == 1 and inside[0].kind == "block":
+                # one icon inside a larger button box (vercel: 24 px icon, 44 px button): mark the icon itself — a
+                # bigger synthetic holder regrouped the rows around it and moved the page
+                target = inside[0]
+            elif inside:
                 target = Item(f"trigger:{name}", "block")
                 target.at = {bp: {"box": list(b), "fill": None, "border": None, "radius": None, "shadow": False}
                              for bp, b in boxes.items()}
@@ -1085,8 +1089,20 @@ def _mark_trigger(lines: list[str], name: str) -> list[str]:
     m = re.match(r"<(\w+)", stripped)
     tag = m.group(1)
     rest = stripped[m.end():]
-    rest = rest.replace(' type="button"', "")
+    rest = rest.replace(' type="button"', "").replace(' aria-hidden="true"', "")   # a button stays visible to AT
     lines = list(lines)
+    cm = re.search(r'className="([^"]*)"', rest)
+    if len(lines) == 1 and stripped.rstrip().endswith("/>") and cm:
+        # the trigger IS an icon block (vercel: a 24 px placeholder): its look moves to a child so the open look can
+        # replace it; the button keeps the layout classes (same size, same place)
+        toks = cm.group(1).split()
+        visual = [t for t in toks if re.match(r"(?:[\w-]+:)*(?:bg-|border|rounded|shadow)", t)]
+        layout = [t for t in toks if t not in visual] + ["relative"]
+        head = rest[:cm.start()] + f'className="{" ".join(layout)}"' + rest[cm.end():]
+        head = head.rstrip()[:-2].rstrip()
+        lines[0] = (f'{pad}<button type="button" data-trigger="{name}"{head}>'
+                    f'<span aria-hidden="true" className="absolute inset-0 {" ".join(visual)}" /></button>')
+        return lines
     lines[0] = f'{pad}<button type="button" data-trigger="{name}"{rest}'
     if not stripped.rstrip().endswith("/>"):
         lines[-1] = lines[-1].replace(f"</{tag}>", "</button>")

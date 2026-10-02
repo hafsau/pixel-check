@@ -13,7 +13,7 @@ from collections import Counter
 from .fluid import compile_fluid
 
 SIZES = {"mobile": (390, 844), "tablet": (768, 1024), "desktop": (1280, 800)}
-from .states import backdrop, classify, dim_region, panel_of, state_diff, trigger_look
+from .states import backdrop, backdrop_fit, classify, dim_region, panel_of, panel_surface, state_diff, trigger_look
 
 
 def _shift(item: dict, dx: float, dy: float) -> dict:
@@ -37,7 +37,7 @@ def compile_panel(base_spec: dict, states: dict, name: str = "Panel", triggers: 
     diffs = {bp: state_diff(base_spec["breakpoints"][bp], f, triggers.get(bp))
              for bp, f in states.items() if bp in base_spec["breakpoints"]}
     tchg = {bp: d["trigger_changes"] for bp, d in diffs.items()}
-    back, look = {}, {}
+    back, look, fill = {}, {}, {}
     for bp, d in diffs.items():     # images: {bp: (base png, state png)} → a dimming layer behind the panel
         back[bp] = None
         if images and bp in images:
@@ -63,14 +63,31 @@ def compile_panel(base_spec: dict, states: dict, name: str = "Panel", triggers: 
                 covered = bool(d["panel"]) and any(t["box"][1] + t["box"][3] / 2 > d["panel"][1]
                                                    for t in d["disappeared"]["texts"])
                 d["kind"] = classify(d["panel"], W, H, covered)
+            veil = None
+            if dr is None:
+                # no constant dimming (a blurred / tinted page behind a drawer): the panel's own surface, measured
+                ps = panel_surface(b_img, s_img, exclude=ex)
+                if ps:
+                    sx, sy, sw, sh = ps["box"]
+                    inside = lambda it: (sx - 4 <= it["box"][0] + it["box"][2] / 2 <= sx + sw + 4 and
+                                         sy - 4 <= it["box"][1] + it["box"][3] / 2 <= sy + sh + 4)
+                    surface = lambda it: it["box"][2] * it["box"][3] >= 0.8 * sw * sh   # the surface itself
+                    d["appeared"] = {"texts": [t for t in d["appeared"]["texts"] if inside(t)],
+                                     "blocks": [k for k in d["appeared"]["blocks"] if inside(k) and not surface(k)]}
+                    d["panel"] = ps["box"]
+                    W, H = (states[bp].get("size") or [b_img.shape[1], b_img.shape[0]])
+                    d["kind"] = classify(d["panel"], W, H, False)
+                    fill[bp] = ps["fill"]
+                    veil = backdrop_fit(b_img, s_img, ps["box"], exclude=ex)
             if d["panel"]:
-                back[bp] = backdrop(b_img, s_img, d["panel"], exclude=ex)
+                back[bp] = veil if veil is not None else backdrop(b_img, s_img, d["panel"], exclude=ex)
             if triggers.get(bp):
                 look[bp] = trigger_look(b_img, s_img, triggers[bp])
 
     live = {bp: d for bp, d in diffs.items() if d["kind"] != "none"}
     if not live:
-        return {"jsx": None, "kind": "none", "panel": {}, "diff": diffs, "trigger_changes": tchg, "backdrop": back, "trigger_look": look}
+        return {"jsx": None, "kind": "none", "panel": {}, "diff": diffs, "trigger_changes": tchg, "backdrop": back,
+                "trigger_look": look, "panel_fill": fill}
     kind = Counter(d["kind"] for d in live.values()).most_common(1)[0][0]
     for bp, d in live.items():   # an overlay spans the viewport (perception only sees its content's extent)
         if d["kind"] == "overlay":
@@ -122,22 +139,35 @@ def compile_panel(base_spec: dict, states: dict, name: str = "Panel", triggers: 
     if tjsx:
         jsx = jsx + "\n" + tjsx
     return {"jsx": jsx, "kind": kind, "panel": panel, "diff": diffs, "trigger_changes": tchg, "backdrop": back,
-            "trigger_look": look, "components": components, "trigger_component": tname if tjsx else None}
+            "trigger_look": look, "components": components, "trigger_component": tname if tjsx else None,
+            "panel_fill": fill}
 
 
 def compile_trigger_look(look: dict | None, name: str) -> str | None:
     """The trigger's open look (states.trigger_look, read from the images) as a component placed inside the trigger:
-    shape "x" = two 2 px bars of the measured colour, rotated ±45°, crossing at the centre of the measured box.
+    shape "x" = two 2 px bars of the measured colour, rotated ±45°, crossing at the centre of the measured box;
+    shape "block" = one solid span (a media placeholder).
     Measurable, so compiled — the writer only decides when to show it."""
-    if not look or look.get("shape") != "x":
+    if not look or look.get("shape") not in ("x", "block"):
         return None
     x, y, w, h = look["box"]
     c = look["fill"]
+    if look.get("trigger_size"):
+        # from the trigger's centre: the marked element can be smaller than the captured trigger (a 24 px icon in a
+        # 44 px button)
+        tw, th = look["trigger_size"]
+        off = lambda v: f"calc(50%{'+' if v >= 0 else '-'}{abs(round(v))}px)"
+        L, T = off(x - tw / 2), off(y - th / 2)
+    else:
+        L, T = f"{x}px", f"{y}px"
+    if look["shape"] == "block":     # a solid patch (a media placeholder): one span of the measured box and colour
+        return (f"function {name}() {{\n  return (\n    <span aria-hidden=\"true\" className=\"absolute left-[{L}] "
+                f"top-[{T}] w-[{w}px] h-[{h}px] bg-[{c}] pointer-events-none\" />\n  );\n}}\n")
     bar = round((w * w + h * h) ** 0.5)
     left = round(x + w / 2 - bar / 2)
     top = round(y + h / 2 - 1)
     b = f"absolute left-[{left}px] top-[{top}px] w-[{bar}px] h-[2px] bg-[{c}]"
-    return (f"function {name}() {{\n  return (\n    <span aria-hidden=\"true\" className=\"absolute left-[{x}px] top-[{y}px] "
+    return (f"function {name}() {{\n  return (\n    <span aria-hidden=\"true\" className=\"absolute left-[{L}] top-[{T}] "
             f"w-[{w}px] h-[{h}px] pointer-events-none\">\n      <span className=\"{b.replace(f'left-[{left}px] top-[{top}px]', f'left-[{left - x}px] top-[{top - y}px]')} rotate-45\" />\n"
             f"      <span className=\"{b.replace(f'left-[{left}px] top-[{top}px]', f'left-[{left - x}px] top-[{top - y}px]')} -rotate-45\" />\n"
             f"    </span>\n  );\n}}\n")

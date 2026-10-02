@@ -1,6 +1,7 @@
 """Run the interaction pipeline on a dev page with a captured state (docs/INTERACTIONS.md).
 
     PYTHONPATH=.:sandbox .venv/bin/python tools/interact_run.py <page> --state=menu [--oracle] [--sandbox] [--attempts=3]
+        [--template]   (deterministic baseline, orchestrator/fallback.py — no model)
 
 Base spec: perception (out/specs/<page>-lx.json) or --oracle; state frames: perceived from <bp>.<state>.png the same
 way (cached as out/specs/<page>-lx.<state>.json) or --oracle. Trigger boxes from meta-<state>.json. Runner: local
@@ -14,12 +15,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from orchestrator.interact_loop import local_runner, run_interaction  # noqa: E402
+from orchestrator.interact_loop import local_runner, run_interaction, run_template, sandbox_cost  # noqa: E402
 from orchestrator.perceive import perceive  # noqa: E402
 from orchestrator.tf_client import TFClient  # noqa: E402
 
 
-def main(page: str, state: str, oracle: bool, sandbox: bool, attempts: int):
+def main(page: str, state: str, oracle: bool, sandbox: bool, attempts: int, template: bool = False):
     d = ROOT / "benchmarks-dev" / f"{page}-lx"
     meta = json.loads((d / f"meta-{state}.json").read_text())
     trig = {bp: v["box"] for bp, v in meta["trigger"].items() if v.get("box")}
@@ -41,27 +42,33 @@ def main(page: str, state: str, oracle: bool, sandbox: bool, attempts: int):
     if sandbox:
         from orchestrator.interact_loop import sandbox_runner
         runner = sandbox_runner
-    out = ROOT / "out" / "interact" / page / state / (("oracle" if oracle else "perception") + ("-sandbox" if sandbox else ""))
+    out = ROOT / "out" / "interact" / page / state / (("oracle" if oracle else "perception") + ("-sandbox" if sandbox else "")
+                                                      + ("-template" if template else ""))
     if out.exists():                 # stale attempts from an earlier run must not leak into this one's record
         import shutil
         shutil.rmtree(out)
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    res = run_interaction(base, states, trig, targets, state, client, runner, out=out, max_attempts=attempts)
+    res = (run_template(base, states, trig, targets, state, runner, out=out) if template else
+           run_interaction(base, states, trig, targets, state, client, runner, out=out, max_attempts=attempts))
     for a in res["attempts"]:
         v = a["verdict"]
         print(f"attempt {a['attempt']}: pass {v['pass']}  state scores {v.get('state_scores')}  failures {v['failures'][:4]}")
-    summary = {"page": page, "state": state, "oracle": oracle, "pass": res["pass"], "best_attempt": res["best_attempt"],
+    summary = {"page": page, "state": state, "oracle": oracle, "writer": "template" if template else "nemotron", "pass": res["pass"], "best_attempt": res["best_attempt"],
                "kind": res["kind"], "attempts": [{"attempt": a["attempt"], "verdict": a["verdict"], "sections": a["sections"]}
                                                  for a in res["attempts"]],
-               "usd": round(client.run_spend, 4), "seconds": round(time.time() - t0, 1),
-               "sandbox": [json.loads(p.read_text()) for p in sorted(out.glob("attempt*/sandbox.json"))]}
+               "model_usd": round(client.run_spend, 4), "sandbox_usd": round(sandbox_cost(out), 4),
+               "usd": round(client.run_spend + sandbox_cost(out), 4), "seconds": round(time.time() - t0, 1),
+               "base_expected": res.get("base_expected"),
+               "sandbox": [json.loads(p.read_text()) for p in sorted(out.glob("*/sandbox.json"))]}
     (out / "result.json").write_text(json.dumps(summary, indent=1))
     if res["code"]:
         (out / "App.jsx").write_text(res["code"])
-    print(f"pass {res['pass']}  best attempt {res['best_attempt']}  ${summary['usd']}  {summary['seconds']}s  → {out}")
+    print(f"pass {res['pass']}  best attempt {res['best_attempt']}  ${summary['usd']} (model ${summary['model_usd']} + "
+          f"sandbox ${summary['sandbox_usd']})  {summary['seconds']}s  → {out}")
 
 
 if __name__ == "__main__":
     opt = lambda k, d=None: next((a.split("=", 1)[1] for a in sys.argv if a.startswith(k + "=")), d)
-    main(sys.argv[1], opt("--state", "menu"), "--oracle" in sys.argv, "--sandbox" in sys.argv, int(opt("--attempts", 3)))
+    main(sys.argv[1], opt("--state", "menu"), "--oracle" in sys.argv, "--sandbox" in sys.argv, int(opt("--attempts", 3)),
+         "--template" in sys.argv)

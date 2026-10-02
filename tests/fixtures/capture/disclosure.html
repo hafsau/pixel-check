@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>body{margin:0;background:#000;color:#fff}</style></head>
+<body>
+  <button id="t" style="margin:20px;display:flex;gap:4px;background:none;border:0;color:#fff;font-size:16px">Get help
+    <span id="icon"><svg width="16" height="16"><rect width="16" height="16" fill="#ff0000"/></svg></span></button>
+  <div id="more" style="display:none;margin:0 20px">
+    <a href="#" style="color:#fff">Forgot email?</a>
+    <svg id="new" width="32" height="32" style="display:block;margin-top:8px"><rect width="32" height="32" fill="#ff0000"/></svg>
+  </div>
+  <p style="margin:20px">Footer text</p>
+  <script>
+    document.getElementById("t").addEventListener("click", () => {
+      document.getElementById("more").style.display = "block";
+      // a re-render swaps the chevron for a new icon element (React does this)
+      document.getElementById("icon").innerHTML = '<svg width="16" height="16"><rect width="16" height="16" fill="#ff0000"/></svg>';
+    });
+  </script>
+</body></html>

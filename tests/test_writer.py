@@ -268,3 +268,116 @@ def test_prompt_offers_compiled_trigger_look_component():
     write_interaction(c, dict(FACTS, trigger_open_component="MenuTriggerOpen"), "menu")
     prompt = c.calls[0]["messages"][-1]["content"]
     assert "<MenuTriggerOpen />" in prompt
+
+
+# Gate B: inline interactions (a disclosure / accordion) — the panel is mounted in the page flow right after the
+# trigger's row, so the content below moves down by itself (netflix "Get help")
+INLINE_BASE = '''export default function App() {
+  return (
+    <div className="flow-root min-h-screen w-full font-sans bg-[#000000]">
+      <div data-seg="S5" className="flow-root w-full mt-[48px]">
+        <div className="w-full pl-[20px]">
+          <div className="flex flex-row flex-wrap w-full">
+            <button type="button" data-trigger="help" className="flex w-[83px] h-[20px]">
+              <span className="text-[16px] text-[#ffffff]">Get help</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div data-seg="S6" className="flow-root w-full mt-[38px]">
+        <p className="text-[13px] text-[#808080]">This page is protected</p>
+      </div>
+    </div>
+  );
+}
+'''
+INLINE_PANEL = '''function HelpPanel({ className = "" }) {
+  return (
+    <div className={`w-full ${className}`}>
+      <a href="#" className="text-[14px] text-[#ffffff] underline">Forgot email?</a>
+    </div>
+  );
+}
+'''
+INLINE_REPLY = '''### HOOKS
+const [helpOpen, setHelpOpen] = useState(false);
+### TRIGGER_PROPS
+onClick={() => setHelpOpen((o) => !o)} aria-expanded={helpOpen} aria-controls="help-panel"
+### TRIGGER_OPEN
+### INLINE
+{helpOpen && (<div id="help-panel" className="mt-[15px]"><HelpPanel /></div>)}
+'''
+
+
+def test_parse_sections_inline_without_overlay():
+    s = parse_sections(INLINE_REPLY)
+    assert s["INLINE"].startswith("{helpOpen &&") and not s.get("OVERLAY")
+
+
+def test_parse_sections_needs_overlay_or_inline():
+    with pytest.raises(WriterFormatError, match="OVERLAY or INLINE"):
+        parse_sections(INLINE_REPLY.split("### INLINE")[0])
+
+
+def test_assemble_inline_goes_right_after_the_triggers_row():
+    code = assemble(INLINE_BASE, INLINE_PANEL, parse_sections(INLINE_REPLY), "help")
+    i_row_end = code.index("</div>", code.index("</button>"))           # the trigger's row closes here
+    i_panel = code.index('id="help-panel"')
+    assert i_row_end < i_panel < code.index('data-seg="S6"')            # inside S5's container, before the next band
+    between = code[i_row_end + len("</div>"):i_panel]
+    assert "</div>" not in between                                       # not after the container / band closed
+    assert code.count('id="help-panel"') == 1 and lint(code)["ok"], lint(code)
+
+
+def test_assemble_inline_and_overlay_together():
+    reply = INLINE_REPLY + '### OVERLAY\n{helpOpen && <div aria-hidden="true" className="fixed inset-0 bg-[#000000]/50" />}\n'
+    code = assemble(INLINE_BASE, INLINE_PANEL, parse_sections(reply), "help")
+    assert code.index('id="help-panel"') < code.index('data-seg="S6"') < code.index("fixed inset-0")
+    assert lint(code)["ok"]
+
+
+def test_prompt_explains_inline_kind_with_the_measured_gap():
+    from orchestrator.writer import WRITER_SYSTEM, _facts_text
+    f = {"trigger_tag": '<button type="button" data-trigger="help">', "panel_component": "HelpPanel",
+         "kind": {"mobile": "inline"}, "panel": {"mobile": [20, 438, 262, 43]}, "background": {"mobile": "#000000"},
+         "inline_gap": {"mobile": 15}, "hidden_at": []}
+    t = _facts_text(f, "help")
+    assert "kind inline" in t and "gap below the trigger's row 15 px" in t
+    assert "### INLINE" in WRITER_SYSTEM and "inline" in WRITER_SYSTEM.lower()
+
+
+def test_assemble_inline_when_the_trigger_sits_directly_in_the_root():
+    base = '''export default function App() {
+  return (
+    <div className="flow-root min-h-screen w-full">
+      <button type="button" data-trigger="help" className="w-[83px] h-[20px]">Get help</button>
+      <p className="text-[13px]">Below</p>
+    </div>
+  );
+}
+'''
+    code = assemble(base, INLINE_PANEL, parse_sections(INLINE_REPLY), "help")
+    assert code.index("</button>") < code.index('id="help-panel"') < code.index(">Below<") or \
+        code.index(">Below<") < code.index('id="help-panel"') < code.rindex("</div>")
+    assert lint(code)["ok"], lint(code)
+
+
+def test_prompt_tells_the_writer_when_the_panel_covers_the_trigger():
+    from orchestrator.writer import WRITER_SYSTEM, _facts_text
+    f = {"trigger_tag": "<button>", "panel_component": "MenuPanel", "kind": {"mobile": "drawer"},
+         "panel": {"mobile": [99, 0, 291, 844]}, "background": {"mobile": "#ffffff"}, "hidden_at": [],
+         "trigger_box": {"mobile": [349, 10, 36, 36]}, "trigger_covered": {"mobile": True}}
+    t = _facts_text(f, "menu")
+    assert "the open panel covers the trigger (box [349, 10, 36, 36])" in t
+    assert "covers the trigger" in WRITER_SYSTEM and "z-[1000]" in WRITER_SYSTEM
+
+
+@pytest.mark.parametrize("filler", ["(empty)", "empty", "(none)", "None", "N/A", "-", "(leave empty)", "```\n```"])
+def test_placeholder_section_bodies_are_empty(filler):
+    """Nemotron wrote '### INLINE\\n(empty)' (copying the prompt's 'or empty'): the literal text was mounted in the
+    page and showed before any click (lennysjobs, 3 attempts)."""
+    s = parse_sections(REPLY + f"\n### INLINE\n{filler}\n")
+    assert s.get("INLINE", "") == ""
+    s2 = parse_sections(REPLY.replace("### TRIGGER_OPEN\n", f"### TRIGGER_OPEN\n{filler}\n### IGNORE\n").split("### IGNORE")[0]
+                        + "### OVERLAY" + REPLY.split("### OVERLAY")[1])
+    assert s2.get("TRIGGER_OPEN", "") == ""

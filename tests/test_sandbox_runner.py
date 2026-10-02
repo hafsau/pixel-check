@@ -106,6 +106,8 @@ def test_infrastructure_error_retests_the_same_code_without_misleading_the_write
     calls = []
 
     def flaky(code, scenarios, out):
+        if out.name == "static":                                      # the static reference render
+            return local_runner(code, scenarios, out)
         calls.append(code)
         if len(calls) == 1:
             raise RunnerError("sandbox run FAILED: vm lost")
@@ -126,9 +128,58 @@ def test_infrastructure_errors_on_every_attempt_end_cleanly(tmp_path):
     from orchestrator.interact_loop import RunnerError, run_interaction
     base, states, trig, targets = inputs()
 
+    from orchestrator.interact_loop import local_runner
+
     def down(code, scenarios, out):
+        if out.name == "static":
+            return local_runner(code, scenarios, out)
         raise RunnerError("sandbox run FAILED")
     c = Scripted([GOOD])
     res = run_interaction(base, states, trig, targets, "menu", c, down, out=tmp_path, max_attempts=2)
     assert not res["pass"] and len(res["attempts"]) == 2 and len(c.calls) == 1
     assert all(a["verdict"].get("infra") for a in res["attempts"])
+
+
+@pytest.mark.skipif(not (DEV / "mobile.menu.oracle.json").exists(), reason="dev state capture not present")
+def test_static_reference_render_failing_twice_raises_before_any_model_call(tmp_path):
+    from test_interact_loop import GOOD, Scripted, inputs
+    from orchestrator.interact_loop import RunnerError, run_interaction
+    base, states, trig, targets = inputs()
+    seen = []
+
+    def down(code, scenarios, out):
+        seen.append(out.name)
+        raise RunnerError("sandbox run FAILED")
+    c = Scripted([GOOD])
+    with pytest.raises(RunnerError):
+        run_interaction(base, states, trig, targets, "menu", c, down, out=tmp_path, max_attempts=2)
+    assert seen == ["static", "static"] and c.calls == []
+
+
+def test_local_runner_timeout_is_an_infrastructure_error(tmp_path, monkeypatch):
+    import subprocess
+    from orchestrator import interact_loop as m
+
+    def slow(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd="node", timeout=1)
+    monkeypatch.setattr(m.subprocess, "run", slow)
+    with pytest.raises(m.RunnerError, match="timed out"):
+        m.local_runner("x", SCEN, tmp_path)
+
+
+def test_local_runner_without_report_is_an_infrastructure_error(tmp_path, monkeypatch):
+    from orchestrator import interact_loop as m
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **kw: None)
+    with pytest.raises(m.RunnerError, match="interact.json"):
+        m.local_runner("x", SCEN, tmp_path)
+
+
+def test_sandbox_cost_sums_every_run_including_the_static_reference(tmp_path):
+    """Council (Oct 2): the reported '$0.0042/run' left out ~$0.02 per sandbox run."""
+    from orchestrator.interact_loop import sandbox_cost
+    for d, c in (("static", 0.021), ("attempt0", 0.019), ("attempt1", None)):   # None: cost not reported
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "sandbox.json").write_text(json.dumps({"cost": c}))
+    (tmp_path / "attempt2").mkdir()                                            # lint failure: no sandbox run
+    assert sandbox_cost(tmp_path) == pytest.approx(0.040)
+    assert sandbox_cost(tmp_path / "nothing") == 0.0

@@ -5,6 +5,7 @@ Nemotron writes the behaviour in four sections (prompt in WRITER_SYSTEM):
   ### TRIGGER_PROPS  props added to the trigger element (onClick, aria-expanded, aria-controls, aria-label)
   ### TRIGGER_OPEN   optional: what the trigger shows while open (hamburger → X), JSX
   ### OVERLAY        JSX placed at the end of the page that mounts the compiled panel component when open
+  ### INLINE         JSX placed in the page flow right after the trigger's row (disclosures, accordions)
 assemble() places them deterministically into the compiled page; everything else stays byte-identical, so the
 static layout's score cannot regress. Verified by the generated acceptance tests (orchestrator/acceptance.py).
 """
@@ -12,8 +13,8 @@ from __future__ import annotations
 
 import re
 
-SECTIONS = ("HOOKS", "TRIGGER_PROPS", "TRIGGER_OPEN", "OVERLAY")
-REQUIRED = ("HOOKS", "TRIGGER_PROPS", "OVERLAY")
+SECTIONS = ("HOOKS", "TRIGGER_PROPS", "TRIGGER_OPEN", "OVERLAY", "INLINE")
+REQUIRED = ("HOOKS", "TRIGGER_PROPS")      # + OVERLAY or INLINE
 HOOK_NAMES = ("useState", "useEffect", "useRef", "useCallback")
 
 
@@ -22,17 +23,42 @@ class WriterFormatError(ValueError):
 
 
 def parse_sections(text: str) -> dict:
-    parts = re.split(r"^\s*#{2,4}\s*(HOOKS|TRIGGER_PROPS|TRIGGER_OPEN|OVERLAY)\s*$", text or "", flags=re.M)
+    parts = re.split(r"^\s*#{2,4}\s*(HOOKS|TRIGGER_PROPS|TRIGGER_OPEN|OVERLAY|INLINE)\s*$", text or "", flags=re.M)
     out = {}
     for i in range(1, len(parts) - 1, 2):
         body = parts[i + 1]
         fence = re.search(r"```[a-zA-Z]*\n(.*?)```", body, re.S)
-        body = fence.group(1) if fence else body
-        out[parts[i]] = body.strip()
+        body = (fence.group(1) if fence else body).strip()
+        # "(empty)", "none", "N/A"… mean nothing (Nemotron copied the prompt's "or empty"; the text got mounted)
+        if re.fullmatch(r"\(?\s*(?:empty|none|nothing|n/?a|-+|leave (?:it |this )?empty)\s*\)?\.?", body, re.I):
+            body = ""
+        out[parts[i]] = body
     missing = [s for s in REQUIRED if not out.get(s)]
     if missing:
         raise WriterFormatError(f"missing section(s): {', '.join(missing)}")
+    if not out.get("OVERLAY") and not out.get("INLINE"):
+        raise WriterFormatError("missing section(s): OVERLAY or INLINE (where the panel is mounted)")
     return out
+
+
+def _insert_inline(code: str, name: str, inline: str) -> str:
+    """After the trigger's parent element (its row) closes — same indentation as the parent's opening line, as the
+    compiler writes it — so the panel takes part in the flow and the content below moves down. A trigger directly in
+    the root element: before the root closes."""
+    lines = code.split("\n")
+    ind = lambda l: len(l) - len(l.lstrip(" "))
+    ti = next(i for i, l in enumerate(lines) if f'data-trigger="{name}"' in l)
+    pi = next((j for j in range(ti - 1, -1, -1) if lines[j].strip() and ind(lines[j]) < ind(lines[ti])), None)
+    if pi is None:
+        raise WriterFormatError("cannot find the trigger's parent element")
+    pind = ind(lines[pi])
+    ci = next((k for k in range(ti + 1, len(lines)) if lines[k].strip().startswith("</") and ind(lines[k]) == pind), None)
+    if ci is None:
+        raise WriterFormatError("cannot find where the trigger's parent element closes")
+    root = ci + 1 < len(lines) and lines[ci + 1].strip().startswith(");")
+    at, pad = (ci, pind + 2) if root else (ci + 1, pind)
+    block = [" " * pad + l for l in inline.splitlines()]
+    return "\n".join(lines[:at] + block + lines[at:])
 
 
 def _imports(code: str, used: set[str]) -> str:
@@ -47,7 +73,7 @@ def _imports(code: str, used: set[str]) -> str:
 
 def assemble(base: str, panel_jsx: str | None, sections: dict, name: str) -> str:
     hooks, props = sections["HOOKS"], sections["TRIGGER_PROPS"]
-    open_look, overlay = sections.get("TRIGGER_OPEN", ""), sections["OVERLAY"]
+    open_look, overlay, inline = sections.get("TRIGGER_OPEN", ""), sections.get("OVERLAY", ""), sections.get("INLINE", "")
     code = base
     m = re.search(r'<(\w+)[^<>]*data-trigger="%s"[^<>]*?(/?)>' % re.escape(name), code)
     if not m:
@@ -83,14 +109,18 @@ def assemble(base: str, panel_jsx: str | None, sections: dict, name: str) -> str
         code = code.replace("export default function App() {", panel_jsx.rstrip() + "\n\nexport default function App() {", 1)
     start = code.index("export default function App() {") + len("export default function App() {")
     code = code[:start] + "\n" + "\n".join("  " + l if l.strip() else l for l in hooks.splitlines()) + code[start:]
-    end = code.rindex("\n    </div>\n  );\n}")
-    code = code[:end] + "\n" + "\n".join("      " + l for l in overlay.splitlines()) + code[end:]
-    used = {h for h in HOOK_NAMES if re.search(r"\b%s\b" % h, hooks + props + overlay + open_look)}
+    if inline:
+        code = _insert_inline(code, name, inline)
+    if overlay:
+        end = code.rindex("\n    </div>\n  );\n}")
+        code = code[:end] + "\n" + "\n".join("      " + l for l in overlay.splitlines()) + code[end:]
+    used = {h for h in HOOK_NAMES if re.search(r"\b%s\b" % h, hooks + props + overlay + inline + open_look)}
     return _imports(code, used)
 
 
 WRITER_SYSTEM = """You write the interaction code for a React + Tailwind page that was compiled from design frames.
-The static page already exists; you add ONLY the behaviour that opens and closes one panel. Breakpoints are mobile
+The static page already exists; you add ONLY the behaviour that opens and closes one panel (an overlay, a drawer, or
+inline content such as a disclosure). Breakpoints are mobile
 (< 768 px, no prefix), tablet (md:, 768–1279 px) and desktop (xl:, ≥ 1280 px).
 
 Rules:
@@ -98,11 +128,17 @@ Rules:
 - Tailwind classes only (arbitrary values like top-[100px] or bg-[#0b0b0b]/[0.9] are fine).
 - Clicking the trigger toggles the panel; aria-expanded on the trigger reflects the state; aria-controls points at
   the panel's id; pressing Escape closes it; the trigger stays a <button> (keyboard Enter already clicks it).
-- When open, mount the given panel component inside a `fixed` container positioned EXACTLY at the measured panel box
-  for each breakpoint (use responsive prefixes when the box or kind differs between breakpoints), with the measured
-  background colour, and `overflow-y-auto`.
+- kind overlay / drawer: when open, mount the given panel component (OVERLAY section) inside a `fixed` container
+  positioned EXACTLY at the measured panel box for each breakpoint (use responsive prefixes when the box or kind
+  differs between breakpoints), with the measured background colour, and `overflow-y-auto`.
+- kind inline (a disclosure / accordion that pushes the content below it down): when open, mount the given panel
+  component (INLINE section — it is placed in the page flow right after the trigger's row) in a normal-flow container
+  (no fixed / absolute) with the measured gap below the trigger's row as margin-top, per breakpoint; the content
+  below moves down by itself. Leave OVERLAY empty unless a backdrop is measured.
 - If a backdrop is measured for a breakpoint, render it when open as a separate fixed layer BEHIND the panel at the
   measured box with the measured colour and opacity, only at that breakpoint (hidden elsewhere).
+- If the open panel covers the trigger, the trigger has already been raised above it (relative z-[1000]) so it
+  stays clickable and shows its open look: keep every layer you add below z-[1000].
 - If the trigger's open look is measured (box relative to the trigger, colour, shape), draw it with plain divs —
   shape "x" = two thin (2 px) bars of the measured colour rotated ±45°, centred in that box (the trigger is a
   positioning context, so absolute children are placed inside it); otherwise leave TRIGGER_OPEN empty.
@@ -115,7 +151,9 @@ Reply with exactly these sections and nothing else:
 ### TRIGGER_OPEN
 (JSX shown inside the trigger while open, or empty)
 ### OVERLAY
-(one JSX expression placed at the end of the page, e.g. {open && (<>...</>)})"""
+(one JSX expression placed at the end of the page, e.g. {open && (<>...</>)}, or empty for an inline panel)
+### INLINE
+(one JSX expression placed right after the trigger's row, e.g. {open && (<div ...>...</div>)}, or empty)"""
 
 
 def _facts_text(f: dict, name: str) -> str:
@@ -135,9 +173,14 @@ def _facts_text(f: dict, name: str) -> str:
         bd = (f.get("backdrop") or {}).get(bp)
         rows.append(f"- {bp}: kind {f['kind'][bp]}, panel box [x, y, w, h] = {f['panel'][bp]}, background "
                     f"{(f.get('background') or {}).get(bp)}, backdrop "
-                    + (f"colour {bd['color']} opacity {bd['opacity']} box {bd['box']}" if bd else "none")
+                    + (f"colour {bd['color']} opacity {bd['opacity']} box {bd['box']}"
+                       + (f" blur {bd['blur']} px (backdrop-blur)" if bd.get("blur") else "") if bd else "none")
+                    + (f", gap below the trigger's row {f['inline_gap'][bp]} px"
+                       if f["kind"][bp] == "inline" and (f.get("inline_gap") or {}).get(bp) is not None else "")
                     + (f", trigger open look (boxes relative to the trigger) {f['trigger_open'][bp]}"
-                       if (f.get("trigger_open") or {}).get(bp) else ""))
+                       if (f.get("trigger_open") or {}).get(bp) else "")
+                    + (f", the open panel covers the trigger (box {f['trigger_box'][bp]})"
+                       if (f.get("trigger_covered") or {}).get(bp) and (f.get("trigger_box") or {}).get(bp) else ""))
     return "\n".join(rows)
 
 
@@ -150,7 +193,7 @@ def write_interaction(client, facts: dict, name: str, *, previous: dict | None =
     if previous:
         user += ("\n\nYour previous code:\n" + "\n".join(f"### {k}\n{v}" for k, v in previous.items())
                  + "\n\nThe generated tests ran in the sandbox and FAILED:\n- " + "\n- ".join(failures or [])
-                 + "\n\nFix the code so every test passes. Reply with all four sections again.")
+                 + "\n\nFix the code so every test passes. Reply with all sections again.")
     msgs = [{"role": "system", "content": WRITER_SYSTEM}, {"role": "user", "content": user}]
     last = ""
     for attempt in range(2):
@@ -164,5 +207,5 @@ def write_interaction(client, facts: dict, name: str, *, previous: dict | None =
         except WriterFormatError as e:
             msgs = msgs + [{"role": "assistant", "content": last},
                            {"role": "user", "content": f"Your reply was not in the required format ({e}). Reply with "
-                                                       "exactly: ### HOOKS, ### TRIGGER_PROPS, ### TRIGGER_OPEN, ### OVERLAY."}]
+                                                       "exactly: ### HOOKS, ### TRIGGER_PROPS, ### TRIGGER_OPEN, ### OVERLAY, ### INLINE."}]
     raise WriterFormatError(f"writer reply unparseable twice: {last[:200]!r}")

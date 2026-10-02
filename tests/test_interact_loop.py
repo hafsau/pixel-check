@@ -157,3 +157,17 @@ def test_revisions_use_a_higher_temperature():
     write_interaction(c, {"trigger_tag": "<button>", "panel_component": "MenuPanel", "kind": {}, "panel": {}}, "menu",
                       previous=parse_sections(GOOD), failures=["x"])
     assert c.kw["temperature"] >= 0.5
+
+
+def test_always_open_panel_fails_in_the_loop(tmp_path):
+    """Council (Oct 2): `{true && (` passed every generated test. The loop renders the static page once and passes
+    its base-frame scores, so a page that is open before any click fails."""
+    from orchestrator.interact_loop import local_runner, run_interaction
+    base, states, trig, targets = inputs()
+    always = GOOD.replace("{menuOpen && (", "{true && (")
+    assert always != GOOD
+    res = run_interaction(base, states, trig, targets, "menu", Scripted([always]), local_runner, out=tmp_path,
+                          max_attempts=1)
+    v = res["attempts"][0]["verdict"]
+    assert not v["pass"] and any("before any click" in f for f in v["failures"]), v["failures"]
+    assert set(res["base_expected"]) == set(states) and min(res["base_expected"].values()) > 50

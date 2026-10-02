@@ -286,8 +286,110 @@ def test_trigger_look_none_when_unchanged():
 def test_trigger_look_unknown_shape():
     from orchestrator.states import trigger_look
 
-    def draw_dot(img):
-        img[45:55, 350:360] = 231
-    base, state = _trigger_imgs(draw_dot)
+    def draw_ring(img):              # an outline (not a solid block, not an X) — a solid dot is now a "block"
+        img[44:56, 349:361] = 231
+        img[46:54, 351:359] = img[40, 340]
+    base, state = _trigger_imgs(draw_ring)
     look = trigger_look(base, state, [335, 33, 40, 34])
     assert look and look["shape"] == "unknown"
+
+
+# Gate B: a drawer over a blurred, whitened page (lennysjobs mobile menu) — dim_region finds nothing (blur is not a
+# constant darkening), perception reads the blurred page as new items, the kind came out "inline"
+def _veiled(sigma=8, a=0.4, colour=(255, 255, 255), x0=110):
+    import numpy as np
+    from scipy import ndimage
+    rng = np.random.default_rng(3)
+    H, W = 844, 390
+    base = ndimage.gaussian_filter(rng.uniform(0, 255, (H, W, 3)), (3, 3, 0))
+    base[200:260, 20:360] = 30                                   # a headline-like dark bar
+    blurred = ndimage.gaussian_filter(base, (sigma, sigma, 0)) if sigma else base
+    state = a * np.array(colour, float) + (1 - a) * blurred
+    state[:, x0:] = 255                                          # the drawer surface
+    for i in range(6):
+        state[54 + 44 * i:70 + 44 * i, x0 + 8:x0 + 8 + 90] = 20  # its menu labels
+    return base.clip(0, 255).astype(np.uint8), state.clip(0, 255).astype(np.uint8)
+
+
+def test_panel_surface_finds_the_drawer():
+    from orchestrator.states import panel_surface
+    b, s = _veiled()
+    r = panel_surface(b, s)
+    assert r and abs(r["box"][0] - 110) <= 2 and r["box"][0] + r["box"][2] >= 388
+    assert r["box"][1] <= 2 and r["box"][3] >= 840 and r["fill"] == "#ffffff"
+
+
+def test_panel_surface_none_without_a_new_uniform_region():
+    import numpy as np
+    from orchestrator.states import panel_surface
+    b, _ = _veiled()
+    assert panel_surface(b, b.copy()) is None
+    s = b.copy()
+    s[300:320, 20:200] = 250                                      # a small new bar is not a panel surface
+    assert panel_surface(b, s) is None
+
+
+def test_panel_surface_rejects_a_frame_wide_uniform_region():
+    """lambda's tablet drawer: dark panel over a page dimmed to near-black — both look uniform → no surface claimed
+    (the dimming path handles it)."""
+    import numpy as np
+    from orchestrator.states import panel_surface
+    b = np.full((1024, 768, 3), 11, np.uint8)
+    b[200:260, 20:700] = 200
+    s = np.full_like(b, 11)
+    assert panel_surface(b, s) is None
+
+
+@pytest.mark.parametrize("sigma,a", [(8, 0.4), (0, 0.6), (16, 0.3)])
+def test_backdrop_fit_recovers_colour_opacity_and_blur(sigma, a):
+    import numpy as np
+    from orchestrator.states import backdrop_fit
+    b, s = _veiled(sigma=sigma, a=a)
+    r = backdrop_fit(b, s, [110, 0, 280, 844])
+    assert r and abs(r["opacity"] - a) <= 0.06, r
+    c = [int(r["color"][i:i + 2], 16) for i in (1, 3, 5)]
+    assert all(abs(v - 255) <= 16 for v in c), r
+    assert abs(r["blur"] - sigma) <= max(3, 0.25 * sigma), r
+    assert r["box"] == [0, 0, 110, 844]
+
+
+def test_backdrop_fit_none_when_the_page_is_unchanged():
+    from orchestrator.states import backdrop_fit
+    b, _ = _veiled()
+    s = b.copy()
+    s[:, 110:] = 255
+    assert backdrop_fit(b, s, [110, 0, 280, 844]) is None
+
+
+def test_panel_surface_bridges_dense_text_rows():
+    """lennysjobs: a row of wide menu labels is < 60 % panel colour; the surface still spans the drawer's height."""
+    from orchestrator.states import panel_surface
+    b, s = _veiled()
+    for i in range(6):
+        s[54 + 44 * i:72 + 44 * i, 118:380] = 20                # labels nearly as wide as the drawer
+    r = panel_surface(b, s)
+    assert r and r["box"][1] <= 2 and r["box"][3] >= 840, r
+
+
+@pytest.mark.parametrize("panel,kind", [([99, 0, 291, 844], "drawer"), ([0, 0, 300, 844], "drawer"),
+                                        ([368, 100, 400, 924], "drawer"), ([0, 100, 390, 744], "overlay"),
+                                        ([20, 438, 262, 43], "inline"), ([60, 0, 270, 844], "inline")])
+def test_classify_wide_drawer_touching_one_edge(panel, kind):
+    from orchestrator.states import classify
+    W, H = (768, 1024) if panel[0] == 368 else (390, 844)
+    assert classify(panel, W, H) == kind
+
+
+def test_trigger_look_solid_block():
+    """vercel / lennysjobs: the open icon is media → a solid grey placeholder block in the state frame (wider than the
+    closed one, or the drawer's close icon drawn over the trigger)."""
+    import numpy as np
+    from orchestrator.states import trigger_look
+    base = np.full((844, 390, 3), 250, np.uint8)
+    base[20:44, 342:366] = 212                       # closed: 24 × 24 placeholder
+    state = base.copy()
+    state[20:44, 342:366] = 250
+    state[26:38, 330:378] = 212                      # open: 48 × 12 placeholder
+    look = trigger_look(base, state, [332, 10, 44, 44])
+    assert look["shape"] == "block" and look["box"] == [0, 16, 44, 12], look
+    assert look["fill"] == "#d4d4d4" and look["trigger_size"] == [44, 44]

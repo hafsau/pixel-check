@@ -253,3 +253,67 @@ def test_unknown_trigger_look_has_no_component():
     from orchestrator.panel import compile_trigger_look
     assert compile_trigger_look({"box": [1, 1, 5, 5], "fill": "#fff", "shape": "unknown"}, "X") is None
     assert compile_trigger_look(None, "X") is None
+
+
+def test_content_left_of_the_panel_origin_gives_no_negative_padding():
+    """netflix 'Get help': a link 1 px left of the panel box → `-pl-[1px]` (no such Tailwind class — no CSS)."""
+    from orchestrator.fluid import compile_fluid
+    for bp in ("mobile", "tablet", "desktop"):
+        f = frame(bp, [("Forgot email address or mobile number?", (-1, 0, 262, 14)), ("Learn more", (0, 29, 160, 14))])
+        out = compile_fluid({"breakpoints": {bp: f}}, auto_menu=False, fragment=True)
+        assert not re.search(r"(?<![\w-])-p[lrxy]?-", out), (bp, re.findall(r"-p[lrxy]?-\S+", out))
+
+
+def test_drawer_over_a_blurred_page_uses_the_measured_surface(tmp_path):
+    """lennysjobs: perception reads the blurred page as new items and the kind came out inline. The panel's surface
+    and the veil (colour, opacity, blur) are measured from the images; items outside the surface are not panel."""
+    from PIL import Image
+    from test_states import _veiled
+    b, s = _veiled(sigma=6, a=0.2, colour=(32, 30, 29), x0=100)
+    Image.fromarray(b).save(tmp_path / "b.png")
+    Image.fromarray(s).save(tmp_path / "s.png")
+    labels = [(n, (116, 54 + 44 * i, 90, 16)) for i, n in enumerate(["Jobs", "Coach", "About"])]
+    junk = [((5, 67, 82, 10), "#e4c5ae"), ((40, 279, 18, 18), "#c5c5c6")]          # blurred page, read as new
+    base = {"breakpoints": {"mobile": dict(frame("mobile", [("Hero", (20, 210, 300, 40))]), background="#ffd9b8")}}
+    st = dict(frame("mobile", labels, junk), background="#ffd9b8")
+    res = compile_panel(base, {"mobile": st}, name="MenuPanel", images={"mobile": (tmp_path / "b.png", tmp_path / "s.png")})
+    assert res["kind"] == "drawer" and abs(res["panel"]["mobile"][0] - 100) <= 2, res["panel"]
+    assert res["panel_fill"]["mobile"] == "#ffffff"
+    bd = res["backdrop"]["mobile"]
+    assert bd and abs(bd["opacity"] - 0.2) <= 0.06 and abs(bd["blur"] - 6) <= 2 and bd["box"][2] <= 102, bd
+    assert "#e4c5ae" not in res["jsx"] and "#c5c5c6" not in res["jsx"] and ">Coach<" in res["jsx"]
+
+
+LENNY = ROOT / "benchmarks-dev" / "lennysjobs-lx"
+
+
+@pytest.mark.skipif(not (ROOT / "out" / "specs" / "lennysjobs-lx.menu.json").exists(), reason="perceived state spec not present")
+def test_real_lennysjobs_menu_is_a_drawer():
+    base = json.loads((ROOT / "out" / "specs" / "lennysjobs-lx.json").read_text())
+    states = json.loads((ROOT / "out" / "specs" / "lennysjobs-lx.menu.json").read_text())["breakpoints"]
+    trig = {bp: v["box"] for bp, v in json.loads((LENNY / "meta-menu.json").read_text())["trigger"].items()}
+    res = compile_panel(base, states, name="MenuPanel", triggers=trig,
+                        images={bp: (LENNY / f"{bp}.png", LENNY / f"{bp}.menu.png") for bp in trig})
+    assert res["kind"] == "drawer" and 90 <= res["panel"]["mobile"][0] <= 110, res["panel"]
+    assert res["panel_fill"]["mobile"] == "#ffffff" and res["backdrop"]["mobile"]
+    assert ">Job market reports<" in res["jsx"] or "Job market reports" in res["jsx"]
+
+
+def test_block_trigger_look_compiled_as_a_component():
+    from orchestrator.panel import compile_trigger_look
+    jsx = compile_trigger_look({"box": [0, 16, 44, 12], "fill": "#d4d4d8", "shape": "block"}, "MenuTriggerOpen")
+    assert jsx.startswith("function MenuTriggerOpen()") and "rotate" not in jsx
+    assert "left-[0px]" in jsx and "top-[16px]" in jsx and "w-[44px]" in jsx and "h-[12px]" in jsx and "bg-[#d4d4d8]" in jsx
+    assert lint(jsx.replace("MenuTriggerOpen(", "Panel("))["ok"]
+
+
+def test_trigger_look_positioned_from_the_triggers_centre():
+    """The marked element may be smaller than the captured trigger box (a 24 px icon in a 44 px button): the open
+    look is placed relative to the trigger's centre."""
+    from orchestrator.panel import compile_trigger_look
+    jsx = compile_trigger_look({"box": [0, 10, 44, 24], "fill": "#d4d4d8", "shape": "block", "trigger_size": [44, 44]},
+                               "MenuTriggerOpen")
+    assert "left-[calc(50%-22px)]" in jsx and "top-[calc(50%-12px)]" in jsx and "w-[44px]" in jsx
+    jx = compile_trigger_look({"box": [11, 7, 18, 20], "fill": "#e7e6d9", "shape": "x", "trigger_size": [40, 34]}, "T")
+    assert "left-[calc(50%-9px)]" in jx and "top-[calc(50%-10px)]" in jx
+    assert lint(jsx.replace("MenuTriggerOpen(", "Panel("))["ok"] and lint(jx.replace("T(", "Panel("))["ok"]

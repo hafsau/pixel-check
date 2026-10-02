@@ -28,7 +28,10 @@ Per page: the 3 static frames (as now) + state frames, each `{bp, state name, tr
   static score unchanged; cost ≤ $0.15/run.
   Oct 2 measurement (sandbox, perception path, 6 runs, image v10): end to end ✓ (mobile **and** tablet), tests pass
   6/6, state scores mobile 87.2 / tablet 84.4, static render pixel-identical (test), $0.0042 + ~16 s sandbox per run.
-  **Criteria met — council review pending before it counts as passed.**
+  Council (Oct 2): PASS WITH CONDITIONS → acceptance holes fixed → re-run 5/6, $0.055–0.08/run all-in.
+- Gate B ablation (Oct 2, sandbox, perception path, 4 states — lambda overlay+drawer, vercel overlay, lennysjobs
+  blurred drawer, netflix inline): deterministic template 4/4 pass first try; Nemotron 6/8 (lambda 0/2), never above
+  the template. **Criterion (Nemotron ≥ +10): FAIL.** Next role for Nemotron: decision pending.
 - **Gate B (~Oct 8)**: overlay + drawer + inline (accordion/tabs) on dev pages; ablation shows Nemotron ≥ +10 on
   state frames over the deterministic fallback.
 - **Gate C (~Oct 11)**: Hafsa's original screens with state frames. Feature freeze Oct 18 (unchanged).

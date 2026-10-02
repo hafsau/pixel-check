@@ -40,7 +40,7 @@ def test_build_scenarios_names_and_steps():
     assert names == {"mobile.base", "mobile.menu", "mobile.menu.closed", "mobile.menu.esc", "mobile.menu.kbd"}
     by = {s["name"]: s for s in SCEN}
     assert by["mobile.menu"]["steps"] == [{"click": '[data-trigger="menu"]'}]
-    assert by["mobile.menu.closed"]["steps"] == [{"click": '[data-trigger="menu"]'}, {"click": '[data-trigger="menu"]'}]
+    assert by["mobile.menu.closed"]["steps"] == [{"click": '[data-trigger="menu"]'}, {"click_at": '[data-trigger="menu"]'}]
     assert by["mobile.menu.esc"]["steps"][-1] == {"key": "Escape"}
     assert by["mobile.menu.kbd"]["steps"] == [{"focus": '[data-trigger="menu"]'}, {"key": "Enter"}]
 
@@ -268,3 +268,139 @@ def test_harness_and_acceptance_flag_duplicate_ids(good, tmp_path):
     v = evaluate(out, targets_from(gout, tmp_path / "t"), "menu")
     assert any("menu-panel" in f and "unique" in f for f in v["failures"]), v["failures"]
     assert good[0]["duplicate_ids"] == []
+
+
+# council review of Gate A (Oct 2): an always-open panel and a menu the trigger cannot close both passed
+def always_open_fixture(tmp_path: Path) -> Path:
+    p = tmp_path / "always.jsx"
+    p.write_text((FIX / "good.jsx").read_text().replace("{open && (", "{true && ("))
+    return p
+
+
+def blocker_fixture(tmp_path: Path) -> Path:
+    """Opens, then an invisible full-screen layer swallows every click: the trigger can never close it."""
+    p = tmp_path / "blocker.jsx"
+    p.write_text((FIX / "good.jsx").read_text().replace(
+        '''      )}
+    </div>''', '''      )}
+      {open && <div aria-hidden="true" className="fixed inset-0 z-[100]" />}
+    </div>'''))
+    return p
+
+
+def test_acceptance_fails_a_panel_that_is_open_before_any_click(good, tmp_path):
+    _, gout = good
+    t = targets_from(gout, tmp_path / "t")
+    t["base_expected"] = {"mobile": 100.0}             # the page without the interaction scores this on the base frame
+    out = tmp_path / "r"
+    run(always_open_fixture(tmp_path), SCEN, out)
+    v = evaluate(out, t, "menu")
+    assert not v["pass"]
+    assert any("before" in f and "click" in f for f in v["failures"]), v["failures"]
+
+
+def test_acceptance_base_check_quiet_for_good_code(good, tmp_path):
+    res, gout = good
+    t = targets_from(gout, tmp_path / "t")
+    t["base_expected"] = {"mobile": 100.0}
+    assert evaluate(gout, t, "menu")["pass"]
+
+
+def test_acceptance_fails_when_a_scenario_errors(good, tmp_path):
+    _, gout = good
+    t = targets_from(gout, tmp_path / "t")
+    out = tmp_path / "r"
+    run(blocker_fixture(tmp_path), SCEN, out)
+    v = evaluate(out, t, "menu")
+    assert not v["pass"]
+    assert any("clicking the trigger again" in f for f in v["failures"]), v["failures"]
+
+
+def test_keyboard_failure_not_repeated_when_click_already_fails(good, tmp_path):
+    _, gout = good
+    t = targets_from(gout, tmp_path / "t")
+    out = tmp_path / "r"
+    run(FIX / "nohandler.jsx", SCEN, out)
+    v = evaluate(out, t, "menu")
+    assert not any("keyboard" in f for f in v["failures"]), v["failures"]
+
+
+def test_trigger_look_not_checked_when_the_design_trigger_does_not_change(good, tmp_path):
+    """netflix 'Get help': the trigger looks the same open and closed in the design; the render's static trigger
+    differs a little (spacing) — that is the static page's score, not a wrong open look (false failure, Oct 2)."""
+    _, gout = good
+    t = targets_from(gout, tmp_path / "t")
+    for p in (t["base"]["mobile"], t["states"]["mobile"]):    # same mark in both design frames
+        im = np.asarray(Image.open(p).convert("RGB")).copy()
+        im[35:45, 335:365] = 17
+        Image.fromarray(im).save(p)
+    t["triggers"] = {"mobile": [330, 23, 40, 34]}
+    v = evaluate(gout, t, "menu")
+    assert not any("open look" in f for f in v["failures"]), v["failures"]
+
+
+def covering_drawer_fixture(tmp_path: Path) -> Path:
+    """The open panel covers the trigger and has its own close button on the same spot (lennysjobs' drawer)."""
+    p = tmp_path / "covering.jsx"
+    p.write_text((FIX / "good.jsx").read_text().replace(
+        '''<div id="menu-panel" className="fixed inset-x-0 top-[80px] bottom-0 bg-[#0b0b0b] px-[20px] pt-[40px]">''',
+        '''<div id="menu-panel" className="fixed inset-0 bg-[#0b0b0b] px-[20px] pt-[120px]">
+          <button type="button" aria-label="Close menu" onClick={() => setOpen(false)}
+                  className="absolute left-[330px] top-[23px] w-[40px] h-[34px] bg-[#333333]" />'''))
+    return p
+
+
+def test_close_scenario_clicks_the_triggers_spot(tmp_path):
+    """Clicking the trigger element again timed out when the drawer covers it; a user clicks the same spot (where the
+    drawer's close button is)."""
+    by = {s["name"]: s for s in build_scenarios(["mobile"], "menu")}
+    assert by["mobile.menu.closed"]["steps"] == [{"click": '[data-trigger="menu"]'}, {"click_at": '[data-trigger="menu"]'}]
+    res = run(covering_drawer_fixture(tmp_path), SCEN, tmp_path / "o")
+    r = {x["name"]: x for x in res["scenarios"]}
+    assert r["mobile.menu.closed"]["ok"], r["mobile.menu.closed"]
+    assert r["mobile.menu.closed"]["aria_expanded"] == "false"
+    assert frac_diff(tmp_path / "o" / "mobile.base.png", tmp_path / "o" / "mobile.menu.closed.png") < 0.001
+
+
+def _x_img(x0, y0, size=20, bg=240, ink=20, W=390, H=120):
+    im = np.full((H, W, 3), bg, np.uint8)
+    for k in range(size):
+        im[y0 + k, x0 + k:x0 + k + 2] = ink
+        im[y0 + k, x0 + size - k - 2:x0 + size - k] = ink
+    return im
+
+
+def test_trigger_look_compared_where_the_render_put_the_trigger():
+    """lennysjobs: the static layout put the trigger at x 190 instead of 349 — the open look is judged inside the
+    render's own trigger box (aligned by centre), the misplacement already costs the static score."""
+    from orchestrator.acceptance import trigger_look_failure
+    design_base = np.full((120, 390, 3), 240, np.uint8)
+    design_state = _x_img(355, 18)                          # X inside the design's trigger box [349, 10, 36, 36]
+    render_ok = _x_img(196, 18)                             # the same X inside the render's trigger at [190, 10, 36, 36]
+    render_bad = np.full((120, 390, 3), 240, np.uint8)
+    render_bad[20:36, 196:216] = 20                         # a solid square instead of the X
+    box_d, box_r = [349, 10, 36, 36], [190, 10, 36, 36]
+    assert trigger_look_failure(design_base, design_state, render_ok, box_d, box_r) is None
+    assert "open look" in trigger_look_failure(design_base, design_state, render_bad, box_d, box_r)
+    assert trigger_look_failure(design_base, design_state, render_ok, box_d, None) is not None   # no render box: as before
+    assert trigger_look_failure(design_state, design_state, render_bad, box_d, box_r) is None    # design unchanged
+
+
+def test_harness_reports_the_triggers_rendered_box(good):
+    res, _ = good
+    tb = {x["name"]: x for x in res["scenarios"]}["mobile.menu"]["trigger_box"]
+    assert tb == [330, 23, 40, 34]
+
+
+def test_base_mismatch_names_what_is_visible(good, tmp_path):
+    _, gout = good
+    t = targets_from(gout, tmp_path / "t")
+    t["base_expected"] = {"mobile": 100.0}
+    p = tmp_path / "stray.jsx"
+    p.write_text((FIX / "good.jsx").read_text().replace("<p className=\"px-[20px] mt-[100px]",
+                                                         "<p className=\"px-[20px] mt-[20px] text-[40px] text-white\">(empty)</p>\n      <p className=\"px-[20px] mt-[100px]"))
+    out = tmp_path / "r"
+    run(p, SCEN, out)
+    v = evaluate(out, t, "menu")
+    f = [x for x in v["failures"] if "before any click" in x]
+    assert f and "(empty)" in f[0], v["failures"]

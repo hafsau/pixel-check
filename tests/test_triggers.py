@@ -131,20 +131,31 @@ def test_real_lambda_hamburger(which):
     assert fluid.STATE["triggers"]["menu"] is not None
 
 
-@pytest.mark.skipif(not (DEV.exists() and META.exists()), reason="dev captures not present")
+STATE_PAGES = [(p.parent.name[:-3], p.stem[len("meta-"):]) for p in sorted((ROOT / "benchmarks-dev").glob("*-lx/meta-*.json"))]
+
+
+@pytest.mark.skipif(not STATE_PAGES, reason="dev captures not present")
+@pytest.mark.parametrize("page,state", STATE_PAGES)
 @pytest.mark.parametrize("which", ["oracle", "perception"])
-def test_marking_the_trigger_leaves_the_static_render_unchanged(which, tmp_path):
-    """Gate A: 'static score unchanged' — the closed page with the trigger marked (writer mode, compiler toggle off)
-    renders like the plain static compile at all three breakpoints."""
+def test_marking_the_trigger_leaves_the_static_render_unchanged(page, state, which, tmp_path):
+    """Gate A/B: 'static score unchanged' — the closed page with the trigger marked (writer mode, compiler toggle off)
+    renders like the plain static compile at all three breakpoints: not one pixel changes outside the trigger's box
+    (inside it the icon is redrawn as a button — council, Oct 2: ~288 px on lambda, score ±0.05). Every dev page with
+    a captured state (vercel: a 44 px holder around a 24 px icon regrouped the header rows, page shifted ~25 px)."""
     import subprocess
     import numpy as np
     from PIL import Image
-    s = json.loads((ROOT / "out" / "specs" / f"lambda-lx{'.oracle' if which == 'oracle' else ''}.json").read_text())
-    trig = {bp: v["box"] for bp, v in json.loads(META.read_text())["trigger"].items() if v.get("box")}
+    sp = ROOT / "out" / "specs" / f"{page}-lx{'.oracle' if which == 'oracle' else ''}.json"
+    if not sp.exists():
+        pytest.skip(f"no {which} spec for {page}")
+    s = json.loads(sp.read_text())
+    meta = json.loads((ROOT / "benchmarks-dev" / f"{page}-lx" / f"meta-{state}.json").read_text())
+    trig = {bp: v["box"] for bp, v in meta["trigger"].items() if v.get("box")}
     sc = tmp_path / "sc.json"
     sc.write_text(json.dumps([{"name": f"{bp}.base", "bp": bp, "steps": []} for bp in SIZES]))
     outs = {}
-    for k, code in {"static": compile_fluid(s), "marked": compile_fluid(s, triggers={"menu": trig}, auto_menu=False)}.items():
+    for k, code in {"static": compile_fluid(s, auto_menu=False),
+                    "marked": compile_fluid(s, triggers={state: trig}, auto_menu=False)}.items():
         d = tmp_path / k
         d.mkdir()
         (d / "App.jsx").write_text(code)
@@ -154,5 +165,45 @@ def test_marking_the_trigger_leaves_the_static_render_unchanged(which, tmp_path)
     for bp in SIZES:
         a, b = (np.asarray(Image.open(outs[k] / f"{bp}.base.png").convert("RGB")).astype(int) for k in ("static", "marked"))
         assert a.shape == b.shape, bp
-        changed = float((np.abs(a - b).sum(axis=2) > 30).mean())
-        assert changed < 0.002, (which, bp, changed)
+        changed = np.abs(a - b).sum(axis=2) > 30
+        if bp in trig:
+            x, y, w, h = trig[bp]
+            changed[max(0, y - 2):y + h + 2, max(0, x - 2):x + w + 2] = False
+        assert int(changed.sum()) == 0, (page, which, bp, int(changed.sum()))
+
+
+def test_single_icon_inside_a_larger_trigger_box_is_marked_itself():
+    """vercel: the capture's trigger is the 44 px button, perception sees only its 24 px icon — a synthetic 44 px holder
+    regrouped the header rows (page shifted ~25 px). One block inside, no text → mark that block; layout unchanged."""
+    frames = {}
+    for bp in SIZES:
+        w = SIZES[bp][0]
+        frames[bp] = {"texts": [text("Hello world", (24, 200, 200, 16))],
+                      "blocks": [block((24, 23, 21, 18), "#d4d4d8"), block((w - 48, 20, 24, 24), "#d4d4d8")]}
+    s = spec(frames)
+    trig = {"mobile": [332, 10, 44, 44], "tablet": [710, 10, 44, 44]}
+    code = compile_fluid(s, triggers={"menu": trig}, auto_menu=False)
+    tag = element_with_marker(code, "menu")
+    assert tag and tag.startswith("<button") and "w-[24px]" in tag and "h-[24px]" in tag
+    assert fluid.STATE["triggers"]["menu"] != "trigger:menu"
+    plain = compile_fluid(s, auto_menu=False)
+    strip = lambda c: re.sub(r'<button type="button" data-trigger="menu"', "<div", c).replace("</button>", "</div>")
+    assert strip(code).count("\n") == plain.count("\n")                  # same structure, only the tag changed
+
+
+def test_single_icon_trigger_keeps_its_look_in_a_child():
+    """The open look replaces the trigger's children; when the trigger IS the icon block, its grey placeholder stayed
+    under the open look (vercel). The visual (bg / border / radius / shadow) moves to a child span; the button keeps
+    the layout classes (same size, same place)."""
+    frames = {}
+    for bp in SIZES:
+        w = SIZES[bp][0]
+        frames[bp] = {"texts": [text("Hello world", (24, 200, 200, 16))],
+                      "blocks": [block((24, 23, 21, 18), "#d4d4d8"), block((w - 48, 20, 24, 24), "#d4d4d8")]}
+    code = compile_fluid(spec(frames), triggers={"menu": {"mobile": [332, 10, 44, 44], "tablet": [710, 10, 44, 44]}},
+                         auto_menu=False)
+    tag = element_with_marker(code, "menu")
+    assert tag and not tag.rstrip().endswith("/>") and "bg-[" not in tag and "w-[24px]" in tag and "relative" in tag
+    assert "aria-hidden" not in tag                                      # a button must not hide from assistive tech
+    inner = code[code.index(tag) + len(tag):].split("</button>")[0]
+    assert "absolute inset-0" in inner and "bg-[#d4d4d8]" in inner

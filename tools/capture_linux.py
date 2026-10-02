@@ -13,6 +13,9 @@ from pathlib import Path
 
 from orchestrator.sandbox import Sandbox
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from oracle_spec import visible_gt  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "tools/capture/capture.mjs").read_bytes()
 
@@ -33,8 +36,17 @@ def capture(sb: Sandbox, slug: str, state: str | None = None, click: str | None 
         raise RuntimeError(f"capture failed for {slug}")
     out = ROOT / "benchmarks-dev" / f"{slug}-lx"
     out.mkdir(parents=True, exist_ok=True)
+    frames = []
     for name, data in sb.download_dir(r.result_image, f"/work/cap/{slug}-lx").items():
-        (out / Path(name).name).write_bytes(data)
+        n = Path(name).name
+        (out / n).write_bytes(data)
+        if n.endswith(".text.json"):
+            # the fresh capture is the new raw ground truth; text.json = its visible-ink subset (oracle_spec)
+            (out / n.replace(".text.json", ".text.raw.json")).write_bytes(data)
+            parts = n[:-len(".text.json")].split(".", 1)
+            frames.append((parts[0], parts[1] if len(parts) > 1 else None))
+    for bp, st in frames:
+        visible_gt(f"{slug}-lx", bp, st)
     return out
 
 

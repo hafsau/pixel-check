@@ -70,6 +70,9 @@ function replaceMedia() {
   for (const n of nodes) {
     const r = n.getBoundingClientRect();
     const cs = getComputedStyle(n);
+    // not rendered now (e.g. inside a closed disclosure): left alone — the pass after a state click replaces it at
+    // its real size (a display:none placeholder would stay hidden when the content opens)
+    if (r.width === 0 || r.height === 0) continue;
     if (decorative(n)) { n.style.setProperty("visibility", "hidden", "important"); continue; }
     const d = document.createElement("div");
     d.dataset.pcMedia = "1";
@@ -77,7 +80,6 @@ function replaceMedia() {
       `width:${r.width}px;height:${r.height}px;background:#d4d4d8;` +
       `border-radius:${cs.borderRadius};flex-shrink:0;margin:${cs.margin};vertical-align:middle;` +
       (cs.position !== "static" ? `position:${cs.position};top:${cs.top};left:${cs.left};right:${cs.right};bottom:${cs.bottom};` : "");
-    if (r.width === 0 || r.height === 0) d.style.display = "none";
     n.replaceWith(d);
   }
   return nodes.length;
@@ -258,6 +260,9 @@ try {
       meta.trigger[bp] = { selector: CLICK, box: tb && [Math.round(tb.x), Math.round(tb.y), Math.round(tb.width), Math.round(tb.height)] };
       await el.click();
       await page.waitForTimeout(700);
+      // media revealed or re-rendered by the click gets the same treatment as the base frame's
+      await page.evaluate(replaceMedia);
+      await page.waitForTimeout(100);
     }
     // Ground-truth visible text inside the viewport (for scorer tests and VLM accuracy in G3).
     const texts = await page.evaluate(([vw, vh]) => {

@@ -357,13 +357,26 @@ async function interactHtml(html, scenarios, outDir) {
       await settle(page);
       const r = { name: sc.name, bp: sc.bp, ok: true, error: null, aria_expanded: null };
       let trigger = null;
+      const spots = {};     // selector → its box when first seen (click_at clicks that spot later)
       for (const st of sc.steps || []) {
         try {
-          if (st.click || st.focus) {
+          if (st.click_at) {
+            const sel = st.click_at;
+            if (!spots[sel]) {
+              const loc = page.locator(sel).first();
+              if (!(await loc.count())) { r.ok = false; r.error = `trigger ${sel} not found`; break; }
+              spots[sel] = await loc.boundingBox();
+            }
+            const b = spots[sel];
+            if (!b) { r.ok = false; r.error = `trigger ${sel} has no box`; break; }
+            trigger = trigger || sel;
+            await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+          } else if (st.click || st.focus) {
             const sel = st.click || st.focus;
             const loc = page.locator(sel).first();
             if (!(await loc.count())) { r.ok = false; r.error = `trigger ${sel} not found`; break; }
             trigger = trigger || sel;
+            if (!spots[sel]) spots[sel] = await loc.boundingBox();
             if (st.click) await loc.click({ timeout: 1500 }); else await loc.focus({ timeout: 1500 });
           } else if (st.key) {
             await page.keyboard.press(st.key);
@@ -375,6 +388,10 @@ async function interactHtml(html, scenarios, outDir) {
         }
       }
       if (trigger) r.aria_expanded = await page.locator(trigger).first().getAttribute("aria-expanded").catch(() => null);
+      if (trigger) {        // where the render put the trigger (the open-look check looks there)
+        const tb = await page.locator(trigger).first().boundingBox().catch(() => null);
+        r.trigger_box = tb ? [tb.x, tb.y, tb.width, tb.height].map(Math.round) : null;
+      }
       // the panel the trigger controls: present? on top at its centre? if not, what covers it (a developer's first
       // check — a backdrop painted after the panel hides it completely)
       if (trigger) {
