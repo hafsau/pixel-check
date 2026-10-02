@@ -197,6 +197,21 @@ def _text(c: Item, indent: int, vis: dict, pos: str) -> list[str]:
     return [f'{pad}<{tag}{href} className="{_j([_disp(vis, "block"), body])}">{_jsx_text(c.text)}</{tag}>']
 
 
+def _borders(at: dict) -> str:
+    """One class per side + colour (a multi-token "border border-[#x]" would leak its colour to other breakpoints).
+    border_l: a column divider measured as a vertical rule left of a card."""
+    if not any(at[bp].get("border") or at[bp].get("border_l") for bp in BPS):
+        return "border-0"
+    per = {}
+    for bp in BPS:
+        a = at[bp]
+        full, left = a.get("border"), a.get("border_l")
+        per[bp] = {"t": "border-t" if full else "border-t-0", "r": "border-r" if full else "border-r-0",
+                   "b": "border-b" if full else "border-b-0", "l": "border-l" if full or left else "border-l-0",
+                   "c": f"border-[{full or left}]" if full or left else "border-transparent"}
+    return _rc(per)
+
+
 def _block(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]:
     pad = "  " * indent
     at = {bp: c.at.get(bp) or c.at[next(iter(c.at))] for bp in BPS}
@@ -204,10 +219,12 @@ def _block(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]
     full = {bp: box[bp][2] >= 0.92 * cont_w[bp] for bp in BPS}
     width = _resp({bp: ("w-full" if full[bp] else f"w-[{box[bp][2]}px] max-w-full") for bp in BPS})
     style = [_resp({bp: f"bg-[{at[bp]['fill']}]" if at[bp].get("fill") else "bg-transparent" for bp in BPS}),
-             _resp({bp: f"border border-[{at[bp]['border']}]" if at[bp].get("border") else "border-0" for bp in BPS}),
+             _borders(at),
              _resp({bp: f"rounded-[{at[bp]['radius']}px]" if at[bp].get("radius") else "rounded-none" for bp in BPS}),
              _resp({bp: "shadow-sm" if at[bp].get("shadow") else "shadow-none" for bp in BPS})]
     texts = [ch for ch in c.children if ch.kind == "text"]
+    if getattr(c, "grid", None):
+        return _grid(c, indent, width, style, vis, pos)
     if MENU and c.key == MENU.get("trigger"):
         return [f'{pad}<button type="button" aria-label="Open menu" aria-expanded={{menuOpen}} onClick={{() => setMenuOpen((o) => !o)}} '
                 f'className="{_j([_disp(vis, "block"), width, _resp({bp: f"h-[{box[bp][3]}px]" for bp in BPS}), *style, "shrink-0 cursor-pointer", pos])}" />']
@@ -235,6 +252,165 @@ def _block(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]
     out = [f'{pad}<div className="{_j([_disp(vis, "block"), width, _resp({bp: f"min-h-[{box[bp][3]}px]" for bp in BPS}), *style, "shrink-0 flow-root", pos])}">']
     out += _layout(c.children, {bp: list(box[bp]) for bp in BPS}, indent + 1)
     return out + [f"{pad}</div>"]
+
+
+def _grid(c: Item, indent: int, width: str, style: list, vis: dict, pos: str) -> list[str]:
+    """A planned card grid: CSS grid with the column count each frame shows; every card fills its cell."""
+    pad = "  " * indent
+    cards = sorted([ch for ch in c.children if getattr(ch, "card", None) is not None], key=lambda ch: ch.card)
+    cols, gx, gy = {}, {}, {}
+    for bp in BPS:
+        bs = [ch.at[bp]["box"] for ch in cards if bp in ch.at]
+        n = 1
+        if bs:
+            row0 = [b for b in bs if b[1] < min(x[1] for x in bs) + 0.5 * min(x[3] for x in bs)]
+            n = max(1, len(row0))
+        cols[bp] = f"grid-cols-{n}"
+        srt = sorted(bs, key=lambda b: (b[1], b[0]))
+        hg = [srt[k + 1][0] - (srt[k][0] + srt[k][2]) for k in range(len(srt) - 1) if abs(srt[k + 1][1] - srt[k][1]) < 20]
+        vg = [srt[k + 1][1] - (srt[k][1] + srt[k][3]) for k in range(len(srt) - 1) if srt[k + 1][1] >= srt[k][1] + srt[k][3] - 8]
+        gx[bp] = _px("gap-x", max(0, min(hg))) if hg else "gap-x-0"
+        gy[bp] = _px("gap-y", max(0, min(vg))) if vg else "gap-y-0"
+    disp = _disp(vis, "grid") or "grid"
+    out = [f'{pad}<div data-seg="{_seg("cards", cards, 1)}" className="{_j([disp, _resp(cols), _resp(gx), _resp(gy), width, *style, "shrink-0 items-stretch", pos])}">']
+    for card in cards:
+        cw = {bp: (card.at.get(bp) or card.at[next(iter(card.at))])["box"][2] for bp in BPS}
+        out += _block(card, indent + 1, cw, {bp: _shown(card, bp) for bp in BPS}, "")
+    return out + [f"{pad}</div>"]
+
+
+def _apply_cards(items: list[Item], groups: list[list[list[str]]]) -> list[Item]:
+    """Execute a planned card grouping: each card becomes a block around its members (styled, per frame, by the
+    measured box that holds most of that card and little else, transparent where the frame shows the card as a
+    plain column); the grid becomes a block around the cards (styled by a measured box that holds several cards,
+    e.g. desktop's bordered wrapper). Measured boxes that were a card's or the grid's outline in a frame are absorbed
+    for that frame; vertical rules between columns become a card's left border. Geometry decides boxes and column
+    counts; the plan only decides which elements belong together."""
+    by_key = {c.key: c for c in items}
+    out = list(items)
+    for g_i, cards in enumerate(groups):
+        mem = [[by_key[k] for k in card if k in by_key] for card in cards]
+        mem = [m for m in mem if m]
+        if len(mem) < 2:
+            continue
+        # verify the plan against geometry: a member box that encloses most of ANOTHER card's members (and little of
+        # its own) is that card's outline (the planner put Pro's mobile outline into Hobby, Oct 1)
+        for j in range(len(mem)):
+            for b in [m for m in mem[j] if m.kind == "block"]:
+                for bp in b.at:
+                    k, frac, n_in = _enclosure(b, bp, mem)
+                    if k is not None and k != j and frac[k] >= 0.6 and n_in[j] <= 0.3 * n_in[k]:
+                        mem[j].remove(b)
+                        mem[k].append(b)
+                        STATE.setdefault("plan_fixes", []).append(f"{b.key}: card {j} -> {k}")
+                        break
+        member_ids = {id(m) for card in mem for m in card}
+        style = [dict() for _ in mem]
+        grid_style = {}
+        for b in [c for c in out if c.kind == "block"]:
+            for bp in list(b.at):
+                bx = b.at[bp]["box"]
+                if bx[3] <= 3:
+                    continue
+                k, frac, n_in = _enclosure(b, bp, mem)
+                if k is None:
+                    continue
+                if frac[k] >= 0.6 and all(n <= 0.3 * n_in[k] for i, n in enumerate(n_in) if i != k):
+                    # the card's outline in this frame (also when the planner listed it as a member)
+                    if b in mem[k] or id(b) not in member_ids:
+                        if bp not in style[k] or bx[2] * bx[3] < style[k][bp]["box"][2] * style[k][bp]["box"][3]:
+                            style[k][bp] = dict(b.at[bp])
+                        del b.at[bp]
+                elif id(b) not in member_ids and sum(1 for f in frac if f >= 0.5) >= 2:
+                    if bp not in grid_style or bx[2] * bx[3] > grid_style[bp]["box"][2] * grid_style[bp]["box"][3]:
+                        grid_style[bp] = dict(b.at[bp])
+                    del b.at[bp]
+        mem = [[m for m in card if m.at] for card in mem]
+        out = [c for c in out if c.at]
+        card_items = []
+        for i, card in enumerate(mem):
+            it = Item(f"card:{g_i}:{i}", "block")
+            it.card = i
+            for bp in BPS:
+                u = _union(card, bp)
+                if not u:
+                    continue
+                # padding: from the measured outline in this frame, else in another frame that shows one
+                src = bp if bp in style[i] else next((o for o in BPS if o in style[i] and _union(card, o)), None)
+                if src:
+                    sb, su = style[i][src]["box"], _union(card, src)
+                    pl, pt = max(0, su[0] - sb[0]), max(0, su[1] - sb[1])
+                    p_b = min(max(0, sb[1] + sb[3] - su[1] - su[3]), max(pl, pt))
+                else:
+                    pl = pt = p_b = 24
+                own = style[i].get(bp, {})
+                if own:   # the measured outline in this frame; only its bottom may run to the fold, so bound it
+                    ob = own["box"]
+                    box = [ob[0], ob[1], ob[2], min(ob[3], u[1] + u[3] + p_b - ob[1])]
+                else:
+                    box = [u[0] - pl, u[1] - pt, u[2] + 2 * pl, u[3] + pt + p_b]
+                it.at[bp] = {"box": box, "fill": own.get("fill"),
+                             "border": own.get("border"), "radius": own.get("radius"), "shadow": own.get("shadow", False)}
+            card_items.append(it)
+        for bp in BPS:     # stacked cards must not overlap (a measured card box can run to the fold)
+            bs = sorted([c for c in card_items if bp in c.at], key=lambda c: c.at[bp]["box"][1])
+            for a, b in zip(bs, bs[1:]):
+                ab, bb = a.at[bp]["box"], b.at[bp]["box"]
+                if bb[1] >= ab[1] + 0.5 * ab[3] and ab[1] + ab[3] > bb[1]:
+                    ab[3] = bb[1] - ab[1]
+        for r in [c for c in out if c.kind == "block" and id(c) not in member_ids]:   # column dividers
+            for bp in list(r.at):
+                rb = r.at[bp]["box"]
+                if rb[2] > 3 or rb[3] < 40:
+                    continue
+                near = [c for c in card_items if bp in c.at and abs(c.at[bp]["box"][0] - rb[0]) <= 24
+                        and c.at[bp]["box"][1] - 40 <= rb[1] <= c.at[bp]["box"][1] + c.at[bp]["box"][3]]
+                if near:
+                    near[0].at[bp]["border_l"] = r.at[bp].get("fill") or r.at[bp].get("border")
+                    del r.at[bp]
+        out = [c for c in out if c.at]
+        grid = Item(f"grid:{g_i}", "block")
+        grid.grid = True
+        for bp in BPS:
+            u = _union(card_items, bp)
+            if not u:
+                continue
+            gs = grid_style.get(bp)
+            box = gs["box"] if gs and _inside_box(u, gs["box"], 12) else u
+            grid.at[bp] = {"box": list(box), "fill": gs.get("fill") if gs else None, "border": gs.get("border") if gs else None,
+                           "radius": gs.get("radius") if gs else None, "shadow": gs.get("shadow", False) if gs else False}
+        out += card_items + [grid]
+    return out
+
+
+def _enclosure(b: Item, bp: str, mem: list[list[Item]]):
+    """Which card a box outlines at bp → (card index | None, fraction of each card's visible members inside, counts).
+    An outline is clearly bigger than what it encloses (a badge pill around "Pro" is not the Pro card)."""
+    bx = b.at[bp]["box"]
+    others = [[m for m in card if m is not b and bp in m.at] for card in mem]
+    ins = [[m for m in o if _centre(_box(m, bp), bx)] for o in others]
+    n_in = [len(x) for x in ins]
+    if not any(n_in):
+        return None, [], n_in
+    u = _union([m for x in ins for m in x], bp)
+    if sum(n_in) <= 2 and bx[3] < 1.8 * u[3] and bx[2] * bx[3] < 2 * u[2] * u[3]:
+        return None, [], n_in
+    frac = [n / len(o) if o else 0 for n, o in zip(n_in, others)]
+    return max(range(len(mem)), key=lambda i: (n_in[i], frac[i])), frac, n_in
+
+
+def _centre(box, outer, slack=3):
+    cx, cy = box[0] + box[2] / 2, box[1] + box[3] / 2
+    return outer[0] - slack <= cx <= outer[0] + outer[2] + slack and outer[1] - slack <= cy <= outer[1] + outer[3] + slack
+
+
+def _inside_box(a, b, slack=3):
+    return a[0] >= b[0] - slack and a[1] >= b[1] - slack and a[0] + a[2] <= b[0] + b[2] + slack and a[1] + a[3] <= b[1] + b[3] + slack
+
+
+def prepare(spec: dict) -> list[Item]:
+    """Measured items as the fluid compiler sees them (the intent planner names these)."""
+    return _merge_variants(_collect(spec, anchored=True))
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -334,20 +510,47 @@ def _band_bg(band: list[Item]):
     return None
 
 
+def _band_sig(band: list[Item]) -> str:
+    """Stable band identity for intents: its first text in reading order (band indices shift when a card plan
+    regroups elements)."""
+    flat = []
+    def walk(its):
+        for it in its:
+            flat.append(it)
+            walk(it.children)
+    walk(band)
+    texts = [c for c in flat if c.kind == "text"]
+    if not texts:
+        return "band:" + ",".join(sorted(c.key for c in band))[:80]
+    first = min(texts, key=lambda c: min(_box(c, bp)[1] / VH[bp] for bp in c.at))
+    return first.key
+
+
 def _container(u, bp, intent):
-    """Content container of a band at bp from the measured gutters: (classes, content frame x, content frame w)."""
+    """Content container of a band at bp from the measured gutters → (classes, content frame x, content frame w).
+    The design width is reproduced either way; the choice only matters between / beyond the frames.
+    intent (desktop only, from the planner): "full" = stretch edge to edge beyond 1280; "centred" = the 1280 column
+    stays centred (the band keeps its own gutters inside it)."""
     lg, rg = u[0], W[bp] - (u[0] + u[2])
     centred = abs(lg - rg) <= max(12, 0.04 * W[bp])
     c = lambda maxw, mx, pl, pr: {"maxw": maxw, "mx": mx, "pl": _px("pl", pl), "pr": _px("pr", pr)}
-    if intent == "full" or (intent is None and not centred and u[2] >= 0.85 * W[bp]):
+    if centred and u[2] < 0.8 * W[bp] and min(lg, rg) > 24:   # narrow centred column: its width is a maximum
+        p = 16
+        return c(f"max-w-[{u[2] + 2 * p}px]", "mx-auto", p, p), lg, u[2]
+    if intent == "centred":
+        if centred:
+            g = max(0, min(lg, rg))
+            return c(f"max-w-[{W[bp]}px]", "mx-auto", g, g), g, W[bp] - 2 * g
+        pr = max(16, min(rg, lg))
+        return c(f"max-w-[{W[bp]}px]", "mx-auto", lg, pr), lg, W[bp] - lg - pr
+    if intent == "full" or not centred and u[2] >= 0.85 * W[bp]:
         return c("max-w-none", "mx-0", lg, max(0, rg)), lg, W[bp] - lg - max(0, rg)
-    if intent == "centred" or centred:
+    if centred:
         g = max(0, min(lg, rg))
-        if u[2] < 0.8 * W[bp] and g > 24:             # narrow centred column: its width is a maximum
-            p = 16
-            return c(f"max-w-[{u[2] + 2 * p}px]", "mx-auto", p, p), lg, u[2]
+        if bp != BPS[-1]:        # page-width below the widest frame: stretch (the next breakpoint takes over)
+            return c("max-w-none", "mx-0", g, g), g, W[bp] - 2 * g
         return c(f"max-w-[{W[bp]}px]", "mx-auto", g, g), g, W[bp] - 2 * g
-    pr = max(16, min(rg, lg))                        # left-anchored
+    pr = max(16, min(rg, lg))    # left-anchored
     return c("max-w-none", "mx-0", lg, pr), lg, W[bp] - lg - pr
 
 
@@ -424,7 +627,10 @@ def _merge_variants(items: list[Item]) -> list[Item]:
 
 def compile_fluid(spec: dict, intents: dict | None = None) -> str:
     SEGMENTS.clear()
-    items = _merge_variants(_collect(spec, anchored=True))
+    items = prepare(spec)
+    intents = intents or {}
+    if intents.get("cards"):
+        items = _apply_cards(items, intents["cards"])
     MENU.clear()
     MENU.update(_detect_menu(items))
     roots = _lift_siblings(_tree(items))
@@ -435,8 +641,9 @@ def compile_fluid(spec: dict, intents: dict | None = None) -> str:
             flat.append(it)
             walk(it.children)
     walk(roots)
+    fixes = STATE.get("plan_fixes", [])
     STATE.clear()
-    STATE.update({"all": flat, "intents": intents or {}})
+    STATE.update({"all": flat, "intents": intents, "bands": [], "plan_fixes": fixes})
 
     ref = max(BPS, key=lambda bp: sum(1 for c in roots if bp in c.at))
     bands = _bands(roots, ref)
@@ -459,6 +666,7 @@ def compile_fluid(spec: dict, intents: dict | None = None) -> str:
 
     def emit_band(k, band, indent):
         pad = "  " * indent
+        sig = _band_sig(band)
         bg = _band_bg(band)
         content = [c for c in band if c is not bg] + (bg.children if bg else [])
         ub = {bp: _union(content, bp) for bp in BPS}
@@ -473,12 +681,14 @@ def compile_fluid(spec: dict, intents: dict | None = None) -> str:
                 o = next(o for o in BPS if ub[o])
                 s = W[bp] / W[o]
                 u = [round(ub[o][0] * s), ub[o][1], round(ub[o][2] * s), ub[o][3]]
-            intent = STATE["intents"].get("bands", {}).get(str(k), {}).get(bp)
+            intent = STATE["intents"].get("bands", {}).get(sig, {}).get(bp)
             cont[bp], x, w = _container(u, bp, intent)
             frames[bp] = [x, u[1], w, u[3]]
         bg_fill = _resp({bp: (f"bg-[{bg.at[bp]['fill']}]" if bg and bp in bg.at and bg.at[bp].get("fill") else "bg-transparent") for bp in BPS})
         min_h = _resp({bp: (f"min-h-[{bb[bp][3]}px]" if bg and bb[bp] else "min-h-0") for bp in BPS})
         sid = _seg("band", band, 0)
+        STATE["bands"].append({"band": k, "sig": sig, "texts": [t for t in SEGMENTS[-1]["texts"][:4]],
+                               "boxes": {bp: ub[bp] for bp in BPS if ub[bp]}, "container": {bp: cont[bp]["maxw"] for bp in BPS}})
         lines = [f'{pad}<div data-seg="{sid}" className="flow-root w-full {bg_fill} {min_h} {_resp({bp: _px("mt", mt[bp]) for bp in BPS})} '
                  f'{_resp({bp: _px("pt", pt[bp]) for bp in BPS})}">',
                  f'{pad}  <div className="w-full {_rc(cont)}">']

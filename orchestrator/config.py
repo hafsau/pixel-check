@@ -7,7 +7,7 @@ load_dotenv()
 
 TF_BASE = os.environ.get("TF_BASE", "https://api.tokenfactory.nebius.com/v1/")
 SANDBOX_BASE = os.environ.get("SANDBOX_BASE", "https://api.tokenfactory.nebius.com/sandboxes/v1")
-RUNTIME_IMAGE = os.environ.get("RUNTIME_IMAGE", "tag:pixel-check-runtime:v6")
+RUNTIME_IMAGE = os.environ.get("RUNTIME_IMAGE", "tag:pixel-check-runtime:v7")
 
 SANDBOX_TIMEOUT_S = int(os.environ.get("SANDBOX_TIMEOUT_S", "180"))
 SANDBOX_POLL_S = 1.0
@@ -32,6 +32,9 @@ def project_id() -> str:
 # --- Models (IDs only here; override via env when models are deprecated) ---
 MODEL_CODER = os.environ.get("MODEL_CODER", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_PLANNER = os.environ.get("MODEL_PLANNER", "nvidia/nemotron-3-super-120b-a12b")
+# responsive-intent planner (Oct 1 probe, vercel cards): Ultra thinking-off found all 3 cards (48 ids, $0.004, 2 s);
+# Super off found 2 partial cards; Super/Ultra with thinking ran out of 8-12k tokens without an answer
+MODEL_INTENT = os.environ.get("MODEL_INTENT", "nvidia/Nemotron-3-Ultra-550b-a55b")
 MODEL_EDITOR = os.environ.get("MODEL_EDITOR", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_CRITIC = os.environ.get("MODEL_CRITIC", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_FAST = os.environ.get("MODEL_FAST", "nvidia/Nemotron-3_5-Lightning")

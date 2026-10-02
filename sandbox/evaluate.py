@@ -9,6 +9,7 @@ import json
 import sys
 from pathlib import Path
 
+import fluidity
 import integrity
 import score
 
@@ -32,6 +33,7 @@ def main():
     res["lint"] = lint
     res["integrity_failures"] = fails
     res["between"] = checks.get("between", {})
+    res["fluidity"] = fluidity.report(checks)   # in-between widths; not part of match, used by loop selection
     res["disqualified"] = (not lint["ok"]) or bool(fails)
     if res["disqualified"]:
         res["match"] = 0.0

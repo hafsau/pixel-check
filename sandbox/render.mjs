@@ -134,7 +134,9 @@ function fluidity() {
   return { content: [Math.round(fl), Math.round(fr)], centre_ratio: +(((fl + fr) / 2) / vw).toFixed(3),
            left_ratio: +(fl / vw).toFixed(3), right_gap_ratio: +((vw - fr) / vw).toFixed(3),
            page_height: pageH, max_vertical_gap: Math.round(maxGap), viewport_h: vh,
-           background_covers: rootH >= pageH - 2 };
+           // 4 px slack: leading-none text at the very bottom of the page overflows its line box by ~2 px of glyph
+           // ink (vercel tablet, Oct 1); the check targets content pushed out of the root (dozens of px or more)
+           background_covers: rootH >= pageH - 4 };
 }
 
 // Runs in the page: layout health at widths we don't have designs for.

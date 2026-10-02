@@ -12,6 +12,6 @@ RUN npm ci --no-audit --no-fund
 
 COPY fonts/ /opt/pc/fonts/
 COPY selftest/ /opt/pc/selftest/
-COPY render.mjs lint.mjs score.py integrity.py evaluate.py readable.py /opt/pc/
+COPY render.mjs lint.mjs score.py integrity.py evaluate.py readable.py fluidity.py /opt/pc/
 RUN cd /opt/pc && node render.mjs --selftest && node lint.mjs selftest/App.jsx && \
-    python3 -c "import score, integrity, evaluate, readable; print('py ok')"
+    python3 -c "import score, integrity, evaluate, readable, fluidity; print('py ok')"

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import config
 from . import jsx_edit
+from .fluid import compile_fluid
 from .scaffold import compile_scaffold
 from .code import class_edits, repair, revise, structural_calls, write_initial
 from .critique import auto_edits, critique, visual_checks, element_diff, feedback_text, flow_diff, visual_notes
@@ -40,6 +41,11 @@ class Candidate:
     def mean(self) -> float:
         return float(self.ev.report.get("mean", 0.0)) if self.ev else 0.0
 
+    @property
+    def fluid_fails(self) -> int:
+        """Widths failing the in-between fluidity checks (sandbox/fluidity.py); 0 when the report predates them."""
+        return len(((self.ev.report.get("fluidity") or {}).get("fails")) or []) if self.ev else 99
+
 
 @dataclass
 class LoopConfig:
@@ -50,6 +56,8 @@ class LoopConfig:
     plateau_rounds: int = 2
     plateau_gain: float = 1.0
     scaffold: bool = True        # measured scaffold as an extra initial candidate (Hafsa, Oct 1: option 1)
+    fluid: bool = True           # scaffold v2 (fluid compiler) instead of v1 (pinned) — re-plan step B
+    intents: bool = True         # Nemotron responsive-intent plan → extra fluid seeds, verified (re-plan step C)
     visual_notes: bool = False   # Gemma's diff notes hallucinated in the first runs; opt-in until an A/B shows value
     run_budget_usd: float = config.RUN_BUDGET_USD
 
@@ -81,9 +89,34 @@ def _better(a: Candidate, b: Candidate | None) -> bool:
     > 2 also wins (a −0.4 tablet wobble was blocking +11 mean from scoped mobile/desktop fixes)."""
     if b is None:
         return True
+    # responsive honesty first (council, Oct 1): never trade in-between-width correctness for design-width points
+    if a.fluid_fails != b.fluid_fails and a.ev and b.ev:
+        return a.fluid_fails < b.fluid_fails and a.match >= b.match - 0.5
     if a.match > b.match:
         return True
     return a.match >= b.match - 0.5 and a.mean > b.mean + 2.0
+
+
+def _intent_seeds(client: TFClient, spec: dict, trace) -> list[dict]:
+    """One planner call → fluid seeds with the card plan, the band plan and both (identical code dropped). The plan
+    is only adopted if a seed carrying it wins round 0 under _better (scores + fluidity) — logged as intent_adoption."""
+    from .intent import plan_intents
+    try:
+        intents, raw = plan_intents(client, spec)
+    except (ValueError, KeyError, TypeError) as err:
+        trace({"kind": "intent_plan", "error": str(err)[:200]})
+        return []
+    trace({"kind": "intent_plan", "intents": intents, "raw": raw.get("raw"), "dropped": intents.get("dropped", []),
+           "usd": raw.get("usd")})
+    base = compile_fluid(spec)
+    seeds, seen = [], {base}
+    for title, it in (("scaffold+cards", {"cards": intents["cards"]}), ("scaffold+bands", {"bands": intents["bands"]}),
+                      ("scaffold+plan", intents)):
+        code = compile_fluid(spec, it)
+        if code not in seen:
+            seen.add(code)
+            seeds.append({"title": title, "mode": "scaffold", "intents": it})
+    return seeds
 
 
 def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *, run_id: str | None = None,
@@ -103,7 +136,8 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
         title = (strategy or {}).get("title", "initial")
         try:
             if parent is None and (strategy or {}).get("mode") == "scaffold":
-                code = compile_scaffold(spec)   # measured scaffold: deterministic geometry (X-Y cut + measurements)
+                # measured scaffold: deterministic geometry; v2 = fluid compiler, optionally with a verified intent plan
+                code = compile_fluid(spec, strategy.get("intents")) if cfg.fluid else compile_scaffold(spec)
                 from .scaffold import SEGMENTS
                 from .structure import apply_semantics, semantic_tags
                 try:                            # Nemotron names the regions (header / nav / section / article / footer…)
@@ -228,11 +262,16 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
     ex = ThreadPoolExecutor(max(cfg.initial_samples, cfg.branches, len(config.BREAKPOINTS)))
     try:
         seeds = ([{"title": "scaffold", "mode": "scaffold"}] if cfg.scaffold else []) + [None] * cfg.initial_samples
+        if cfg.scaffold and cfg.fluid and cfg.intents:
+            seeds = _intent_seeds(client, spec, trace) + seeds
         for c in ex.map(lambda st: build(None, 0, st, ""), seeds):
             record(c)
             if _better(c, best):
                 best = c
         history.append(best.match if best else 0.0)
+        if best is not None:
+            trace({"kind": "intent_adoption", "winner": best.strategy, "adopted": "+" in (best.strategy or ""),
+                   "match": best.match, "fluid_fails": best.fluid_fails})
         trace({"kind": "round_end", "round": 0, "best": best.id if best else None, "match": history[-1], "spend": client.run_spend})
         for rnd in range(1, cfg.max_rounds + 1):
             if best is None or best.code is None or best.ev is None:
