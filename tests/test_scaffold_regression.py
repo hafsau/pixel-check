@@ -19,10 +19,13 @@ import fluidity  # noqa: E402
 from orchestrator.fluid import compile_fluid  # noqa: E402
 from orchestrator.scaffold import compile_scaffold  # noqa: E402
 
-FLOORS = {"netflix-signin": 81.0, "calcom-signup": 58.0, "vercel-pricing": 62.0, "lambda": 40.0}
+# v1 (pinned scaffold) is legacy — kept for the v1-vs-v2 ablation, not used by the loop. Oct 2: measurement now
+# reports vertical column dividers, which v1's banding can't place (lambda 43 → 16); v2 handles them.
+FLOORS = {"netflix-signin": 81.0, "calcom-signup": 58.0, "vercel-pricing": 60.0, "lambda": 14.0}
 # scaffold v2 (fluid compiler), Oct 1: (match floor, must pass the in-between-widths fluidity checks)
-FLUID_FLOORS = {"netflix-signin": (88.0, True), "calcom-signup": (79.0, True), "vercel-pricing": (60.0, True),
-                "lambda": (44.0, True)}
+FLUID_FLOORS = {"netflix-signin": (88.0, True), "calcom-signup": (80.0, True), "vercel-pricing": (67.0, True),
+                "lambda": (67.0, True), "netflix-signin-lx": (89.0, True), "calcom-signup-lx": (84.0, True),
+                "vercel-pricing-lx": (68.0, True), "lambda-lx": (67.0, True)}
 # compiler ceiling: fluid compiler on DOM oracle specs of the Linux re-captures (tools/oracle_spec.py), Oct 1 evening
 ORACLE_FLOORS = {"calcom-signup-lx": 86.0, "vercel-pricing-lx": 85.0, "lambda-lx": 80.0, "netflix-signin-lx": 80.0}
 

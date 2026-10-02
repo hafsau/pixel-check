@@ -59,7 +59,8 @@ def ocr_lines(img: np.ndarray) -> list[dict]:
             x0, y0 = min(w[0] for w in ws), min(w[1] for w in ws)
             x1, y1 = max(w[0] + w[2] for w in ws), max(w[1] + w[3] for w in ws)
             found.append({"text": " ".join(w[4] for w in ws), "box": [round(x0), round(y0), round(x1 - x0), round(y1 - y0)],
-                          "conf": float(np.mean([w[5] for w in ws]))})
+                          "conf": float(np.mean([w[5] for w in ws])),
+                          "words": [{"text": w[4], "box": [round(w[0]), round(w[1]), round(w[2]), round(w[3])]} for w in ws]})
     found.sort(key=lambda l: -l["conf"])
     kept = []
     for l in found:
@@ -150,8 +151,11 @@ def outlined_boxes(img: np.ndarray, min_w: int = 40, min_h: int = 24) -> list[di
         sides = comp[:3].any() and comp[-3:].any() and comp[:, :3].any() and comp[:, -3:].any()
         if not sides or comp.mean() > 0.35:
             continue
-        # needs both a top/bottom edge and a left/right edge (not just one long divider)
-        if comp[:3].mean() < 0.5 and comp[-3:].mean() < 0.5:
+        # a real frame has ≥ 3 sides mostly covered by an edge line (≥ 60 %); dividers meeting in a T or an L (a nav
+        # bar's vertical separators + its bottom border) only touch the sides (lambda header, Oct 1)
+        cover = [comp[:3].any(axis=0).mean(), comp[-3:].any(axis=0).mean(),
+                 comp[:, :3].any(axis=1).mean(), comp[:, -3:].any(axis=1).mean()]
+        if sum(c >= 0.6 for c in cover) < 3:
             continue
         border = img[ys, xs][comp & frame[sl]].mean(axis=0) if (comp & frame[sl]).any() else bg
         out.append({"box": [xs.start, ys.start, bw, bh], "fill": _hex(bg), "border": _hex(border)})
@@ -203,6 +207,82 @@ def rules(img: np.ndarray, min_frac: float = 0.4, text_boxes: list | None = None
                                 out.append({"box": [int(xs.min() + a0), y0, int(a1 - a0), y - y0], "fill": fill})
         y += 1
     return out
+
+
+def thin_lines(img: np.ndarray, text_boxes: list, min_h_len: int = 24, min_v_len: int = 40) -> list[dict]:
+    """Thin (≤ 3 px) lines in BOTH orientations by local contrast: a pixel that differs from the pixels 3 px to either
+    side (which agree with each other) is on a line. Catches what rules() missed (Oct 1, vs DOM oracle): vertical
+    column dividers (lambda, vercel, calcom) and faint 1 px dividers inside cards (#ebebeb on #fafafa). Thick glyph
+    strokes are not thin, so large headings don't produce lines; text boxes are masked out."""
+    H, W, _ = img.shape
+    out = []
+    mask_text = np.zeros((H, W), bool)
+    for tb in text_boxes:
+        x, y, w, h = [int(v) for v in tb]
+        mask_text[max(0, y - 2):y + h + 2, max(0, x - 2):x + w + 2] = True
+    for axis in (0, 1):          # 0: horizontal lines (compare up/down), 1: vertical lines (compare left/right)
+        a = np.roll(img, 3, axis=axis)
+        b = np.roll(img, -3, axis=axis)
+        da = np.linalg.norm(img - a, axis=-1)
+        db = np.linalg.norm(img - b, axis=-1)
+        same = np.linalg.norm(a - b, axis=-1) < 8
+        line = (da > 6) & (db > 6) & same & ~mask_text
+        if axis == 0:
+            line[:3], line[-3:] = False, False
+            runs = ndimage.binary_opening(line, np.ones((1, min_h_len), bool))
+        else:
+            line[:, :3], line[:, -3:] = False, False
+            runs = ndimage.binary_opening(line, np.ones((min_v_len, 1), bool))
+        lab, n = ndimage.label(runs)
+        for i, sl in enumerate(ndimage.find_objects(lab), 1):
+            ys, xs = sl
+            bw, bh = xs.stop - xs.start, ys.stop - ys.start
+            if (axis == 0 and bh > 3) or (axis == 1 and bw > 3):
+                continue
+            comp = lab[sl] == i
+            out.append({"box": [int(xs.start), int(ys.start), int(bw), int(bh)], "fill": _hex(img[ys, xs][comp].mean(axis=0))})
+    return out
+
+
+def block_labels(img: np.ndarray, blocks: list, lines: list) -> list[dict]:
+    """OCR inside control-sized filled boxes that have no text yet, one line each, contrast-stretched and inverted
+    when the text is lighter than the fill. The whole-page pass misses light-on-dark button labels ("LAUNCH GPU
+    INSTANCE", "Continue", "Sign Up", "Continue with Google" — every dev page, Oct 1)."""
+    if not shutil.which("tesseract"):
+        return []
+    found = []
+    for b in blocks:
+        x, y, w, h = [int(v) for v in b["box"]]
+        if b.get("rule") or not (16 <= h <= 90 and w >= 30) or any(_inside(l["box"], b["box"]) for l in lines):
+            continue
+        crop = img[y + 2:y + h - 2, x + 2:x + w - 2]
+        if crop.size == 0:
+            continue
+        grey = crop.mean(axis=2)
+        lo, hi = np.percentile(grey, 2), np.percentile(grey, 98)
+        if hi - lo < 30:
+            continue
+        g = np.clip((grey - lo) / (hi - lo) * 255, 0, 255)
+        if np.median(g) < 128:      # dark fill → light text: make the text dark for tesseract
+            g = 255 - g
+        im = Image.fromarray(g.astype(np.uint8)).resize((g.shape[1] * 3, g.shape[0] * 3), Image.LANCZOS)
+        im = ImageOps.expand(im, border=12, fill=255)
+        buf = io.BytesIO(); im.save(buf, "PNG")
+        out = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "7", "tsv"], input=buf.getvalue(),
+                             capture_output=True).stdout.decode()
+        words = [r for r in csv.DictReader(io.StringIO(out), delimiter="\t")
+                 if (r.get("text") or "").strip() and float(r["conf"]) >= 55]
+        if not words:
+            continue
+        xs0 = min(int(r["left"]) for r in words); ys0 = min(int(r["top"]) for r in words)
+        xs1 = max(int(r["left"]) + int(r["width"]) for r in words); ys1 = max(int(r["top"]) + int(r["height"]) for r in words)
+        bx = [x + 2 + (xs0 - 12) / 3, y + 2 + (ys0 - 12) / 3, (xs1 - xs0) / 3, (ys1 - ys0) / 3]
+        to_page = lambda r: [round(x + 2 + (int(r["left"]) - 12) / 3), round(y + 2 + (int(r["top"]) - 12) / 3),
+                             round(int(r["width"]) / 3), round(int(r["height"]) / 3)]
+        found.append({"text": " ".join(r["text"] for r in words), "box": [round(v) for v in bx],
+                      "conf": float(np.mean([float(r["conf"]) for r in words])), "in_block": True,
+                      "words": [{"text": r["text"], "box": to_page(r)} for r in words]})
+    return found
 
 
 def _border_and_radius(img: np.ndarray, b: dict, bg: np.ndarray) -> None:
@@ -284,8 +364,13 @@ def measure(png: bytes) -> dict:
     text_boxes = [t["box"] for t in lines]
     # small blocks too (icons / image placeholders ≥ 100 px²), minus glyph fragments: solid parts of large letters
     # sit inside text boxes and are small (a button/input IS bigger than its label, so it is never dropped)
+    # minus glyph fragments: solid parts of letters sit inside a text box (a button/input is bigger than its label,
+    # so it is never inside one); large headings' strokes (72 px "l" = 14×64) used to pass a size test
+    # (small relative to that box: OCR also reads image placeholders as junk text like "[Ld" — the placeholder is
+    # then about the size of the junk text's box and must stay)
     blocks = [b for b in solid_blocks(img, lines, min_area=100)
-              if max(b["box"][2], b["box"][3]) > 48 or not any(_frac_inside(b["box"], tb) >= 0.6 for tb in text_boxes)]
+              if not any(_frac_inside(b["box"], tb) >= 0.6 and b["box"][2] * b["box"][3] < 0.5 * tb[2] * tb[3]
+                         for tb in text_boxes)]
     for o in outlined_boxes(img):
         same = [b for b in blocks if _iou(o["box"], b["box"]) >= 0.7]
         if same:                      # a filled block that also has a border (e.g. an input)
@@ -300,6 +385,38 @@ def measure(png: bytes) -> dict:
     for r in rules(img, text_boxes=text_boxes):   # thin horizontal dividers (a header's border-b)
         if all(_iou(r["box"], b["box"]) < 0.5 for b in blocks):
             blocks.append({"box": r["box"], "fill": r["fill"], "rule": True, "contains_text": []})
+    def on_border(r):   # a line along a bordered block's edge is that border, not a divider
+        x, y, w, h = r["box"]
+        for b in blocks:
+            if b.get("rule") or not b.get("border"):
+                continue
+            bx, by, bw, bh = b["box"]
+            if h <= 3 and min(abs(y - by), abs(y - (by + bh - 1))) <= 2 and x >= bx - 3 and x + w <= bx + bw + 3:
+                return True
+            if w <= 3 and min(abs(x - bx), abs(x - (bx + bw - 1))) <= 2 and y >= by - 3 and y + h <= by + bh + 3:
+                return True
+        return False
+    def covered(r):     # already found (a piece of a full-width rule found again)
+        x, y, w, h = r["box"]
+        return any(_frac_inside([x, y, w, h], [b["box"][0] - 2, b["box"][1] - 2, b["box"][2] + 4, b["box"][3] + 4]) >= 0.8
+                   for b in blocks)
+    for r in thin_lines(img, text_boxes):        # vertical and faint dividers
+        if not on_border(r) and not covered(r) and all(_iou(r["box"], b["box"]) < 0.5 for b in blocks):
+            blocks.append({"box": r["box"], "fill": r["fill"], "rule": True, "contains_text": []})
+    # OCR junk the size of a box (the whole red Continue button read as "hE", conf 38) is not its label
+    junk = [l for l in lines if l["conf"] < 60 and any(_iou(l["box"], b["box"]) > 0.6 for b in blocks)]
+    for l in junk:
+        lines.remove(l)
+        for b in blocks:
+            b["contains_text"] = [t for t in (b.get("contains_text") or []) if t != l["text"]]
+    for l in block_labels(img, blocks, lines):   # light-on-dark button labels
+        l["color"], l["backdrop"] = ink_and_backdrop(img, l["box"])
+        l["typo"] = infer(l["text"], l["box"], img)
+        lines.append(l)
+        for b in blocks:
+            if _inside(l["box"], b["box"]) and not b.get("rule"):
+                b["contains_text"] = (b.get("contains_text") or []) + [l["text"]]
+                break
     blocks.sort(key=lambda b: (b["box"][1], b["box"][0]))
     return {"size": [img.shape[1], img.shape[0]], "background": _hex(background(img)),
             "text_lines": lines, "blocks": blocks}

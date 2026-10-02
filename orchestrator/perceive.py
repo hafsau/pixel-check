@@ -128,11 +128,13 @@ def merge(vlm: dict, meas: dict) -> dict:
     button whose white-on-colour label OCR missed); they are flagged "approx".
     """
     lines = meas["text_lines"]
-    used: set[int] = set()
+    used: set[tuple] = set()          # (line, word) pairs taken by a matched text
+    nwords = lambda i: max(1, len(lines[i].get("words") or [None]))
     texts = []
-    # candidates: single OCR lines and joins of 2–3 vertically consecutive lines (wrapped headings/paragraphs:
-    # OCR returns "Enter your info to sign" and "in" separately)
-    cands = [([i], l["text"], l["box"]) for i, l in enumerate(lines)]
+    # candidates: single OCR lines, joins of 2–3 vertically consecutive lines (wrapped headings/paragraphs: OCR
+    # returns "Enter your info to sign" and "in" separately), and runs of words inside one line (the vision model
+    # reads "Questions?" and "Contact us." as two texts where OCR has one line; "Get help" + an icon read as "Hl")
+    cands = [([i], l["text"], l["box"], None) for i, l in enumerate(lines)]
     for i, a in enumerate(lines):
         group, box = [i], list(a["box"])
         for j, b in enumerate(lines):
@@ -145,26 +147,42 @@ def merge(vlm: dict, meas: dict) -> dict:
                 x1 = max(box[0] + box[2], b["box"][0] + b["box"][2])
                 y1 = max(box[1] + box[3], b["box"][1] + b["box"][3])
                 box = [x0, y0, x1 - x0, y1 - y0]
-                cands.append((list(group), " ".join(lines[k]["text"] for k in group), list(box)))
+                cands.append((list(group), " ".join(lines[k]["text"] for k in group), list(box), None))
+        ws = a.get("words") or []
+        for s0 in range(len(ws)):
+            for s1 in range(s0 + 1, min(len(ws), s0 + 8) + 1):
+                if s1 - s0 == len(ws):
+                    continue
+                part = ws[s0:s1]
+                x0, y0 = min(w["box"][0] for w in part), min(w["box"][1] for w in part)
+                x1 = max(w["box"][0] + w["box"][2] for w in part); y1 = max(w["box"][1] + w["box"][3] for w in part)
+                cands.append(([i], " ".join(w["text"] for w in part), [x0, y0, x1 - x0, y1 - y0], (s0, s1)))
+
+    def words_of(c):
+        if c[3] is not None:
+            return {(c[0][0], k) for k in range(*c[3])}
+        return {(i, k) for i in c[0] for k in range(nwords(i))}
+
     for t in vlm.get("texts", []):
         best, score = None, 0.0
         for c in cands:
-            if any(k in used for k in c[0]):
+            if words_of(c) & used:
                 continue
             sc = _sim(t.get("text", ""), c[1])
-            if sc > score:
+            if sc > score or (sc == score and best is not None and c[3] is None and best[3] is not None):
                 best, score = c, sc
         item = {"text": t.get("text", ""), "role": t.get("role", "other"),
                 "size_px": t.get("size_px"), "weight": t.get("weight")}
         # ≥ 0.9 (or containment, which _sim scores ≥ 0.95): "Continue with Google" vs an OCR line "Continue with
         # Email" scored 0.8 and stole its box when OCR missed the white-on-dark Google label
         if best is not None and score >= 0.9:
-            idxs, _, box = best
+            idxs, _, box, sub = best
             first = lines[idxs[0]]
-            if len(idxs) > 1 or _norm(first["text"]) == _norm(t.get("text", "")) or score >= 0.95:
-                used.update(idxs)
+            if sub is not None or len(idxs) > 1 or _norm(first["text"]) == _norm(t.get("text", "")) or score >= 0.95:
+                used.update(words_of(best))
+            ltexts = [best[1]] if sub is not None else [lines[k]["text"] for k in idxs]
             item.update(box=box, color=first["color"], on=first["backdrop"], measured=True, lines=len(idxs),
-                        line_boxes=[lines[k]["box"] for k in idxs])
+                        line_boxes=[box] if sub is not None else [lines[k]["box"] for k in idxs], line_texts=ltexts)
             ty = first.get("typo") or {}
             item["size_px"] = ty.get("size_px") or font_px(first["text"], first["box"][2], first["box"][3], t.get("size_px"))
             if ty:
@@ -195,14 +213,30 @@ def merge(vlm: dict, meas: dict) -> dict:
         else:
             it["box"] = [prev[0] if prev else 0, (y_lo + y_hi) // 2 - 8, 200, 16]
         it["approx"] = True
+    # a block's label = the merged (vision-model) strings inside it, not raw OCR: "HM Continue with Google" (icon read
+    # as "HM") keyed the mobile Google button apart from the same button on tablet/desktop
+    blocks = [{k: v for k, v in b.items()} for b in meas["blocks"]]
+    for b in blocks:
+        if b.get("rule"):
+            continue
+        inside = [t["text"] for t in sorted(texts, key=lambda t: (t["box"][1], t["box"][0]) if t.get("box") else (0, 0))
+                  if t.get("box") and not (t.get("approx") and not t.get("inside_block"))
+                  and _inside_box(t["box"], b["box"])]   # reading order by position (the model's order varies)
+        if inside or b.get("contains_text"):
+            b["contains_text"] = inside
     return {
         "size": meas["size"],
         "background": meas["background"],
         "texts": texts,
-        "blocks": [{k: v for k, v in b.items()} for b in meas["blocks"]],
+        "blocks": blocks,
         "layout": vlm.get("layout", ""),
         "vlm_blocks": [{"kind": b.get("kind"), "fill": b.get("fill")} for b in vlm.get("blocks", [])][:20],
     }
+
+
+def _inside_box(inner, outer, slack=3) -> bool:
+    return (inner[0] >= outer[0] - slack and inner[1] >= outer[1] - slack and
+            inner[0] + inner[2] <= outer[0] + outer[2] + slack and inner[1] + inner[3] <= outer[1] + outer[3] + slack)
 
 
 def layout_facts(frame: dict) -> str:

@@ -214,10 +214,49 @@ def _rc(per_bp: dict) -> str:
     return _j(_resp({bp: per_bp[bp].get(k, "") for bp in BPS}) for k in keys)
 
 
+def _breaks(c: Item) -> tuple[list[str], dict] | None:
+    """Design line breaks per frame from the measured visual lines (OCR reads each line): (words, {bp: set of word
+    indexes a line ends after}). Widths alone moved breaks ("for training and" vs "for training" — lambda's mobile
+    heading). None when no frame knows its lines or the line words don't add up to the text."""
+    words = c.text.replace("\n", " ").split()
+    out = {}
+    for bp, a in c.at.items():
+        lt = a.get("line_texts")
+        if not lt or len(lt) < 2:
+            continue
+        counts = [len(x.split()) for x in lt]
+        if sum(counts) != len(words):
+            continue
+        ends, k = set(), 0
+        for n in counts[:-1]:
+            k += n
+            ends.add(k - 1)
+        out[bp] = ends
+    return (words, out) if out else None
+
+
+def _text_body(c: Item, br: tuple | None) -> str:
+    if not br:
+        return _jsx_text(c.text)
+    words, ends = br
+    parts = []
+    for i, w in enumerate(words):
+        parts.append(_jsx_text(w))
+        if i < len(words) - 1:
+            at = {bp: (i in ends[bp]) for bp in BPS if bp in ends}
+            if any(at.values()):
+                cls = _resp({bp: ("inline" if at.get(bp) else "hidden") for bp in BPS})
+                parts.append(f'{{" "}}<br className="{cls}" />')   # the space stays where the break is hidden
+            else:
+                parts.append(" ")
+    return "".join(parts)
+
+
 def _text(c: Item, indent: int, vis: dict, pos: str) -> list[str]:
     pad = "  " * indent
     a = {bp: c.at.get(bp) or c.at[next(iter(c.at))] for bp in BPS}
     multi = {bp: a[bp].get("lines", 1) > 1 for bp in BPS}
+    br = _breaks(c)
     cls = [_resp({bp: f"text-[{a[bp]['fs']}px]" for bp in BPS}),
            _resp({bp: f"text-[{a[bp]['color']}]" for bp in BPS}),
            _resp({bp: WEIGHT.get(a[bp]["weight"], "font-normal") for bp in BPS}),
@@ -226,7 +265,8 @@ def _text(c: Item, indent: int, vis: dict, pos: str) -> list[str]:
            _resp({bp: {"center": "text-center", "right": "text-right"}.get(a[bp].get("align"), "text-left") for bp in BPS}),
            _resp({bp: ("underline" if a[bp].get("underline") else "no-underline") for bp in BPS}),
            # wrapping text keeps its measured line length as a MAXIMUM (it still narrows on smaller screens)
-           _resp({bp: (f"max-w-[{_elem_box(c, bp if bp in c.at else next(iter(c.at)))[2]}px]" if multi[bp] else "max-w-full") for bp in BPS}),
+           # (with the design's breaks forced by <br>, 8 % slack so font-metric differences don't add a wrap)
+           _resp({bp: (f"max-w-[{round(_elem_box(c, bp if bp in c.at else next(iter(c.at)))[2] * (1.08 if br and bp in br[1] else 1))}px]" if multi[bp] else "max-w-full") for bp in BPS}),
            "min-w-0", pos]
     if all(not multi[bp] for bp in BPS) and len(c.text) <= 32:
         cls.append("whitespace-nowrap")
@@ -244,8 +284,8 @@ def _text(c: Item, indent: int, vis: dict, pos: str) -> list[str]:
         # toggled by the hamburger where the design hides it; always shown from the first frame that shows it
         first = next((b for b in BPS if b in c.at), None)
         always = f"{PREFIX[first]}block" if first and first != "mobile" else ""
-        return [f'{pad}<{tag}{href} className={{`${{menuOpen ? "block" : "hidden"}} {always} {body}`}}>{_jsx_text(c.text)}</{tag}>']
-    return [f'{pad}<{tag}{href} className="{_j([_disp(vis, "block"), body])}">{_jsx_text(c.text)}</{tag}>']
+        return [f'{pad}<{tag}{href} className={{`${{menuOpen ? "block" : "hidden"}} {always} {body}`}}>{_text_body(c, br)}</{tag}>']
+    return [f'{pad}<{tag}{href} className="{_j([_disp(vis, "block"), body])}">{_text_body(c, br)}</{tag}>']
 
 
 def _borders(at: dict) -> str:
@@ -612,7 +652,7 @@ def _container(u, bp, intent):
         if centred:
             g = max(0, min(lg, rg))
             return c(f"max-w-[{W[bp]}px]", "mx-auto", g, g), g, W[bp] - 2 * g
-        pr = max(16, min(rg, lg))
+        pr = min(max(16, min(rg, lg)), max(0, rg))
         return c(f"max-w-[{W[bp]}px]", "mx-auto", lg, pr), lg, W[bp] - lg - pr
     if intent == "full" or not centred and u[2] >= 0.85 * W[bp]:
         return c("max-w-none", "mx-0", lg, max(0, rg)), lg, W[bp] - lg - max(0, rg)
@@ -621,7 +661,7 @@ def _container(u, bp, intent):
         if bp != BPS[-1]:        # page-width below the widest frame: stretch (the next breakpoint takes over)
             return c("max-w-none", "mx-0", g, g), g, W[bp] - 2 * g
         return c(f"max-w-[{W[bp]}px]", "mx-auto", g, g), g, W[bp] - 2 * g
-    pr = max(16, min(rg, lg))    # left-anchored
+    pr = min(max(16, min(rg, lg)), max(0, rg))    # left-anchored (never more right gutter than the design has)
     return c("max-w-none", "mx-0", lg, pr), lg, W[bp] - lg - pr
 
 
@@ -796,7 +836,7 @@ def _rule_regions(items: list[Item]) -> list[Item]:
                       and y0 - 4 <= _box(c, bp)[1] and _box(c, bp)[1] + _box(c, bp)[3] <= y0 + h + 4]
             if not inside:
                 continue
-            x1 = others[0] - 1 if others else max(_box(c, bp)[0] + _box(c, bp)[2] for c in inside) + (inside and 8)
+            x1 = others[0] - 1 if others else max(_box(c, bp)[0] + _box(c, bp)[2] for c in inside)
             reg.at[bp] = {"box": [x0, y0, max(8, x1 - x0), h], "fill": None, "border": None, "border_l": a.get("fill"),
                           "radius": None, "shadow": False}
         if reg.at:

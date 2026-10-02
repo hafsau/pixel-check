@@ -119,7 +119,7 @@ def _collect(spec: dict, anchored: bool = False) -> list[Item]:
                 leading = round(pitch / fs, 2) if fs else None
             frame_texts.append((key, [x, y, w, h]))
             it.at[bp] = {"ink": [x, y, w, h], "fs": fs, "lines": int(t.get("lines") or 1), "color": t.get("color") or "#000000",
-                         "align": align, "leading": leading,
+                         "align": align, "leading": leading, "line_texts": t.get("line_texts"),
                          "underline": bool(t.get("underline")),
                          "weight": _weight(t.get("weight")), "approx": bool(t.get("approx")),
                          "tracking": float(t.get("tracking_em") or 0.0), "top_em": t.get("top_em")}
