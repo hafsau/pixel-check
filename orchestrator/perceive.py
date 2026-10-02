@@ -51,12 +51,12 @@ def _repair_json(text: str):
     return parse_json(t)
 
 
-def read_frame(client: TFClient, bp: str, png: bytes) -> dict:
+def read_frame(client: TFClient, bp: str, png: bytes, model: str | None = None) -> dict:
     w, h = config.BREAKPOINTS[bp]
     msg = [{"role": "user", "content": [{"type": "text", "text": FRAME_PROMPT.format(w=w, h=h, bp=bp)}, image_part(png)]}]
     last = ""
     for attempt, temp in enumerate((0.0, 0.3)):
-        r = client.chat(config.MODEL_VISION, msg, step=f"perceive {bp}", max_tokens=6000, temperature=temp)
+        r = client.chat(model or config.MODEL_VISION, msg, step=f"perceive {bp}", max_tokens=8000, temperature=temp)
         last = r.content or ""
         for data in (parse_json(last), _repair_json(last)):
             if isinstance(data, dict) and isinstance(data.get("texts"), list):

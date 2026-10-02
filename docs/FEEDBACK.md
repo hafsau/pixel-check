@@ -111,6 +111,8 @@ Status tags: **[confirmed]** = experienced first-hand · **[to verify]** = seen 
 **Needs work**
 - 2026-09-29 [confirmed] No NVIDIA vision model on Public endpoints; Nemotron-Nano-V2-12b and Cosmos3-Super-Reasoner are Dedicated-only — so a hackathon asking for NVIDIA models can't use one for vision without a dedicated deployment.
 - 2026-09-29 [confirmed] openbmb/MiniCPM-V-4_5 emits `<think>` reasoning by default and ran out of a 3,000-token budget on 3/10 images; 1/10 returned invalid JSON. Recall 64.6 % overall. The model card should document how to disable thinking.
+- 2026-10-02 [confirmed] Bake-off on 12 UI frames (same prompt, same measurement; text recall vs the page's DOM, end-to-end score after our compiler): Gemma 3 27B 176/183 strings, mean 80.2, 0 failures, cheapest and fastest; DeepSeek-V4.1-Flash 176/183, mean 77.8, $0.046, 51 s; GLM-5.3-Flash 136/183, mean 69.2, 1 empty reply, 179 s; MiniCPM-V-4.5 160/183, mean 65.4, 1 reply that was only `<think>` text; Kimi-K2.6 returned empty content on 9/12 frames at an 8,000-token budget ($0.72 for 12 frames — reasoning tokens billed, no answer). Gemma remains our vision model.
+- 2026-10-02 [confirmed] The live catalogue (`GET /v1/models?verbose=true`) lists google/gemma-3-27b-it as `text->text`, yet it accepts and reads images correctly — the modality field is wrong for this model.
 **Onboarding:** __
 **Build with it again? Why:** __
 
