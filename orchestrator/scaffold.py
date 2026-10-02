@@ -133,10 +133,11 @@ def _collect(spec: dict, anchored: bool = False) -> list[Item]:
                 ins = {k for k, tb in frame_texts if _centre_in(tb, bx, 0)}
                 near = None
                 if not label:
-                    cx, cy = bx[0] + bx[2] / 2, bx[1] + bx[3] / 2
-                    cand = [(max(0, tb[0] - (bx[0] + bx[2]), bx[0] - (tb[0] + tb[2])) + 2 * abs(cy - (tb[1] + tb[3] / 2)), k)
+                    # box-to-box gap (a tall column divider overlaps its label vertically: centre distance missed it)
+                    cand = [(max(0, tb[0] - (bx[0] + bx[2]), bx[0] - (tb[0] + tb[2]))
+                             + 1.5 * max(0, tb[1] - (bx[1] + bx[3]), bx[1] - (tb[1] + tb[3])), k)
                             for k, tb in frame_texts]
-                    cand = [c for c in cand if c[0] <= 48]
+                    cand = [c for c in cand if c[0] <= 64]
                     near = min(cand)[1] if cand else None
             if label:
                 key = f"b:{label}"
@@ -144,19 +145,19 @@ def _collect(spec: dict, anchored: bool = False) -> list[Item]:
                     n = 1
                     here = {k for k, _ in frame_texts}
 
-                    def seen_in(ts, at_bp, o_bp, o_keys):
-                        """Texts of ts (inside the block at at_bp) the other frame could show: present there, or not
-                        after everything it shows (a text after all of it is below that frame's fold)."""
-                        def later(k):
-                            y = items[k].at[at_bp]["ink"][1]
-                            return not any(d in o_keys and at_bp in items[d].at and items[d].at[at_bp]["ink"][1] > y + 4
-                                           for d in items if d.startswith("t:"))
-                        return {k for k in ts if k in o_keys or not later(k)}
-
                     def differs(o_bp, o):
+                        """Containment consistency: texts shown in BOTH frames must be inside both boxes or outside
+                        both. Texts missing from a frame say nothing (below its fold, or another layout puts them
+                        out of view): vercel's outer pricing box holds Hobby + Pro on mobile and all three plans on
+                        desktop, and is one element."""
                         o_keys = {k for k in items if o_bp in items[k].at}
-                        a, b_ = seen_in(ins, bp, o_bp, o_keys), seen_in(o, o_bp, bp, here)
-                        return len(a & b_) < 0.5 * max(len(a), len(b_), 1)
+                        common = here & o_keys
+                        a, b_ = ins & common, o & common
+                        if not a and not b_:
+                            return False
+                        if not (a & b_):
+                            return True
+                        return len(a ^ b_) > max(1, 0.15 * len(a | b_))
                     while key in items and any(differs(o_bp, o) for o_bp, o in inside.get(key, {}).items() if o_bp != bp):
                         n += 1
                         key = f"b:{label}%{n}"

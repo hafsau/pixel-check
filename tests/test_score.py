@@ -16,7 +16,8 @@ sys.path.insert(0, str(ROOT / "sandbox"))
 import score  # noqa: E402
 
 DEV = ROOT / "benchmarks-dev"
-PAGES = sorted(p.name for p in DEV.iterdir() if (p / "desktop.png").exists()) if DEV.exists() else []
+# "-lx" folders are the same pages re-captured in the scoring image (tools/capture_linux.py), not other pages
+PAGES = sorted(p.name for p in DEV.iterdir() if (p / "desktop.png").exists() and not p.name.endswith("-lx")) if DEV.exists() else []
 BPS = score.BREAKPOINTS
 needs_pages = pytest.mark.skipif(not PAGES, reason="no benchmarks-dev captures")
 

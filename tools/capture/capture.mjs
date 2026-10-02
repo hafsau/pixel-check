@@ -92,8 +92,16 @@ function oracleDom([vw, vh]) {
     const cs = getComputedStyle(a); if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) < 0.05) return false; } return true; };
   const beneath = (el) => { for (let a = el.parentElement; a; a = a.parentElement) {
     const c = rgb(getComputedStyle(a).backgroundColor); if (c && c.a > 0.5) return hex(c); } return "#ffffff"; };
+  // what the eye sees: colour alpha × ancestor opacities, blended over the background beneath
+  const opac = (el) => { let o = 1; for (let a = el; a && a !== document.documentElement; a = a.parentElement) o *= Number(getComputedStyle(a).opacity); return o; };
+  const seen = (c, el, under) => { const a = c.a * opac(el); if (a >= 0.99) return c;
+    const u = rgb(under) || { r: 255, g: 255, b: 255 }; return { r: c.r * a + u.r * (1 - a), g: c.g * a + u.g * (1 - a), b: c.b * a + u.b * (1 - a), a: 1 }; };
   const clip = (r) => { const x0 = Math.max(0, r.left), y0 = Math.max(0, r.top), x1 = Math.min(vw, r.right), y1 = Math.min(vh, r.bottom);
     return x1 - x0 >= 1 && y1 - y0 >= 1 ? [Math.round(x0), Math.round(y0), Math.round(x1 - x0), Math.round(y1 - y0)] : null; };
+  // stable DOM path (same HTML at every breakpoint) — ground truth for cross-frame matching, evaluation only
+  const dpath = (el) => { const parts = []; for (let a = el; a && a !== document.body; a = a.parentElement) {
+    const sib = a.parentElement ? [...a.parentElement.children].indexOf(a) : 0; parts.push(`${a.tagName.toLowerCase()}:${sib}`); }
+    return parts.reverse().join("/"); };
   const role = (el) => {
     const tag = (t) => el.closest(t);
     if (el.closest("button,[role=button],input[type=submit]")) return "button";
@@ -106,17 +114,21 @@ function oracleDom([vw, vh]) {
   const texts = [];
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    const t = n.textContent.replace(/\s+/g, " ").trim(); const el = n.parentElement;
-    if (!t || !el || !visible(el)) continue;
+    const raw = n.textContent.replace(/\s+/g, " ").trim(); const el = n.parentElement;
+    if (!raw || !el || !visible(el)) continue;
+    const tt = getComputedStyle(el).textTransform;   // the eye (and OCR) sees the transformed string
+    const t = tt === "uppercase" ? raw.toUpperCase() : tt === "lowercase" ? raw.toLowerCase()
+      : tt === "capitalize" ? raw.replace(/\b\w/g, (m) => m.toUpperCase()) : raw;
     const range = document.createRange(); range.selectNodeContents(n);
     const lines = [...range.getClientRects()].map(clip).filter(Boolean);
     if (!lines.length) continue;
-    const cs = getComputedStyle(el); const c = rgb(cs.color);
-    if (!c || c.a < 0.05) continue;
-    texts.push({ text: t, lines, size_px: parseFloat(cs.fontSize), weight: Number(cs.fontWeight) || 400, color: hex(c),
+    const cs = getComputedStyle(el); const c0 = rgb(cs.color);
+    if (!c0 || c0.a < 0.05) continue;
+    const c = seen(c0, el, beneath(el.parentElement ? el : el));
+    texts.push({ text: t, lines, line_height_px: parseFloat(cs.lineHeight) || null, size_px: parseFloat(cs.fontSize), weight: Number(cs.fontWeight) || 400, color: hex(c),
       letter_spacing_px: cs.letterSpacing === "normal" ? 0 : parseFloat(cs.letterSpacing) || 0,
       underline: (cs.textDecorationLine || "").includes("underline"), role: role(el), tag: el.tagName.toLowerCase(),
-      align: cs.textAlign });
+      align: cs.textAlign, path: dpath(el) + "#" + [...el.childNodes].indexOf(n) });
   }
   for (const el of document.querySelectorAll("input,textarea")) {
     if (!visible(el) || el.value || !el.placeholder) continue;
@@ -124,7 +136,7 @@ function oracleDom([vw, vh]) {
     const ps = getComputedStyle(el, "::placeholder"); const cs = getComputedStyle(el); const c = rgb(ps.color) || rgb(cs.color);
     texts.push({ text: el.placeholder.replace(/\s+/g, " ").trim(), lines: [r], size_px: parseFloat(cs.fontSize),
       weight: Number(cs.fontWeight) || 400, color: c ? hex(c) : "#757575", letter_spacing_px: 0, underline: false,
-      role: "input-placeholder", tag: el.tagName.toLowerCase(), placeholder: true });
+      role: "input-placeholder", tag: el.tagName.toLowerCase(), placeholder: true, path: dpath(el) });
   }
   const blocks = [];
   for (const el of document.body.querySelectorAll("*")) {
@@ -132,26 +144,40 @@ function oracleDom([vw, vh]) {
     const cs = getComputedStyle(el); const R = el.getBoundingClientRect(); const box = clip(R);
     if (!box) continue;
     const bg = rgb(cs.backgroundColor); const under = beneath(el);
-    const fill = bg && bg.a > 0.5 ? hex(bg) : null;
-    const side = (s) => { const w = parseFloat(cs[`border${s}Width`]); const c = rgb(cs[`border${s}Color`]);
-      return w >= 0.5 && cs[`border${s}Style`] !== "none" && c && c.a > 0.3 ? { w, c: hex(c) } : null; };
+    const fill = bg && bg.a * opac(el) > 0.15 ? hex(seen(bg, el, under)) : null;
+    // a translucent border (Tailwind black/10 on white) is visible: judge it by its blend over what is beneath
+    const side = (s) => { const w = parseFloat(cs[`border${s}Width`]); const c0 = rgb(cs[`border${s}Color`]);
+      if (!(w >= 0.5 && cs[`border${s}Style`] !== "none" && c0 && c0.a > 0.02)) return null;
+      const c = seen(c0, el, fill || under); const u = rgb(fill || under) || { r: 255, g: 255, b: 255 };
+      return Math.abs(c.r - u.r) + Math.abs(c.g - u.g) + Math.abs(c.b - u.b) >= 12 ? { w, c: hex(c) } : null; };
     const sides = { Top: side("Top"), Right: side("Right"), Bottom: side("Bottom"), Left: side("Left") };
+    // a Tailwind ring is a box-shadow with 0 offset, 0 blur and a spread: it looks (and measures) like a border
+    // (Tailwind stacks several layers, the first ones transparent 0-size placeholders: check each layer)
+    const layers = (cs.boxShadow || "none") === "none" ? [] : cs.boxShadow.split(/,(?![^(]*\))/);
+    let ringC = null;
+    for (const L of layers) {
+      const col = (L.match(/(rgba?\([^)]*\)|oklch\([^)]*\)|lab\([^)]*\)|color\([^)]*\)|#[0-9a-f]{3,8})/i) || [null])[0];
+      const lens = [...L.replace(col || "", "").matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((m) => parseFloat(m[1]));
+      const c = rgb(col || cs.color);
+      if (lens.length >= 4 && lens[0] === 0 && lens[1] === 0 && lens[2] === 0 && lens[3] >= 0.5 && c && c.a > 0.3) { ringC = c; break; }
+    }
     // a bordered box cut by the viewport edge is still a bordered box (not three loose rules)
-    const cut = { Top: R.top < 0, Right: R.right > vw, Bottom: R.bottom > vh, Left: R.left < 0 };
+    const cut = { Top: R.top < 0.5, Right: R.right > vw - 0.5, Bottom: R.bottom > vh - 0.5, Left: R.left < 0.5 };
     const nSides = Object.values(sides).filter(Boolean).length;
-    const all = nSides >= 2 && Object.keys(sides).every((k) => sides[k] || cut[k]) ? (sides.Top || sides.Left || sides.Right || sides.Bottom) : null;
-    const shadow = cs.boxShadow && cs.boxShadow !== "none";
+    const all = nSides >= 2 && Object.keys(sides).every((k) => sides[k] || cut[k]) ? (sides.Top || sides.Left || sides.Right || sides.Bottom)
+      : ringC && ringC.a > 0.3 ? { w: 1, c: hex(ringC) } : null;
+    const shadow = cs.boxShadow && cs.boxShadow !== "none" && !ringC;
     const paintsFill = fill && fill !== under;
     if (paintsFill || all || shadow) {
       blocks.push({ box, fill: paintsFill || all || shadow ? fill : null, border: all ? all.c : null,
-        radius: Math.round(parseFloat(cs.borderTopLeftRadius) || 0), shadow: !!shadow, tag: el.tagName.toLowerCase() });
+        radius: Math.round(parseFloat(cs.borderTopLeftRadius) || 0), shadow: !!shadow, tag: el.tagName.toLowerCase(), path: dpath(el) });
     }
     if (!all) for (const [s, v] of Object.entries(sides)) {
       if (!v) continue;
       const r = s === "Top" ? [R.left, R.top, R.width, v.w] : s === "Bottom" ? [R.left, R.bottom - v.w, R.width, v.w]
         : s === "Left" ? [R.left, R.top, v.w, R.height] : [R.right - v.w, R.top, v.w, R.height];
       const rb = clip({ left: r[0], top: r[1], right: r[0] + r[2], bottom: r[1] + r[3] });
-      if (rb && (rb[2] >= 8 || rb[3] >= 8)) blocks.push({ box: rb, fill: v.c, rule: true, tag: el.tagName.toLowerCase() });
+      if (rb && (rb[2] >= 8 || rb[3] >= 8)) blocks.push({ box: rb, fill: v.c, rule: true, tag: el.tagName.toLowerCase(), path: dpath(el) + "|" + s });
     }
   }
   const pageBg = rgb(getComputedStyle(document.body).backgroundColor);

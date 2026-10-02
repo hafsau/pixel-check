@@ -51,18 +51,29 @@ def frame(slug: str, bp: str) -> dict:
     dom = json.loads((d / f"{bp}.oracle.json").read_text())
     texts = []
     for t in dom["texts"]:
-        lines = [b for b in (_ink(mask, r) for r in t["lines"]) if b]
+        rects = sorted(t["lines"], key=lambda r: r[1])
+        fs = max(8, int(round(t["size_px"])))
+        w = _snap_weight(t["weight"])
+        hr, _, top = metrics(t["text"], w)
+        # an inline text rect is its font CONTENT box (ascender line → descender line), whatever the line-height, so
+        # the glyph ink starts top·fs below it (Inter metrics, as perception assumes); the pixel crop only refines
+        # inside that band — a free crop caught the neighbouring line's descenders under tight leading (vercel's
+        # 2-line heading: +17 px on line 2, and every element below inherited it)
+        lines = []
+        for r in rects:
+            y0 = r[1] + top * fs
+            band = [r[0], int(y0 - 1), r[2], int(hr * fs + 3)]
+            ik = _ink(mask, band)
+            lines.append([ik[0], ik[1], ik[2], ik[3]] if ik else [r[0], int(round(y0)), r[2], int(round(hr * fs))])
         if not lines:
             continue
         x0, y0 = min(b[0] for b in lines), min(b[1] for b in lines)
         x1, y1 = max(b[0] + b[2] for b in lines), max(b[1] + b[3] for b in lines)
-        fs = max(8, int(round(t["size_px"])))
-        w = _snap_weight(t["weight"])
-        top = metrics(t["text"], w)[2]
         texts.append({"text": t["text"], "role": t["role"], "size_px": fs, "weight": w,
                       "box": [x0, y0, x1 - x0, y1 - y0], "color": t["color"], "measured": True, "lines": len(lines),
                       "line_boxes": lines, "tracking_em": round(t.get("letter_spacing_px", 0) / fs, 3),
-                      "top_em": round(top, 3), "underline": bool(t.get("underline")), "oracle": True})
+                      "top_em": round(top, 3), "underline": bool(t.get("underline")), "oracle": True,
+                      "path": t.get("path")})
     blocks, seen = [], set()
     for b in dom["blocks"]:
         key = (tuple(b["box"]), b.get("rule", False))
@@ -74,7 +85,7 @@ def frame(slug: str, bp: str) -> dict:
             continue   # a page-size wrapper is the background (perception never reports it as a block)
         inside = [t["text"] for t in texts if bx[0] <= t["box"][0] + t["box"][2] / 2 <= bx[0] + bx[2]
                   and bx[1] <= t["box"][1] + t["box"][3] / 2 <= bx[1] + bx[3]]
-        blk = {"box": bx, "fill": b.get("fill"), "contains_text": inside}
+        blk = {"box": bx, "fill": b.get("fill"), "contains_text": inside, "path": b.get("path")}
         if b.get("rule"):
             blk["rule"] = True
         else:
@@ -84,7 +95,26 @@ def frame(slug: str, bp: str) -> dict:
             "layout": "", "vlm_blocks": []}
 
 
+def visible_gt(slug: str, bp: str):
+    """Ground-truth text for the scorer = DOM text WITH visible ink in the frame (the capture's text.json also lists
+    visually hidden strings — an sr-only "Password" label, a stray "." — which no reproduction can show, so every
+    candidate lost text score for them). Original kept as <bp>.text.raw.json."""
+    d = ROOT / "benchmarks-dev" / slug
+    raw = d / f"{bp}.text.raw.json"
+    if not raw.exists():
+        raw.write_text((d / f"{bp}.text.json").read_text())
+    img = np.asarray(Image.open(d / f"{bp}.png").convert("RGB")).astype(int)
+    nt = np.asarray(Image.open(d / f"{bp}.notext.png").convert("RGB")).astype(int)
+    mask = np.abs(img - nt).sum(axis=2) > 40
+    keep = [t for t in json.loads(raw.read_text()) if len(t["text"].strip(" .·•|")) >= 1
+            and (lambda b: mask[max(0, b[1]):b[1] + b[3], max(0, b[0]):b[0] + b[2]].sum() >= 6)(t["box"])]
+    (d / f"{bp}.text.json").write_text(json.dumps(keep, indent=1))
+    return len(keep)
+
+
 def build(slug: str) -> Path:
+    for bp in BPS:
+        visible_gt(slug, bp)
     spec = {"breakpoints": {bp: frame(slug, bp) for bp in BPS}, "oracle": True}
     out = ROOT / "out" / "specs" / f"{slug}.oracle.json"
     out.write_text(json.dumps(spec, indent=1))

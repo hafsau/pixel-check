@@ -3,13 +3,23 @@ sys.path.insert(0,'sandbox'); import score, integrity
 from orchestrator.scaffold import compile_scaffold
 from orchestrator.fluid import compile_fluid
 import fluidity
-V2='--v2' in sys.argv
+V2='--v2' in sys.argv or '--oracle' in sys.argv
+ORACLE='--oracle' in sys.argv
+INTENTS='--intents' in sys.argv
 pages=[a for a in sys.argv[1:] if not a.startswith('--')]
 from PIL import Image
 for page in pages:
-    spec=json.loads(pathlib.Path(f"out/specs/{page}.json").read_text())
-    code=(compile_fluid if V2 else compile_scaffold)(spec)
-    p=pathlib.Path(f"out/{'fluid' if V2 else 'scaffold'}/{page}"); p.mkdir(parents=True,exist_ok=True); (p/"App.jsx").write_text(code)
+    spec=json.loads(pathlib.Path(f"out/specs/{page}{'.oracle' if ORACLE else ''}.json").read_text())
+    if V2 and INTENTS:
+        from orchestrator import intent
+        from orchestrator.tf_client import TFClient
+        pf=pathlib.Path(f"out/specs/{page}{'.oracle' if ORACLE else ''}.plan.json")
+        raw=json.loads(pf.read_text()) if pf.exists() else intent.plan_intents(TFClient(run_id='plan-'+page), spec)[1]['raw']
+        pf.write_text(json.dumps(raw))
+        code=compile_fluid(spec, intent.revalidate(spec, raw))
+    else:
+        code=(compile_fluid if V2 else compile_scaffold)(spec)
+    p=pathlib.Path(f"out/{'fluid-oracle' if ORACLE else 'fluid' if V2 else 'scaffold'}{'-plan' if INTENTS else ''}/{page}"); p.mkdir(parents=True,exist_ok=True); (p/"App.jsx").write_text(code)
     lint=json.loads(subprocess.run(["node","lint.mjs",str((p/"App.jsx").resolve())],cwd="sandbox",capture_output=True,text=True).stdout)
     subprocess.run(["node","render.mjs","--in",str((p/"App.jsx").resolve()),"--out",str(p.resolve())],cwd="sandbox",capture_output=True)
     if not (p/"checks.json").exists(): print(page,"BUILD FAILED"); continue

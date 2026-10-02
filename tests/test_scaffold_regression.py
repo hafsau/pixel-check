@@ -21,8 +21,10 @@ from orchestrator.scaffold import compile_scaffold  # noqa: E402
 
 FLOORS = {"netflix-signin": 81.0, "calcom-signup": 58.0, "vercel-pricing": 62.0, "lambda": 40.0}
 # scaffold v2 (fluid compiler), Oct 1: (match floor, must pass the in-between-widths fluidity checks)
-FLUID_FLOORS = {"netflix-signin": (88.0, True), "calcom-signup": (79.0, True), "vercel-pricing": (27.0, False),
-                "lambda": (42.0, False)}
+FLUID_FLOORS = {"netflix-signin": (88.0, True), "calcom-signup": (79.0, True), "vercel-pricing": (60.0, True),
+                "lambda": (44.0, True)}
+# compiler ceiling: fluid compiler on DOM oracle specs of the Linux re-captures (tools/oracle_spec.py), Oct 1 evening
+ORACLE_FLOORS = {"calcom-signup-lx": 86.0, "vercel-pricing-lx": 85.0, "lambda-lx": 80.0, "netflix-signin-lx": 80.0}
 
 
 @pytest.mark.parametrize("page", sorted(FLOORS))
@@ -35,8 +37,14 @@ def test_fluid_page(page, tmp_path):
     _check(page, tmp_path, compile_fluid, *FLUID_FLOORS[page])
 
 
-def _check(page, tmp_path, compiler, floor, fluid_pass):
-    spec_p, dev = ROOT / "out" / "specs" / f"{page}.json", ROOT / "benchmarks-dev" / page
+@pytest.mark.parametrize("page", sorted(ORACLE_FLOORS))
+def test_fluid_oracle_page(page, tmp_path):
+    _check(page, tmp_path, compile_fluid, ORACLE_FLOORS[page], True, oracle=True)
+
+
+def _check(page, tmp_path, compiler, floor, fluid_pass, oracle=False):
+    spec_p = ROOT / "out" / "specs" / f"{page}{'.oracle' if oracle else ''}.json"
+    dev = ROOT / "benchmarks-dev" / page
     if not spec_p.exists() or not dev.exists():
         pytest.skip("spec/capture not present")
     (tmp_path / "App.jsx").write_text(compiler(json.loads(spec_p.read_text())))
