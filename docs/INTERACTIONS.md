@@ -15,17 +15,20 @@ Per page: the 3 static frames (as now) + state frames, each `{bp, state name, tr
 ## Pipeline (each stage written test-first)
 | # | Stage | Deterministic / model | Tests first |
 |---|---|---|---|
-| 1 | `states.state_diff(base, state)` → appeared / disappeared / moved / persisted, kind (overlay · drawer · inline · none), panel box | deterministic | `tests/test_states.py` (12, incl. real lambda menu) ✅ |
-| 2 | Trigger resolution: trigger box/label → element id in the compiled base (`data-pc`) | deterministic | duplicate labels, icon-only triggers, trigger absent at a bp |
-| 3 | Panel content: compile the appeared elements with the fluid compiler into a JSX fragment (per-bp, same classes as the page) | deterministic | fragment compiles, lints, contains every appeared text |
-| 4 | **Interaction writer (Nemotron)**: given base App.jsx, trigger id, kind, panel fragment, diff → edits App.jsx: state + handlers + mounting (overlay `fixed inset-0`, drawer side panel, inline insert) + a11y (aria-expanded/controls, Escape, focus) | **Nemotron** | output parses, lints, keeps static layout byte-identical outside the edit |
-| 5 | Acceptance tests generated from the state frames, run in the sandbox (`render.mjs --interact`): base matches; click trigger → state frame score ≥ threshold; click/Escape → back to base; keyboard Enter works; aria-expanded toggles | deterministic | harness tested on fixture components (toggle, drawer, accordion) incl. failing fixtures |
-| 6 | Agent loop: write → run tests → feed failures back → revise (≤ 3 attempts), verified adoption | Nemotron + sandbox | loop stops on pass, never adopts a version that breaks the static score |
+| 1 | `states.state_diff(base, state)` → appeared / disappeared / moved / persisted, kind (overlay · drawer · inline · none), panel box; `dim_region`, `backdrop`, `trigger_look` from the images | deterministic | `tests/test_states.py` ✅ |
+| 2 | Trigger resolution: trigger box → `<button data-trigger>` in the compiled base | deterministic | `tests/test_triggers.py` ✅ |
+| 3 | Panel content (shared or per-breakpoint + wrapper), compiled trigger open look | deterministic | `tests/test_panel.py`, `tests/test_glyphs.py`, `tests/test_measure_crosses.py` ✅ |
+| 4 | **Interaction writer (Nemotron Ultra)**: four sections → deterministic assembly | **Nemotron** | `tests/test_writer.py` ✅ |
+| 5 | Generated acceptance tests (`render.mjs --interact`, `acceptance.py`), run in the sandbox (`sandbox_runner`, image v10) | deterministic | `tests/test_interact.py` (fixtures: good, no handler, no Escape, covered, no aria-controls, dead classes, duplicate ids), `tests/test_sandbox_runner.py` ✅ |
+| 6 | Agent loop (`interact_loop.py`) | Nemotron + sandbox | `tests/test_interact_loop.py` ✅ — lambda perception path in the sandbox: **6/6 pass** (first draft 0/6, revision 6/6) |
 | 7 | Ablation: no interaction · deterministic fallback (compiler's inline menu-link toggle) · Nemotron writer | — | numbers per state frame |
 
 ## Gates (re-planned Oct 2)
 - **Gate A (~Oct 5)**: stages 1–6 on lambda's mobile menu end to end; generated tests pass; state-frame score ≥ 75;
   static score unchanged; cost ≤ $0.15/run.
+  Oct 2 measurement (sandbox, perception path, 6 runs, image v10): end to end ✓ (mobile **and** tablet), tests pass
+  6/6, state scores mobile 87.2 / tablet 84.4, static render pixel-identical (test), $0.0042 + ~16 s sandbox per run.
+  **Criteria met — council review pending before it counts as passed.**
 - **Gate B (~Oct 8)**: overlay + drawer + inline (accordion/tabs) on dev pages; ablation shows Nemotron ≥ +10 on
   state frames over the deterministic fallback.
 - **Gate C (~Oct 11)**: Hafsa's original screens with state frames. Feature freeze Oct 18 (unchanged).

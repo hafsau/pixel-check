@@ -244,6 +244,39 @@ def thin_lines(img: np.ndarray, text_boxes: list, min_h_len: int = 24, min_v_len
     return out
 
 
+def crosses(img: np.ndarray, text_boxes: list, min_len: int = 8, max_len: int = 24) -> list[dict]:
+    """Small "+" icons → two thin rules crossing at their centres (fluid._glyphs turns the pair into one glyph).
+    An ink component of plus size whose centre row AND centre column are mostly ink while the box is mostly empty
+    (a T-junction, a letter or a filled square fails one of those). Components inside text boxes are skipped."""
+    bg = background(img)
+    ink = np.linalg.norm(img - bg, axis=-1) > 40
+    for tb in text_boxes:
+        x, y, w, h = [int(v) for v in tb]
+        ink[max(0, y - 1):y + h + 1, max(0, x - 1):x + w + 1] = False
+    lab, n = ndimage.label(ink, np.ones((3, 3), bool))
+    out = []
+    for i, sl in enumerate(ndimage.find_objects(lab), 1):
+        ys, xs = sl
+        w, h = xs.stop - xs.start, ys.stop - ys.start
+        if not (min_len <= w <= max_len and min_len <= h <= max_len) or abs(w - h) > 4:
+            continue
+        comp = lab[sl] == i
+        if comp.mean() > 0.45:
+            continue
+        rows, cols = comp.mean(axis=1), comp.mean(axis=0)
+        hr = np.nonzero(rows >= 0.8)[0]      # rows of the horizontal bar
+        vc = np.nonzero(cols >= 0.8)[0]      # columns of the vertical bar
+        if not len(hr) or not len(vc) or len(hr) > 3 or len(vc) > 3:
+            continue
+        cy, cx = (hr.min() + hr.max()) / 2, (vc.min() + vc.max()) / 2
+        if abs(cy - (h - 1) / 2) > 1.5 or abs(cx - (w - 1) / 2) > 1.5:
+            continue                          # bars must cross at the middle (a "T" crosses at an end)
+        fill = _hex(img[ys, xs][comp].mean(axis=0))
+        out.append({"box": [int(xs.start), int(ys.start + hr.min()), int(w), int(len(hr))], "fill": fill})
+        out.append({"box": [int(xs.start + vc.min()), int(ys.start), int(len(vc)), int(h)], "fill": fill})
+    return out
+
+
 def block_labels(img: np.ndarray, blocks: list, lines: list) -> list[dict]:
     """OCR inside control-sized filled boxes that have no text yet, one line each, contrast-stretched and inverted
     when the text is lighter than the fill. The whole-page pass misses light-on-dark button labels ("LAUNCH GPU
@@ -409,6 +442,8 @@ def measure(png: bytes) -> dict:
         lines.remove(l)
         for b in blocks:
             b["contains_text"] = [t for t in (b.get("contains_text") or []) if t != l["text"]]
+    for r in crosses(img, [l["box"] for l in lines]):   # small "+" icons (a pair of crossing rules each)
+        blocks.append({"box": r["box"], "fill": r["fill"], "rule": True, "contains_text": []})
     for l in block_labels(img, blocks, lines):   # light-on-dark button labels
         l["color"], l["backdrop"] = ink_and_backdrop(img, l["box"])
         l["typo"] = infer(l["text"], l["box"], img)

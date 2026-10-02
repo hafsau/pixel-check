@@ -7,10 +7,11 @@ load_dotenv()
 
 TF_BASE = os.environ.get("TF_BASE", "https://api.tokenfactory.nebius.com/v1/")
 SANDBOX_BASE = os.environ.get("SANDBOX_BASE", "https://api.tokenfactory.nebius.com/sandboxes/v1")
-RUNTIME_IMAGE = os.environ.get("RUNTIME_IMAGE", "tag:pixel-check-runtime:v7")
+RUNTIME_IMAGE = os.environ.get("RUNTIME_IMAGE", "tag:pixel-check-runtime:v10")
 
 SANDBOX_TIMEOUT_S = int(os.environ.get("SANDBOX_TIMEOUT_S", "180"))
 SANDBOX_POLL_S = 1.0
+INTERACT_TIMEOUT_S = int(os.environ.get("INTERACT_TIMEOUT_S", "300"))  # 5 scenarios × bps, each a fresh page
 SANDBOX_OUTPUT_CAP = 10 * 1024 * 1024  # API max for truncate_output_at
 
 BREAKPOINTS = {"mobile": (390, 844), "tablet": (768, 1024), "desktop": (1280, 800)}
@@ -35,6 +36,10 @@ MODEL_PLANNER = os.environ.get("MODEL_PLANNER", "nvidia/nemotron-3-super-120b-a1
 # responsive-intent planner (Oct 1 probe, vercel cards): Ultra thinking-off found all 3 cards (48 ids, $0.004, 2 s);
 # Super off found 2 partial cards; Super/Ultra with thinking ran out of 8-12k tokens without an answer
 MODEL_INTENT = os.environ.get("MODEL_INTENT", "nvidia/Nemotron-3-Ultra-550b-a55b")
+# interaction writer (docs/INTERACTIONS.md stage 4): Ultra thinking-off wrote the best code in the Sep coder tests
+MODEL_WRITER = os.environ.get("MODEL_WRITER", "nvidia/Nemotron-3-Ultra-550b-a55b")
+# revisions with thinking=low (Oct 2): 3-4x cost, 2/4 replies without sections, no gain → off by default
+WRITER_REVISION_THINKING = os.environ.get("WRITER_REVISION_THINKING", "off")
 MODEL_EDITOR = os.environ.get("MODEL_EDITOR", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_CRITIC = os.environ.get("MODEL_CRITIC", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_FAST = os.environ.get("MODEL_FAST", "nvidia/Nemotron-3_5-Lightning")

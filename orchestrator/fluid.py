@@ -18,6 +18,8 @@ responsive-intent plan (`intents`, see orchestrator/intent.py).
 """
 from __future__ import annotations
 
+import re
+
 from .scaffold import (BPS, MENU, PREFIX, SEGMENTS, SIZES, TAGS, Item, _attr, _bands, _bands_consistent, _collect,
                        _detect_menu, _elem_box, _jsx_text, _link_segments, _placeholder_variant, _px, _resp, _seg,
                        _tree)
@@ -322,6 +324,12 @@ def _one_line(c: Item) -> bool:
 
 
 def _block(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]:
+    lines = _block_inner(c, indent, cont_w, vis, pos)
+    name = getattr(c, "trigger", None)
+    return _mark_trigger(lines, name) if name else lines
+
+
+def _block_inner(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]:
     pad = "  " * indent
     at = {bp: c.at.get(bp) or c.at[next(iter(c.at))] for bp in BPS}
     box = {bp: at[bp]["box"] for bp in BPS}
@@ -332,6 +340,15 @@ def _block(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]
              _resp({bp: f"rounded-[{at[bp]['radius']}px]" if at[bp].get("radius") else "rounded-none" for bp in BPS}),
              _resp({bp: "shadow-sm" if at[bp].get("shadow") else "shadow-none" for bp in BPS})]
     texts = [ch for ch in c.children if ch.kind == "text"]
+    if getattr(c, "glyph", None) == "plus":
+        t = _resp({bp: f"h-[{at[bp].get('thick', 2)}px]" for bp in BPS})
+        tw = _resp({bp: f"w-[{at[bp].get('thick', 2)}px]" for bp in BPS})
+        col = _resp({bp: f"bg-[{at[bp].get('fill') or '#000000'}]" for bp in BPS})
+        size = _j([_resp({bp: f"w-[{box[bp][2]}px]" for bp in BPS}), _resp({bp: f"h-[{box[bp][3]}px]" for bp in BPS})])
+        return [f'{pad}<div aria-hidden="true" data-glyph="plus" className="{_j([_disp(vis, "block"), "relative", size, "shrink-0", pos])}">',
+                f'{pad}  <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 {t} {col}" />',
+                f'{pad}  <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 {tw} {col}" />',
+                f"{pad}</div>"]
     if getattr(c, "grid", None):
         return _grid(c, indent, width, style, vis, pos)
     if MENU and c.key == MENU.get("trigger"):
@@ -715,7 +732,9 @@ def _decorations(items: list[Item]) -> list[Item]:
         return any(o is not c and bp in o.at and _centre(_box(o, bp), c.at[bp]["box"], 0)
                    and _box(o, bp)[2] * _box(o, bp)[3] < c.at[bp]["box"][2] * c.at[bp]["box"][3]
                    for bp in c.at for o in others)
-    leaves = [c for c in items if c.kind == "block" and not holds(c)]
+    # thin lines (dividers, rules) are layout, never decoration — a menu's 12 row dividers looked like a "pattern"
+    leaves = [c for c in items if c.kind == "block" and not holds(c)
+              and not all(min(a["box"][2], a["box"][3]) <= 3 for a in c.at.values())]
 
     def partial(c, bp):
         a = c.at[bp]["box"]
@@ -766,6 +785,37 @@ def _decorations(items: list[Item]) -> list[Item]:
                 deco |= {id(c) for c in lone}
     STATE["decorations_dropped"] = len(deco)
     return [c for c in items if id(c) not in deco]
+
+
+def _glyphs(items: list[Item]) -> list[Item]:
+    """Two short (≤ 24 px) thin rules crossing at their centres in every frame they share = one "+" glyph."""
+    rules = [c for c in items if c.kind == "block" and not c.children
+             and all(min(a["box"][2], a["box"][3]) <= 3 and max(a["box"][2], a["box"][3]) <= 24 for a in c.at.values())]
+    horiz = [c for c in rules if all(a["box"][2] > a["box"][3] for a in c.at.values())]
+    vert = [c for c in rules if all(a["box"][3] > a["box"][2] for a in c.at.values())]
+    used, out = set(), []
+    for h in horiz:
+        for v in vert:
+            if id(v) in used or id(h) in used or set(h.at) != set(v.at):
+                continue
+            ok = True
+            for bp in h.at:
+                hb, vb = h.at[bp]["box"], v.at[bp]["box"]
+                if abs((hb[0] + hb[2] / 2) - (vb[0] + vb[2] / 2)) > 2 or abs((hb[1] + hb[3] / 2) - (vb[1] + vb[3] / 2)) > 2:
+                    ok = False
+            if not ok:
+                continue
+            g = Item("glyph:" + h.key, "block")
+            g.glyph = "plus"
+            for bp in h.at:
+                hb, vb = h.at[bp]["box"], v.at[bp]["box"]
+                x0, y0 = min(hb[0], vb[0]), min(hb[1], vb[1])
+                x1, y1 = max(hb[0] + hb[2], vb[0] + vb[2]), max(hb[1] + hb[3], vb[1] + vb[3])
+                g.at[bp] = {"box": [x0, y0, x1 - x0, y1 - y0], "fill": h.at[bp].get("fill"), "thick": hb[3],
+                            "border": None, "radius": None, "shadow": False}
+            used |= {id(h), id(v)}
+            out.append(g)
+    return [c for c in items if id(c) not in used] + out
 
 
 def _frames(items: list[Item]) -> list[Item]:
@@ -988,15 +1038,76 @@ def _merge_variants(items: list[Item]) -> list[Item]:
     return [c for c in items if id(c) not in gone]
 
 
-def compile_fluid(spec: dict, intents: dict | None = None) -> str:
+def _apply_triggers(items: list[Item], triggers: dict | None) -> dict:
+    """Interaction triggers (docs/INTERACTIONS.md stage 2): {state: {bp: box}} → the element to mark, by overlap:
+    a box matching the trigger (IoU ≥ 0.5); else the control holding it (the trigger is its label); else a new box
+    around what lies inside the trigger area (lambda's hamburger is a transparent button over three bars). The marked
+    element renders as <button type="button" data-trigger="state">. Returns {state: item key | None}."""
+    out = {}
+    for name, boxes in (triggers or {}).items():
+        boxes = {bp: b for bp, b in (boxes or {}).items() if b and bp in BPS}
+        blocks = [c for c in items if c.kind == "block"]
+        score = lambda c: sum(_iou(c.at[bp]["box"], b) for bp, b in boxes.items() if bp in c.at)
+        best = max(blocks, key=score, default=None)
+        target = best if best is not None and score(best) / max(len(boxes), 1) >= 0.5 else None
+        if target is None:
+            # (at least ~ the trigger's size: a hamburger bar under the trigger's centre is not its control)
+            holders = [c for c in blocks if any(bp in c.at and _centre(b, c.at[bp]["box"], 0) and
+                                                0.8 * b[2] * b[3] <= c.at[bp]["box"][2] * c.at[bp]["box"][3] <= 8 * b[2] * b[3]
+                                                for bp, b in boxes.items())]
+            target = min(holders, key=lambda c: min(c.at[bp]["box"][2] * c.at[bp]["box"][3] for bp in c.at), default=None)
+        if target is None:
+            inside = [c for c in items if any(bp in c.at and _centre(_box(c, bp), b, 0) for bp, b in boxes.items())]
+            if inside:
+                target = Item(f"trigger:{name}", "block")
+                target.at = {bp: {"box": list(b), "fill": None, "border": None, "radius": None, "shadow": False}
+                             for bp, b in boxes.items()}
+                items.append(target)
+        if target is not None:
+            target.trigger = name
+        out[name] = target.key if target is not None else None
+    return out
+
+
+def _iou(a, b) -> float:
+    ix = max(0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+    i = ix * iy
+    u = a[2] * a[3] + b[2] * b[3] - i
+    return i / u if u else 0.0
+
+
+def _mark_trigger(lines: list[str], name: str) -> list[str]:
+    """Make the element a real button carrying data-trigger (opening tag = first line; closing = last line)."""
+    first = lines[0]
+    stripped = first.lstrip()
+    pad = first[:len(first) - len(stripped)]
+    m = re.match(r"<(\w+)", stripped)
+    tag = m.group(1)
+    rest = stripped[m.end():]
+    rest = rest.replace(' type="button"', "")
+    lines = list(lines)
+    lines[0] = f'{pad}<button type="button" data-trigger="{name}"{rest}'
+    if not stripped.rstrip().endswith("/>"):
+        lines[-1] = lines[-1].replace(f"</{tag}>", "</button>")
+    return lines
+
+
+def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None = None, auto_menu: bool = True,
+                  fragment: bool = False) -> str:
+    """triggers: {state: {bp: box}} interaction triggers to mark (stage 2); auto_menu: the compiler's own
+    deterministic hamburger toggle (off when the interaction writer provides the behaviour); fragment: return only
+    the body's JSX lines (no root, no fold handling) — the content of an interaction panel (stage 3)."""
     SEGMENTS.clear()
     items = prepare(spec)
     intents = intents or {}
     if intents.get("cards"):
         items = _apply_cards(items, intents["cards"])
+    resolved = _apply_triggers(items, triggers)
     MENU.clear()
-    MENU.update(_detect_menu(items))
-    roots = _lift_siblings(_tree2(_rule_regions(_edge_rules(_frames(_decorations(items))))))
+    if auto_menu:
+        MENU.update(_detect_menu(items))
+    roots = _lift_siblings(_tree2(_rule_regions(_edge_rules(_frames(_glyphs(_decorations(items)))))))
     _synth(roots)
     flat = []
     def walk(its):
@@ -1006,7 +1117,7 @@ def compile_fluid(spec: dict, intents: dict | None = None) -> str:
     walk(roots)
     keep = {k: STATE[k] for k in ("plan_fixes", "decorations_dropped") if k in STATE}
     STATE.clear()
-    STATE.update({"all": flat, "intents": intents, "bands": [], **keep})
+    STATE.update({"all": flat, "intents": intents, "bands": [], "triggers": resolved, **keep})
 
     ref = max(BPS, key=lambda bp: sum(1 for c in roots if bp in c.at))
     bands = _bands(roots, ref)
@@ -1063,6 +1174,11 @@ def compile_fluid(spec: dict, intents: dict | None = None) -> str:
         return lines
 
     out = []
+    if fragment:     # a panel has no fold: every band in order
+        for k, b in enumerate(bands):
+            out += emit_band(k, b, 3)
+        _link_segments()
+        return "\n".join(out)
     if tail:
         tail_top = {bp: min((_box(c, bp)[1] for b in tail for c in b if bp in c.at), default=None) for bp in BPS}
         mh = _resp({bp: (f"min-h-[{tail_top[bp]}px]" if tail_top[bp] is not None else "min-h-screen") for bp in BPS})

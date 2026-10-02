@@ -51,9 +51,24 @@ def frame(slug: str, bp: str, state: str | None = None) -> dict:
     nt = np.asarray(Image.open(d / f"{bp}{sfx}.notext.png").convert("RGB")).astype(int)
     mask = np.abs(img - nt).sum(axis=2) > 40
     dom = json.loads((d / f"{bp}{sfx}.oracle.json").read_text())
+    tc = d / f"{bp}{sfx}.tcoded.png"
+    bc = d / f"{bp}{sfx}.bcoded.png"
+    tcoded = np.asarray(Image.open(tc).convert("RGB")).astype(int) if tc.exists() else None
+    bcoded = np.asarray(Image.open(bc).convert("RGB")).astype(int) if bc.exists() else None
+
+    def painted(coded, hexc, r, min_px):
+        """the element's code colour reaches the screen inside r (≥ min_px pixels within ±8 per channel)"""
+        if coded is None or not hexc:
+            return True
+        c = np.array([int(hexc[i:i + 2], 16) for i in (1, 3, 5)])
+        x, y, w, h = [int(v) for v in r]
+        sub = coded[max(0, y - 1):y + h + 1, max(0, x - 1):x + w + 1]
+        return int((np.abs(sub - c).max(axis=2) <= 8).sum()) >= min_px
     texts = []
     for t in dom["texts"]:
-        rects = sorted(t["lines"], key=lambda r: r[1])
+        rects = sorted([r for r in t["lines"] if painted(tcoded, t.get("code"), r, 3)], key=lambda r: r[1])
+        if not rects:
+            continue
         fs = max(8, int(round(t["size_px"])))
         w = _snap_weight(t["weight"])
         hr, _, top = metrics(t["text"], w)
@@ -83,12 +98,14 @@ def frame(slug: str, bp: str, state: str | None = None) -> dict:
             continue
         seen.add(key)
         bx = b["box"]
+        if not painted(bcoded, b.get("code"), bx, max(6, int(0.1 * bx[2] * bx[3]))):
+            continue
         if bx[2] * bx[3] >= 0.9 * BPS[bp][0] * BPS[bp][1]:
             continue   # a page-size wrapper is the background (perception never reports it as a block)
         inside = [t["text"] for t in texts if bx[0] <= t["box"][0] + t["box"][2] / 2 <= bx[0] + bx[2]
                   and bx[1] <= t["box"][1] + t["box"][3] / 2 <= bx[1] + bx[3]]
         blk = {"box": bx, "fill": b.get("fill"), "contains_text": inside, "path": b.get("path")}
-        if b.get("rule"):
+        if b.get("rule") or min(bx[2], bx[3]) <= 3:   # thin bars (hamburger lines) are rules, as perception reports them
             blk["rule"] = True
         else:
             blk.update(border=b.get("border"), radius=b.get("radius") or None, shadow=bool(b.get("shadow")))
@@ -97,26 +114,38 @@ def frame(slug: str, bp: str, state: str | None = None) -> dict:
             "layout": "", "vlm_blocks": []}
 
 
-def visible_gt(slug: str, bp: str):
+def visible_gt(slug: str, bp: str, state: str | None = None):
     """Ground-truth text for the scorer = DOM text WITH visible ink in the frame (the capture's text.json also lists
     visually hidden strings — an sr-only "Password" label, a stray "." — which no reproduction can show, so every
     candidate lost text score for them). Original kept as <bp>.text.raw.json."""
     d = ROOT / "benchmarks-dev" / slug
-    raw = d / f"{bp}.text.raw.json"
+    sfx = f".{state}" if state else ""
+    raw = d / f"{bp}{sfx}.text.raw.json"
     if not raw.exists():
-        raw.write_text((d / f"{bp}.text.json").read_text())
-    img = np.asarray(Image.open(d / f"{bp}.png").convert("RGB")).astype(int)
-    nt = np.asarray(Image.open(d / f"{bp}.notext.png").convert("RGB")).astype(int)
+        raw.write_text((d / f"{bp}{sfx}.text.json").read_text())
+    img = np.asarray(Image.open(d / f"{bp}{sfx}.png").convert("RGB")).astype(int)
+    nt = np.asarray(Image.open(d / f"{bp}{sfx}.notext.png").convert("RGB")).astype(int)
     mask = np.abs(img - nt).sum(axis=2) > 40
-    keep = [t for t in json.loads(raw.read_text()) if len(t["text"].strip(" .·•|")) >= 1
-            and (lambda b: mask[max(0, b[1]):b[1] + b[3], max(0, b[0]):b[0] + b[2]].sum() >= 6)(t["box"])]
-    (d / f"{bp}.text.json").write_text(json.dumps(keep, indent=1))
+    seen = frame(slug, bp, state)["texts"]       # painted texts (colour-coded check when available)
+    norm = lambda s: " ".join((s or "").split()).lower()
+
+    def visible(t):
+        b = t["box"]
+        if len(t["text"].strip(" .·•|")) < 1 or mask[max(0, b[1]):b[1] + b[3], max(0, b[0]):b[0] + b[2]].sum() < 6:
+            return False
+        return any(norm(t["text"]) in norm(o["text"]) or norm(o["text"]) in norm(t["text"]) for o in seen
+                   if abs(o["box"][1] - b[1]) <= max(40, o["box"][3]))
+    keep = [t for t in json.loads(raw.read_text()) if visible(t)]
+    (d / f"{bp}{sfx}.text.json").write_text(json.dumps(keep, indent=1))
     return len(keep)
 
 
 def build(slug: str) -> Path:
+    d = ROOT / "benchmarks-dev" / slug
     for bp in BPS:
         visible_gt(slug, bp)
+        for f in d.glob(f"{bp}.*.oracle.json"):          # interaction state frames: <bp>.<state>.oracle.json
+            visible_gt(slug, bp, f.name[len(bp) + 1:-len(".oracle.json")])
     spec = {"breakpoints": {bp: frame(slug, bp) for bp in BPS}, "oracle": True}
     out = ROOT / "out" / "specs" / f"{slug}.oracle.json"
     out.write_text(json.dumps(spec, indent=1))

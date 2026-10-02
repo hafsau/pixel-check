@@ -158,7 +158,9 @@ def _collect(spec: dict, anchored: bool = False) -> list[Item]:
                         if not (a & b_):
                             return True
                         return len(a ^ b_) > max(1, 0.15 * len(a | b_))
-                    while key in items and any(differs(o_bp, o) for o_bp, o in inside.get(key, {}).items() if o_bp != bp):
+                    # (a second box with the same label in the SAME frame is another element — two "More" buttons)
+                    while key in items and (bp in items[key].at or
+                                            any(differs(o_bp, o) for o_bp, o in inside.get(key, {}).items() if o_bp != bp)):
                         n += 1
                         key = f"b:{label}%{n}"
                     inside.setdefault(key, {})[bp] = ins

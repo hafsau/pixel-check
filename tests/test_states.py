@@ -124,3 +124,170 @@ def test_real_lambda_mobile_menu():
     gone = {t["text"] for t in d["disappeared"]["texts"]}
     assert any("Supercomputers" in t for t in gone) and "LAUNCH GPU INSTANCE" in gone
     assert d["kind"] == "overlay"
+
+
+def test_trigger_icon_swap_is_not_panel_content():
+    """Hamburger → X inside the trigger area is the trigger's open look, not part of the opened panel
+    (lambda: counting the X made the panel start at y=33 and the overlay hid the logo)."""
+    bars = [((343, 41 + 8 * i, 24, 2), "#e7e6d9") for i in range(3)]
+    base = frame([("Logo", (20, 40, 60, 16)), ("Hero", (20, 300, 300, 40))], bars)
+    x_icon = [((344, 38, 22, 22), "#e7e6d9")]
+    links = [(f"Link {i}", (20, 140 + 40 * i, 120, 16)) for i in range(4)]
+    state = frame([("Logo", (20, 40, 60, 16))] + links, x_icon + [((0, 100, 390, 744), "#0b0b0b")])
+    d = state_diff(base, state, trigger_box=[335, 33, 40, 34])
+    assert [b["box"] for b in d["trigger_changes"]["appeared"]["blocks"]] == [[344, 38, 22, 22]]
+    assert len(d["trigger_changes"]["disappeared"]["blocks"]) == 3
+    assert d["panel"][1] == 100, "panel starts below the header"
+    assert all(b["box"] != [344, 38, 22, 22] for b in d["appeared"]["blocks"])
+
+
+def test_trigger_box_optional_and_far_away_changes_unaffected():
+    base = frame([("Logo", (20, 40, 60, 16))])
+    state = frame([("Logo", (20, 40, 60, 16)), ("Link", (20, 200, 60, 16))])
+    d = state_diff(base, state, trigger_box=[335, 33, 40, 34])
+    assert [t["text"] for t in d["appeared"]["texts"]] == ["Link"]
+    assert d["trigger_changes"]["appeared"]["texts"] == [] and d["trigger_changes"]["appeared"]["blocks"] == []
+
+
+VDEV = ROOT / "benchmarks-dev" / "vercel-pricing-lx"
+
+
+@pytest.mark.skipif(not (VDEV / "mobile.menu.oracle.json").exists(), reason="dev state capture not present")
+def test_oracle_state_frame_has_only_painted_text():
+    """Closed <details> content has real boxes and passes every style check but is not painted (vercel's mobile
+    menu: "Agent Stack", "AI SDK" leaked into the oracle). Visibility = the element's own colour shows up in a
+    colour-coded screenshot."""
+    import sys
+    sys.path.insert(0, str(ROOT / "tools"))
+    from oracle_spec import frame as oracle_frame
+    st = oracle_frame("vercel-pricing-lx", "mobile", state="menu")
+    texts = {t["text"] for t in st["texts"]}
+    assert {"Products", "Resources", "Enterprise", "Pricing", "Get a Demo", "Log In", "Sign Up"} <= texts
+    assert not ({"Agent Stack", "AI SDK", "Learn", "Docs"} & texts), texts
+
+
+@pytest.mark.skipif(not (VDEV / "mobile.menu.text.json").exists(), reason="dev state capture not present")
+def test_state_ground_truth_text_is_visible_only():
+    import json as _j
+    gt = {t["text"] for t in _j.loads((VDEV / "mobile.menu.text.json").read_text())}
+    assert "Agent Stack" not in gt and "Products" in gt
+
+
+def _imgs(dim=None, panel=(368, 100, 400, 924), seed=0):
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    base = np.full((1024, 768, 3), 11.0)
+    base[150:500, 20:700] = rng.integers(120, 255, size=(350, 680, 3))   # bright page content
+    state = base.copy()
+    if dim is not None:                   # the page below the header is dimmed; the header stays (as on lambda)
+        state[100:] = state[100:] * (1 - dim)
+    x, y, w, h = panel
+    state[y:y + h, x:x + w] = 11.0                                    # the drawer itself
+    return base, state
+
+
+def test_backdrop_detected_with_opacity():
+    from orchestrator.states import backdrop
+    base, state = _imgs(dim=0.6)
+    b = backdrop(base, state, [368, 100, 400, 924])
+    assert b is not None and b["color"] == "#000000" and abs(b["opacity"] - 0.6) < 0.05
+
+
+def test_no_backdrop_when_page_unchanged():
+    from orchestrator.states import backdrop
+    base, state = _imgs(dim=None)
+    assert backdrop(base, state, [368, 100, 400, 924]) is None
+
+
+def test_backdrop_ignores_the_panel_area():
+    from orchestrator.states import backdrop
+    base, state = _imgs(dim=None, panel=(0, 100, 768, 924))   # full-width panel: nothing outside to compare
+    assert backdrop(base, state, [0, 100, 768, 924]) is None
+
+
+def test_backdrop_area_excludes_undimmed_header():
+    import numpy as np
+    from orchestrator.states import backdrop
+    base, state = _imgs(dim=0.6)
+    base[10:60, 20:300] = 200
+    state[10:60, 20:300] = 200            # header above the backdrop stays bright
+    b = backdrop(base, state, [368, 100, 400, 924])
+    assert b is not None and b["box"][1] >= 100 and b["box"][1] <= 160
+
+
+def test_backdrop_ignores_trigger_area_and_spans_viewport():
+    from orchestrator.states import backdrop
+    base, state = _imgs(dim=0.6)
+    base[41:59, 721:745] = 230             # hamburger bars that turn into an X
+    state[41:59, 721:745] = 11
+    b = backdrop(base, state, [368, 100, 400, 924], exclude=[[713, 33, 40, 34]])
+    assert b["box"][0] == 0 and b["box"][2] == 768 and b["box"][1] >= 100
+    assert b["box"][1] + b["box"][3] == 1024
+
+
+def test_opaque_full_screen_cover_is_not_dimming():
+    """A full-screen menu of the page colour over bright content looks like 'ratio ≈ 0.05' on the bright pixels, but the
+    page background is unchanged — that is a cover, not a backdrop (lambda mobile)."""
+    import numpy as np
+    from orchestrator.states import dim_region
+    rng = np.random.default_rng(2)
+    base = np.full((844, 390, 3), 11.0)
+    base[200:400, 20:370] = rng.integers(120, 255, size=(200, 350, 3))
+    state = base.copy()
+    state[100:] = 11.0                       # opaque panel, same colour as the page
+    assert dim_region(base, state) is None
+
+
+def test_white_page_dimmed_is_dimming():
+    import numpy as np
+    from orchestrator.states import dim_region
+    rng = np.random.default_rng(3)
+    base = np.full((1024, 768, 3), 255.0)
+    base[200:400, 20:700] = rng.integers(0, 140, size=(200, 680, 3))
+    state = base.copy()
+    state[100:] = state[100:] * 0.5
+    state[100:, 400:] = 255.0                # white drawer
+    d = dim_region(base, state)
+    assert d is not None and abs(d["opacity"] - 0.5) < 0.06 and d["undimmed"][0] >= 380
+
+
+def _trigger_imgs(state_draw):
+    import numpy as np
+    base = np.full((100, 390, 3), 11.0)
+    for i in range(3):                              # hamburger bars at x 343..367
+        base[41 + 8 * i:43 + 8 * i, 343:367] = 231
+    state = np.full((100, 390, 3), 11.0)
+    state_draw(state)
+    return base, state
+
+
+def test_trigger_look_detects_an_x():
+    import numpy as np
+    from orchestrator.states import trigger_look
+
+    def draw_x(img):
+        for k in range(20):
+            img[39 + k, 345 + k] = 231
+            img[39 + k, 364 - k] = 231
+    base, state = _trigger_imgs(draw_x)
+    look = trigger_look(base, state, [335, 33, 40, 34])
+    assert look and look["shape"] == "x" and look["fill"].startswith("#e")
+    assert 8 <= look["box"][0] <= 12 and look["box"][2] >= 18      # relative to the trigger box
+
+
+def test_trigger_look_none_when_unchanged():
+    import numpy as np
+    from orchestrator.states import trigger_look
+    base, state = _trigger_imgs(lambda img: None)
+    base2 = base.copy()
+    assert trigger_look(base, base2, [335, 33, 40, 34]) is None
+
+
+def test_trigger_look_unknown_shape():
+    from orchestrator.states import trigger_look
+
+    def draw_dot(img):
+        img[45:55, 350:360] = 231
+    base, state = _trigger_imgs(draw_dot)
+    look = trigger_look(base, state, [335, 33, 40, 34])
+    assert look and look["shape"] == "unknown"

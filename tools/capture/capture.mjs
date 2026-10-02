@@ -133,6 +133,17 @@ function oracleDom([vw, vh]) {
   };
   const onTop = (el, r) => !clippedOut(el, r) &&
     [[0.5, 0.5], [0.2, 0.5], [0.8, 0.5]].some(([fx, fy]) => !coveredAt(el, r[0] + r[2] * fx, r[1] + r[3] * fy));
+  // colour codes for the "is it painted?" passes (oracle_spec checks each element's colour in its box)
+  let nCode = 0;
+  const code = (el, attr) => {
+    if (!el.dataset[attr]) {
+      const i = ++nCode, hh = ((i * 137.508) % 360) / 60, l = i % 2 ? 0.42 : 0.58, ch = 1 - Math.abs(2 * l - 1);
+      const xx = ch * (1 - Math.abs((hh % 2) - 1)), m = l - ch / 2;
+      const [r1, g1, b1] = hh < 1 ? [ch, xx, 0] : hh < 2 ? [xx, ch, 0] : hh < 3 ? [0, ch, xx] : hh < 4 ? [0, xx, ch] : hh < 5 ? [xx, 0, ch] : [ch, 0, xx];
+      el.dataset[attr] = "#" + [r1 + m, g1 + m, b1 + m].map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("");
+    }
+    return el.dataset[attr];
+  };
   const role = (el) => {
     const tag = (t) => el.closest(t);
     if (el.closest("button,[role=button],input[type=submit]")) return "button";
@@ -159,7 +170,7 @@ function oracleDom([vw, vh]) {
     texts.push({ text: t, lines, line_height_px: parseFloat(cs.lineHeight) || null, size_px: parseFloat(cs.fontSize), weight: Number(cs.fontWeight) || 400, color: hex(c),
       letter_spacing_px: cs.letterSpacing === "normal" ? 0 : parseFloat(cs.letterSpacing) || 0,
       underline: (cs.textDecorationLine || "").includes("underline"), role: role(el), tag: el.tagName.toLowerCase(),
-      align: cs.textAlign, path: dpath(el) + "#" + [...el.childNodes].indexOf(n) });
+      align: cs.textAlign, path: dpath(el) + "#" + [...el.childNodes].indexOf(n), code: code(el, "pct") });
   }
   for (const el of document.querySelectorAll("input,textarea")) {
     if (!visible(el) || el.value || !el.placeholder) continue;
@@ -167,7 +178,7 @@ function oracleDom([vw, vh]) {
     const ps = getComputedStyle(el, "::placeholder"); const cs = getComputedStyle(el); const c = rgb(ps.color) || rgb(cs.color);
     texts.push({ text: el.placeholder.replace(/\s+/g, " ").trim(), lines: [r], size_px: parseFloat(cs.fontSize),
       weight: Number(cs.fontWeight) || 400, color: c ? hex(c) : "#757575", letter_spacing_px: 0, underline: false,
-      role: "input-placeholder", tag: el.tagName.toLowerCase(), placeholder: true, path: dpath(el) });
+      role: "input-placeholder", tag: el.tagName.toLowerCase(), placeholder: true, path: dpath(el), code: code(el, "pct") });
   }
   const blocks = [];
   for (const el of document.body.querySelectorAll("*")) {
@@ -205,7 +216,8 @@ function oracleDom([vw, vh]) {
     const paintsFill = fill && fill !== under;
     if (paintsFill || all || shadow) {
       blocks.push({ box, fill: paintsFill || all || shadow ? fill : null, border: all ? all.c : null,
-        radius: Math.round(parseFloat(cs.borderTopLeftRadius) || 0), shadow: !!shadow, tag: el.tagName.toLowerCase(), path: dpath(el) });
+        radius: Math.round(parseFloat(cs.borderTopLeftRadius) || 0), shadow: !!shadow, tag: el.tagName.toLowerCase(), path: dpath(el),
+        code: code(el, "pcb") });
     }
     if (!all) for (const [s, v] of Object.entries(sides)) {
       if (!v) continue;
@@ -252,10 +264,13 @@ try {
       const out = [];
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        const t = n.textContent.replace(/\s+/g, " ").trim();
+        const raw = n.textContent.replace(/\s+/g, " ").trim();
         const el = n.parentElement;
-        if (!t || !el) continue;
+        if (!raw || !el) continue;
         const cs = getComputedStyle(el);
+        // ground truth = what is on screen: CSS text-transform applied (as in the oracle dump)
+        const t = cs.textTransform === "uppercase" ? raw.toUpperCase() : cs.textTransform === "lowercase" ? raw.toLowerCase()
+          : cs.textTransform === "capitalize" ? raw.replace(/\b\w/g, (m) => m.toUpperCase()) : raw;
         if (cs.visibility === "hidden" || cs.display === "none" || Number(cs.opacity) === 0) continue;
         const range = document.createRange(); range.selectNodeContents(n);
         const r = range.getBoundingClientRect();
@@ -274,6 +289,23 @@ try {
         "text-shadow:none!important;text-decoration-color:transparent!important}::placeholder{color:transparent!important}" });
       await page.waitForTimeout(150);
       await page.screenshot({ path: path.join(outDir, `${bp}${suffix}.notext.png`), fullPage: false });
+      // painted-or-not passes: each text element in its own colour (everything else transparent text), then each
+      // block in its own background colour — an element counts only where its colour actually reaches the screen
+      // (closed <details>, opacity tricks, overlays, clipping: all handled the same way)
+      const css = await page.evaluate(() => {
+        const t = [...document.querySelectorAll("[data-pct]")].map((e) =>
+          `[data-pct="${e.dataset.pct}"],[data-pct="${e.dataset.pct}"]::placeholder{color:${e.dataset.pct}!important;-webkit-text-fill-color:${e.dataset.pct}!important;text-decoration-color:transparent!important}`);
+        const b = [...document.querySelectorAll("[data-pcb]")].map((e) =>
+          `[data-pcb="${e.dataset.pcb}"]{background-color:${e.dataset.pcb}!important;border-color:${e.dataset.pcb}!important;box-shadow:none!important}`);
+        return { t: t.join("\n"), b: b.join("\n") };
+      });
+      const tStyle = await page.addStyleTag({ content: css.t });
+      await page.waitForTimeout(100);
+      await page.screenshot({ path: path.join(outDir, `${bp}${suffix}.tcoded.png`), fullPage: false });
+      await tStyle.evaluate((n) => n.remove());
+      await page.addStyleTag({ content: css.b });
+      await page.waitForTimeout(100);
+      await page.screenshot({ path: path.join(outDir, `${bp}${suffix}.bcoded.png`), fullPage: false });
     }
     meta.breakpoints[bp] = { width: w, height: h, media_replaced: replaced };
     console.log(`${slug} ${bp} ${w}x${h} media_replaced=${replaced}`);

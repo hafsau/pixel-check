@@ -14,4 +14,6 @@ COPY fonts/ /opt/pc/fonts/
 COPY selftest/ /opt/pc/selftest/
 COPY render.mjs lint.mjs score.py integrity.py evaluate.py readable.py fluidity.py /opt/pc/
 RUN cd /opt/pc && node render.mjs --selftest && node lint.mjs selftest/App.jsx && \
+    node render.mjs --interact selftest/scenarios.json --in selftest/App.jsx --out /tmp/pc-interact && \
+    node -e "const r=require('/tmp/pc-interact/interact.json'); process.exit(r.scenarios.length===2&&r.scenarios.every(s=>s.ok)?0:1)" && \
     python3 -c "import score, integrity, evaluate, readable, fluidity; print('py ok')"

@@ -226,6 +226,46 @@ export function integrity(dumps) {
   };
 }
 
+// One frame: screenshot, DOM, layout health, integrity dump, text-transparent and colour-coded passes (the scorer
+// needs all of them). Used for the breakpoint renders and for every interaction scenario (--interact).
+async function captureFrame(page, outDir, name) {
+  await page.screenshot({ path: path.join(outDir, `${name}.png`), fullPage: false });
+  const dom = await page.evaluate(extractDom);
+  fs.writeFileSync(path.join(outDir, `${name}.dom.json`), JSON.stringify(dom));
+  const health = { ...(await page.evaluate(layoutHealth)), ...(await page.evaluate(fluidity)) };
+  const fontsOk = await page.evaluate(() => document.fonts.check("16px Inter"));
+  const dump = await page.evaluate(integrityDump);
+  fs.writeFileSync(path.join(outDir, `${name}.nodes.json`), JSON.stringify(dump));
+  // Same page with every glyph transparent: text is readable only where these pixels differ from the
+  // real screenshot (catches occlusion, clip-path, filters, zero-height, same-colour text, blend modes).
+  await page.addStyleTag({ content: NOTEXT_CSS });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await page.screenshot({ path: path.join(outDir, `${name}.notext.png`), fullPage: false });
+  // Third pass: each text element painted its own colour, so every visible glyph pixel can be
+  // attributed to exactly one element (text hidden under a labelled button can't borrow its pixels).
+  const codes = await page.evaluate((idxs) => {
+    const all = [...document.querySelectorAll("#root *")];
+    const rules = [], out = {};
+    idxs.forEach((i, k) => {
+      // golden-angle hues, full saturation, alternating lightness → distinct, far from grey backgrounds
+      const hh = ((k * 137.508) % 360) / 60, l = k % 2 ? 0.42 : 0.58, ch = (1 - Math.abs(2 * l - 1));
+      const xx = ch * (1 - Math.abs((hh % 2) - 1)), m = l - ch / 2;
+      const [r1, g1, b1] = hh < 1 ? [ch, xx, 0] : hh < 2 ? [xx, ch, 0] : hh < 3 ? [0, ch, xx] : hh < 4 ? [0, xx, ch] : hh < 5 ? [xx, 0, ch] : [ch, 0, xx];
+      const c = `rgb(${Math.round((r1 + m) * 255)}, ${Math.round((g1 + m) * 255)}, ${Math.round((b1 + m) * 255)})`;
+      all[i].setAttribute("data-pcc", String(i));
+      rules.push(`[data-pcc="${i}"],[data-pcc="${i}"]::placeholder{color:${c}!important;-webkit-text-fill-color:${c}!important}`);
+      out[i] = c;
+    });
+    const st = document.createElement("style"); st.textContent = rules.join("\n"); document.head.appendChild(st);
+    return out;
+  }, dom.map((e) => e.idx));
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await page.screenshot({ path: path.join(outDir, `${name}.coded.png`), fullPage: false });
+  for (const e of dom) e.code = codes[e.idx];
+  fs.writeFileSync(path.join(outDir, `${name}.dom.json`), JSON.stringify(dom));
+  return { dom, health, fontsOk, dump };
+}
+
 async function renderHtml(html, outDir) {
   fs.mkdirSync(outDir, { recursive: true });
   const browser = await chromium.launch({ args: CHROMIUM_ARGS });
@@ -246,40 +286,8 @@ async function renderHtml(html, outDir) {
     };
     for (const [bp, [w, h]] of Object.entries(BREAKPOINTS)) {
       const { ctx, page } = await open(w, h);
-      await page.screenshot({ path: path.join(outDir, `${bp}.png`), fullPage: false });
-      const dom = await page.evaluate(extractDom);
-      fs.writeFileSync(path.join(outDir, `${bp}.dom.json`), JSON.stringify(dom));
-      const health = { ...(await page.evaluate(layoutHealth)), ...(await page.evaluate(fluidity)) };
-      const fontsOk = await page.evaluate(() => document.fonts.check("16px Inter"));
-      dumps[bp] = await page.evaluate(integrityDump);
-      fs.writeFileSync(path.join(outDir, `${bp}.nodes.json`), JSON.stringify(dumps[bp]));
-      // Same page with every glyph transparent: text is readable only where these pixels differ from the
-      // real screenshot (catches occlusion, clip-path, filters, zero-height, same-colour text, blend modes).
-      await page.addStyleTag({ content: NOTEXT_CSS });
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-      await page.screenshot({ path: path.join(outDir, `${bp}.notext.png`), fullPage: false });
-      // Third pass: each text element painted its own colour, so every visible glyph pixel can be
-      // attributed to exactly one element (text hidden under a labelled button can't borrow its pixels).
-      const codes = await page.evaluate((idxs) => {
-        const all = [...document.querySelectorAll("#root *")];
-        const rules = [], out = {};
-        idxs.forEach((i, k) => {
-          // golden-angle hues, full saturation, alternating lightness → distinct, far from grey backgrounds
-          const hh = ((k * 137.508) % 360) / 60, l = k % 2 ? 0.42 : 0.58, ch = (1 - Math.abs(2 * l - 1));
-          const xx = ch * (1 - Math.abs((hh % 2) - 1)), m = l - ch / 2;
-          const [r1, g1, b1] = hh < 1 ? [ch, xx, 0] : hh < 2 ? [xx, ch, 0] : hh < 3 ? [0, ch, xx] : hh < 4 ? [0, xx, ch] : hh < 5 ? [xx, 0, ch] : [ch, 0, xx];
-          const c = `rgb(${Math.round((r1 + m) * 255)}, ${Math.round((g1 + m) * 255)}, ${Math.round((b1 + m) * 255)})`;
-          all[i].setAttribute("data-pcc", String(i));
-          rules.push(`[data-pcc="${i}"],[data-pcc="${i}"]::placeholder{color:${c}!important;-webkit-text-fill-color:${c}!important}`);
-          out[i] = c;
-        });
-        const st = document.createElement("style"); st.textContent = rules.join("\n"); document.head.appendChild(st);
-        return out;
-      }, dom.map((e) => e.idx));
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-      await page.screenshot({ path: path.join(outDir, `${bp}.coded.png`), fullPage: false });
-      for (const e of dom) e.code = codes[e.idx];
-      fs.writeFileSync(path.join(outDir, `${bp}.dom.json`), JSON.stringify(dom));
+      const { dom, health, fontsOk, dump } = await captureFrame(page, outDir, bp);
+      dumps[bp] = dump;
       result.breakpoints[bp] = { width: w, height: h, elements: dom.length, fonts_ok: fontsOk, ...health };
       await ctx.close();
     }
@@ -326,6 +334,118 @@ async function renderHtml(html, outDir) {
   result.integrity = integrity(dumps);
   fs.writeFileSync(path.join(outDir, "checks.json"), JSON.stringify(result, null, 2));
   return result;
+}
+
+// Interaction scenarios (docs/INTERACTIONS.md stage 5): [{name, bp, steps: [{click|focus: selector} | {key}]}].
+// Each scenario: fresh page at the breakpoint, run the steps, capture the frame as <name>.*; report whether every
+// step found its target and the trigger's aria-expanded afterwards. Runtime errors are collected for all scenarios.
+async function interactHtml(html, scenarios, outDir) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const browser = await chromium.launch({ args: CHROMIUM_ARGS });
+  const out = { scenarios: [], runtime_errors: [], unknown_classes: [], duplicate_ids: [] };
+  const dead = new Set(), dupIds = new Set();
+  const settle = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  try {
+    for (const sc of scenarios) {
+      const [w, h] = BREAKPOINTS[sc.bp];
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
+      const page = await ctx.newPage();
+      page.on("pageerror", (e) => out.runtime_errors.push(`${sc.name}: ${String(e.message).slice(0, 300)}`));
+      await page.setContent(html, { waitUntil: "load" });
+      await page.addScriptTag({ content: `window.__inkInfo = ${inkInfo.toString()};` });
+      await page.evaluate(async () => { await document.fonts.ready; });
+      await settle(page);
+      const r = { name: sc.name, bp: sc.bp, ok: true, error: null, aria_expanded: null };
+      let trigger = null;
+      for (const st of sc.steps || []) {
+        try {
+          if (st.click || st.focus) {
+            const sel = st.click || st.focus;
+            const loc = page.locator(sel).first();
+            if (!(await loc.count())) { r.ok = false; r.error = `trigger ${sel} not found`; break; }
+            trigger = trigger || sel;
+            if (st.click) await loc.click({ timeout: 1500 }); else await loc.focus({ timeout: 1500 });
+          } else if (st.key) {
+            await page.keyboard.press(st.key);
+          }
+          await settle(page);
+          await page.waitForTimeout(60);
+        } catch (e) {
+          r.ok = false; r.error = String(e.message || e).split("\n")[0].slice(0, 200); break;
+        }
+      }
+      if (trigger) r.aria_expanded = await page.locator(trigger).first().getAttribute("aria-expanded").catch(() => null);
+      // the panel the trigger controls: present? on top at its centre? if not, what covers it (a developer's first
+      // check — a backdrop painted after the panel hides it completely)
+      if (trigger) {
+        r.panel = await page.evaluate((sel) => {
+          const t = document.querySelector(sel);
+          const id = t && t.getAttribute("aria-controls");
+          if (!id) return { id: null, exists: false };
+          const el = document.getElementById(id);
+          if (!el) return { id, exists: false };
+          const b = el.getBoundingClientRect();
+          if (b.width < 1 || b.height < 1) return { id, exists: true, on_top: false, covered_by: "(zero size)" };
+          const cx = Math.min(innerWidth - 1, Math.max(0, b.left + b.width / 2)), cy = Math.min(innerHeight - 1, Math.max(0, b.top + Math.min(b.height / 2, 200)));
+          const hit = document.elementFromPoint(cx, cy);
+          const onTop = !!hit && (hit === el || el.contains(hit));
+          const snippet = (n) => { const c = n.cloneNode(false); return c.outerHTML.slice(0, 200); };
+          return { id, exists: true, rect: [b.left, b.top, b.width, b.height].map(Math.round), on_top: onTop,
+                   covered_by: onTop || !hit ? null : snippet(hit) };
+        }, trigger).catch(() => null);
+      }
+      // arbitrary-value classes with no effective rule: Tailwind emitted none, or the browser dropped its invalid
+      // value (bg-[#000000/0.9] → background-color: #000000/0.9 → empty rule) — name them (rules inside media
+      // queries count, so breakpoint-only classes are known at every width)
+      (await page.evaluate(() => {
+        const known = new Set();
+        const unesc = (t) => t.replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+          .replace(/\\(.)/g, "$1");
+        const walk = (rules) => {
+          for (const r of rules) {
+            if (r.selectorText && r.style && r.style.length) for (const m of r.selectorText.matchAll(/\.((?:\\[0-9a-fA-F]{1,6}\s?|\\.|[\w-])+)/g)) known.add(unesc(m[1]));
+            if (r.cssRules) walk(r.cssRules);
+          }
+        };
+        for (const sh of document.styleSheets) { try { walk(sh.cssRules); } catch (e) { /* cross-origin: none here */ } }
+        const out = [];
+        for (const el of document.querySelectorAll("[class]")) for (const c of el.classList) if (c.includes("[") && !known.has(c)) out.push(c);
+        return out;
+      }).catch(() => [])).forEach((c) => dead.add(c));
+      (await page.evaluate(() => {
+        const n = {};
+        for (const el of document.querySelectorAll("[id]")) if (el.id && el.id !== "root") n[el.id] = (n[el.id] || 0) + 1;
+        return Object.keys(n).filter((k) => n[k] > 1);
+      }).catch(() => [])).forEach((i) => dupIds.add(i));
+      // focus rings after keyboard use are correct behaviour but not part of the design frame: neutralise them
+      // for the capture only (static renders are untouched)
+      await page.addStyleTag({ content: ":focus,:focus-visible{outline:none!important}" });
+      await settle(page);
+      await captureFrame(page, outDir, sc.name);
+      out.scenarios.push(r);
+      await ctx.close();
+    }
+  } finally {
+    await browser.close();
+  }
+  out.unknown_classes = [...dead].sort();
+  out.duplicate_ids = [...dupIds].sort();
+  fs.writeFileSync(path.join(outDir, "interact.json"), JSON.stringify(out, null, 2));
+  return out;
+}
+
+export async function interact(appPath, scenarios, outDir) {
+  const log = [];
+  let html;
+  try {
+    html = await build(appPath, log);
+  } catch (e) {
+    fs.mkdirSync(outDir, { recursive: true });
+    const res = { scenarios: [], runtime_errors: [], build_failed: String(e.errors ? e.errors.map((x) => x.text).join("\n") : e) };
+    fs.writeFileSync(path.join(outDir, "interact.json"), JSON.stringify(res, null, 2));
+    return res;
+  }
+  return interactHtml(html, scenarios, outDir);
 }
 
 export async function render(appPath, outDir) {
@@ -388,6 +508,10 @@ async function selftest() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--selftest")) {
     await selftest();
+  } else if (process.argv.includes("--interact")) {
+    const scenarios = JSON.parse(fs.readFileSync(arg("--interact"), "utf8"));
+    const res = await interact(path.resolve(arg("--in", "/work/App.jsx")), scenarios, path.resolve(arg("--out", "/work/out")));
+    process.exit(res.build_failed ? 2 : 0);
   } else {
     const outDir = arg("--out", "/work/out");
     const result = await render(arg("--in", "/work/App.jsx"), outDir);
