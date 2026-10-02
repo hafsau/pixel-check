@@ -62,13 +62,19 @@ class Item:
         self.role = "other"
 
 
-def _collect(spec: dict) -> list[Item]:
+def _collect(spec: dict, anchored: bool = False) -> list[Item]:
+    """anchored (scaffold v2): a labelled block must contain mostly the same texts in every frame it is matched in (a
+    desktop wrapper of three cards whose first label is "Hobby" is not the mobile Hobby card), and a text-free block
+    is matched by its nearest text (check icons in three side-by-side cards are numbered row-wise on desktop and
+    card-wise on mobile, so reading order paired the wrong icons)."""
     items: dict[str, Item] = {}
+    inside: dict[str, dict[str, set]] = {}   # block key -> bp -> text keys inside it
     for bp in BPS:
         frame = spec["breakpoints"].get(bp)
         if not frame:
             continue
         seen: dict[str, int] = {}
+        frame_texts: list[tuple[str, list]] = []
         for t in frame["texts"]:
             if not t.get("box") or t.get("approx") and not t.get("inside_block"):
                 continue
@@ -91,9 +97,29 @@ def _collect(spec: dict) -> list[Item]:
                 from .typography import metrics
                 ib = t["inside_block"]
                 tw = max(8, round(metrics(t["text"], _weight(t.get("weight") or 500))[1] * fs))
+                # unread label: the vision model's colour guess can be dark-on-dark; use the contrasting one
+                fill = next((b.get("fill") for b in frame["blocks"] if list(b["box"]) == list(ib)), None)
+                if fill and len(fill) == 7:
+                    lum = sum(int(fill[i:i + 2], 16) for i in (1, 3, 5)) / 3
+                    t = dict(t, color="#ffffff" if lum < 128 else "#111111")
                 th = round(0.75 * fs)
                 x, y, w, h = ib[0] + (ib[2] - tw) // 2, ib[1] + (ib[3] - th) // 2, tw, th
+            align, leading = "left", None
+            lb = t.get("line_boxes") or []
+            if len(lb) >= 2:
+                lefts = [b[0] for b in lb]
+                rights = [b[0] + b[2] for b in lb]
+                centres = [b[0] + b[2] / 2 for b in lb]
+                if max(lefts) - min(lefts) > 6 and max(centres) - min(centres) <= 6:
+                    align = "center"
+                elif max(lefts) - min(lefts) > 6 and max(rights) - min(rights) <= 6:
+                    align = "right"
+                tops = sorted(b[1] for b in lb)
+                pitch = (tops[-1] - tops[0]) / (len(tops) - 1)
+                leading = round(pitch / fs, 2) if fs else None
+            frame_texts.append((key, [x, y, w, h]))
             it.at[bp] = {"ink": [x, y, w, h], "fs": fs, "lines": int(t.get("lines") or 1), "color": t.get("color") or "#000000",
+                         "align": align, "leading": leading,
                          "underline": bool(t.get("underline")),
                          "weight": _weight(t.get("weight")), "approx": bool(t.get("approx")),
                          "tracking": float(t.get("tracking_em") or 0.0), "top_em": t.get("top_em")}
@@ -102,12 +128,50 @@ def _collect(spec: dict) -> list[Item]:
             if b["box"][2] * b["box"][3] < 120 and not b.get("rule"):
                 continue
             label = _norm((b.get("contains_text") or [""])[0])
+            bx = b["box"]
+            if anchored:
+                ins = {k for k, tb in frame_texts if _centre_in(tb, bx, 0)}
+                near = None
+                if not label:
+                    cx, cy = bx[0] + bx[2] / 2, bx[1] + bx[3] / 2
+                    cand = [(max(0, tb[0] - (bx[0] + bx[2]), bx[0] - (tb[0] + tb[2])) + 2 * abs(cy - (tb[1] + tb[3] / 2)), k)
+                            for k, tb in frame_texts]
+                    cand = [c for c in cand if c[0] <= 48]
+                    near = min(cand)[1] if cand else None
             if label:
                 key = f"b:{label}"
+                if anchored:
+                    n = 1
+                    here = {k for k, _ in frame_texts}
+
+                    def seen_in(ts, at_bp, o_bp, o_keys):
+                        """Texts of ts (inside the block at at_bp) the other frame could show: present there, or not
+                        after everything it shows (a text after all of it is below that frame's fold)."""
+                        def later(k):
+                            y = items[k].at[at_bp]["ink"][1]
+                            return not any(d in o_keys and at_bp in items[d].at and items[d].at[at_bp]["ink"][1] > y + 4
+                                           for d in items if d.startswith("t:"))
+                        return {k for k in ts if k in o_keys or not later(k)}
+
+                    def differs(o_bp, o):
+                        o_keys = {k for k in items if o_bp in items[k].at}
+                        a, b_ = seen_in(ins, bp, o_bp, o_keys), seen_in(o, o_bp, bp, here)
+                        return len(a & b_) < 0.5 * max(len(a), len(b_), 1)
+                    while key in items and any(differs(o_bp, o) for o_bp, o in inside.get(key, {}).items() if o_bp != bp):
+                        n += 1
+                        key = f"b:{label}%{n}"
+                    inside.setdefault(key, {})[bp] = ins
+            elif anchored and near:
+                f = b.get("fill") or "#000000"
+                key = (f"b:{''.join(f'{int(f[i:i + 2], 16) // 32:x}' for i in (1, 3, 5))}{'o' if b.get('border') else ''}"
+                       f"{'r' if b.get('rule') else ''}~{near}")
+                while key in items and bp in items[key].at:
+                    key += "'"
             else:   # text-free blocks: match across breakpoints by colour class, then reading order within it
                 f = b.get("fill") or "#000000"
                 import math
-                size = f"{round(math.log2(max(b['box'][2], 1)))}x{round(math.log2(max(b['box'][3], 1)))}"
+                # height class only: widths change with the breakpoint (106 / 205 / 135 px placeholders), heights don't
+                size = f"h{round(math.log2(max(b['box'][3], 1)))}"
                 cls = ("".join(f"{int(f[i:i + 2], 16) // 32:x}" for i in (1, 3, 5)) + ("o" if b.get("border") else "")
                        + ("r" if b.get("rule") else "") + "@" + size)   # colour + size class (icons ≠ placeholders)
                 ranks[cls] = ranks.get(cls, 0) + 1
@@ -128,6 +192,10 @@ def _elem_box(it: Item, bp: str):
     off = (a["top_em"] - 0.111) if a.get("top_em") is not None else TOP_OFFSET
     if a.get("lines", 1) == 1:
         return [round(x - 1.5), round(y - off * fs), round(w * 1.06 + 6), fs]
+    if a.get("lines", 1) > 1 and a.get("leading"):
+        lh = a["leading"] * fs   # line box; the ink of line 1 sits (lh − ink)/2-ish below its top
+        top = y - max(0.0, (lh - fs) / 2) - off * fs
+        return [round(x - 1.5), round(top), round(w * 1.02 + 4), round(a["lines"] * lh)]
     if a.get("lines", 1) > 1:   # wrapped text: keep its measured width so it wraps the same way
         return [round(x - 1.5), round(y - TOP_OFFSET * fs), round(w * 1.02 + 2), round(h + 2 * TOP_OFFSET * fs)]
     return [round(x - 1.5), round(y - TOP_OFFSET * fs), round(w * 1.06 + 6), fs]
@@ -149,7 +217,8 @@ def _tree(items: list[Item]) -> list[Item]:
             box = it.at[bp]["ink"] if it.kind == "text" else it.at[bp]["box"]
             area = box[2] * box[3]
             holders = [b for b in blocks if b is not it and bp in b.at and _centre_in(box, b.at[bp]["box"])
-                       and b.at[bp]["box"][2] * b.at[bp]["box"][3] > area * 1.05]
+                       and b.at[bp]["box"][2] * b.at[bp]["box"][3] > area * 1.05
+                       and box[2] <= b.at[bp]["box"][2] + 4 and box[3] <= b.at[bp]["box"][3] + 4]   # must fit inside
             if holders:
                 h = min(holders, key=lambda b: b.at[bp]["box"][2] * b.at[bp]["box"][3])
                 votes[id(h)] = votes.get(id(h), 0) + 1
@@ -299,7 +368,9 @@ def _emit(children: list[Item], origin, view_h, indent: int) -> list[str]:
                 _resp({bp: {400: "font-normal", 500: "font-medium", 600: "font-semibold", 700: "font-bold"}[a[bp]["weight"]] for bp in BPS}),
                 _resp({bp: (f"tracking-[{a[bp]['tracking']}em]" if a[bp].get("tracking") else "tracking-normal") for bp in BPS}),
                 _resp({bp: f"w-[{_elem_box(c, bp)[2] if bp in c.at else _elem_box(c, next(iter(c.at)))[2]}px]" for bp in BPS}),
-                "leading-none" if all(c.at.get(bp, {}).get("lines", 1) == 1 for bp in c.at) else "leading-tight",
+                ("leading-none" if all(c.at.get(bp, {}).get("lines", 1) == 1 for bp in c.at) else
+                 _resp({bp: (f"leading-[{a[bp]['leading']}]" if a[bp].get("leading") else "leading-tight") for bp in BPS})),
+                _resp({bp: {"center": "text-center", "right": "text-right"}.get(a[bp].get("align"), "text-left") for bp in BPS}),
                 _resp({bp: ("underline" if a[bp].get("underline") else "no-underline") for bp in BPS}),
                 "whitespace-nowrap" if all(c.at.get(bp, {}).get("lines", 1) == 1 for bp in c.at) else "",
             ]
@@ -388,6 +459,8 @@ def _split(children: list[Item], bp: str):
         if len(left) < 2 or len(right) < 2:
             continue
         s1 = min(boxes[id(d)][0] for d in right)
+        if any(boxes[id(d)][0] < s0 for d in right):
+            continue   # an item crosses the gutter (a rule across all three cards): not a column split
         if s1 - s0 < 16:
             continue
         ly0, ly1 = min(boxes[id(d)][1] for d in left), max(boxes[id(d)][1] + boxes[id(d)][3] for d in left)
@@ -418,10 +491,13 @@ def _bands(children: list[Item], bp: str) -> list[list[Item]] | None:
     present = sorted([c for c in children if bp in c.at], key=lambda c: _elem_box(c, bp)[1])
     if len(present) < 3:
         return None
+    def is_rule(c):   # thin divider spanning most of the width: always a band of its own (a separator)
+        b = _elem_box(c, bp)
+        return c.kind == "block" and b[3] <= 3 and b[2] >= 0.4 * SIZES[bp][0]
     bands, cur, bottom = [], [], None
     for c in present:
         y0, h = _elem_box(c, bp)[1], _elem_box(c, bp)[3]
-        if cur and y0 > bottom:
+        if cur and (y0 > bottom or is_rule(c) or is_rule(cur[-1]) and y0 >= bottom - 1):
             bands.append(cur)
             cur = []
         cur.append(c)
@@ -516,6 +592,20 @@ def _emit_split(children: list[Item], origin: dict, width: dict, view_h, indent:
             return _emit_bands(bands, children, ref_b, origin, width, view_h, indent, depth)
     splits = {bp: (_split(children, bp) if depth < 6 else None) for bp in BPS}
     ref = next((bp for bp in ("desktop", "tablet", "mobile") if splits[bp]), None)
+    if ref is None and depth < 6:
+        # a split blocked only by thin full-width rules (the top border across three cards): rules first, then columns
+        def thin(c):
+            return c.kind == "block" and all(_elem_box(c, bp)[3] <= 3 for bp in c.at)
+        rules = [c for c in children if thin(c)]
+        rest = [c for c in children if not thin(c)]
+        if rules and any(_split(rest, bp) for bp in BPS):
+            out = [f'{pad}<div className="flex flex-col items-start {_resp({bp: f"w-[{width[bp]}px]" for bp in BPS})} shrink-0">']
+            out += [f'{pad}  <div className="flex flex-wrap content-start items-start {_resp({bp: f"w-[{width[bp]}px]" for bp in BPS})}">']
+            out += _emit(rules, origin, view_h, indent + 2) + [f"{pad}  </div>"]
+            below = {bp: (origin[bp][0], max([origin[bp][1]] + [_elem_box(c, bp)[1] + _elem_box(c, bp)[3]
+                                                             for c in rules if bp in c.at])) for bp in BPS}
+            out += _emit_split(rest, below, width, view_h, indent + 1, depth + 1, allow_bands=False)
+            return out + [f"{pad}</div>"]
     if ref is None:
         return ([f'{pad}<div className="flex flex-wrap content-start items-start {_resp({bp: f"w-[{width[bp]}px]" for bp in BPS})}">'] +
                 _emit(children, origin, view_h, indent + 1) + [f"{pad}</div>"])

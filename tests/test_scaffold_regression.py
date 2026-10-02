@@ -15,17 +15,31 @@ sys.path.insert(0, str(ROOT / "sandbox"))
 sys.path.insert(0, str(ROOT))
 import integrity  # noqa: E402
 import score  # noqa: E402
+import fluidity  # noqa: E402
+from orchestrator.fluid import compile_fluid  # noqa: E402
 from orchestrator.scaffold import compile_scaffold  # noqa: E402
 
-FLOORS = {"netflix-signin": 78.0, "calcom-signup": 48.0, "vercel-pricing": 50.0}
+FLOORS = {"netflix-signin": 81.0, "calcom-signup": 58.0, "vercel-pricing": 62.0, "lambda": 40.0}
+# scaffold v2 (fluid compiler), Oct 1: (match floor, must pass the in-between-widths fluidity checks)
+FLUID_FLOORS = {"netflix-signin": (88.0, True), "calcom-signup": (79.0, True), "vercel-pricing": (27.0, False),
+                "lambda": (42.0, False)}
 
 
 @pytest.mark.parametrize("page", sorted(FLOORS))
 def test_scaffold_page(page, tmp_path):
+    _check(page, tmp_path, compile_scaffold, FLOORS[page], False)
+
+
+@pytest.mark.parametrize("page", sorted(FLUID_FLOORS))
+def test_fluid_page(page, tmp_path):
+    _check(page, tmp_path, compile_fluid, *FLUID_FLOORS[page])
+
+
+def _check(page, tmp_path, compiler, floor, fluid_pass):
     spec_p, dev = ROOT / "out" / "specs" / f"{page}.json", ROOT / "benchmarks-dev" / page
     if not spec_p.exists() or not dev.exists():
         pytest.skip("spec/capture not present")
-    (tmp_path / "App.jsx").write_text(compile_scaffold(json.loads(spec_p.read_text())))
+    (tmp_path / "App.jsx").write_text(compiler(json.loads(spec_p.read_text())))
     lint = json.loads(subprocess.run(["node", "lint.mjs", str(tmp_path / "App.jsx")], cwd=ROOT / "sandbox",
                                      capture_output=True, text=True).stdout)
     assert lint["ok"], lint
@@ -38,6 +52,8 @@ def test_scaffold_page(page, tmp_path):
         (tdir / f"{bp}.text.json").write_text(json.dumps(t))
     assert integrity.failures(checks, tmp_path, [x["text"] for v in texts.values() for x in v]) == []
     res = score.score_run(dev, tmp_path, tdir)
-    assert res["match"] >= FLOORS[page], {bp: v["score"] for bp, v in res["breakpoints"].items()}
+    assert res["match"] >= floor, {bp: v["score"] for bp, v in res["breakpoints"].items()}
     c = checks.get("controls", {})
     assert c.get("inputs_typeable", 0) == c.get("inputs", 0) and c.get("buttons_focusable", 0) == c.get("buttons", 0)
+    if fluid_pass:
+        assert fluidity.report(checks)["pass"], fluidity.report(checks)["fails"]

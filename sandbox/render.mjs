@@ -19,7 +19,7 @@ import { chromium } from "playwright";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const BREAKPOINTS = { mobile: [390, 844], tablet: [768, 1024], desktop: [1280, 800] };
-export const BETWEEN_WIDTHS = [600, 1024, 1440];
+export const BETWEEN_WIDTHS = [360, 375, 500, 1024, 1600];   // fluidity check (council, Oct 1)
 const NOTEXT_CSS = `*,*::before,*::after{color:transparent!important;-webkit-text-fill-color:transparent!important;
 text-shadow:none!important;text-decoration-color:transparent!important;-webkit-background-clip:border-box!important;
 background-clip:border-box!important}*::placeholder{color:transparent!important;-webkit-text-fill-color:transparent!important}`;
@@ -104,6 +104,37 @@ function extractDom() {
     });
   });
   return out;
+}
+
+// Runs in the page: where the content sits and whether the full page has dead gaps (fluidity check).
+function fluidity() {
+  const vw = innerWidth, vh = innerHeight;
+  const boxes = [];
+  for (const el of document.querySelectorAll("#root *")) {
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 1) continue;
+    const ownText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+    const painted = ownText || (cs.backgroundColor !== "rgba(0, 0, 0, 0)" && r.width < vw * 0.98) ||
+      ["INPUT", "BUTTON"].includes(el.tagName) || parseFloat(cs.borderTopWidth) > 0;
+    if (painted) boxes.push([r.left + scrollX, r.top + scrollY, r.right + scrollX, r.bottom + scrollY]);
+  }
+  if (!boxes.length) return { content: null };
+  const left = Math.min(...boxes.map((b) => b[0])), right = Math.max(...boxes.map((b) => b[2]));
+  const above = boxes.filter((b) => b[1] < vh);
+  const fl = above.length ? Math.min(...above.map((b) => b[0])) : left, fr = above.length ? Math.max(...above.map((b) => b[2])) : right;
+  // vertical coverage over the full page
+  const iv = boxes.map((b) => [b[1], b[3]]).sort((a, b) => a[0] - b[0]);
+  let maxGap = 0, end = 0;
+  for (const [a, b] of iv) { if (a > end) maxGap = Math.max(maxGap, a - end); end = Math.max(end, b); }
+  const pageH = document.documentElement.scrollHeight;
+  const root = document.querySelector("#root > *");
+  const rootH = root ? root.getBoundingClientRect().height : 0;
+  return { content: [Math.round(fl), Math.round(fr)], centre_ratio: +(((fl + fr) / 2) / vw).toFixed(3),
+           left_ratio: +(fl / vw).toFixed(3), right_gap_ratio: +((vw - fr) / vw).toFixed(3),
+           page_height: pageH, max_vertical_gap: Math.round(maxGap), viewport_h: vh,
+           background_covers: rootH >= pageH - 2 };
 }
 
 // Runs in the page: layout health at widths we don't have designs for.
@@ -216,7 +247,7 @@ async function renderHtml(html, outDir) {
       await page.screenshot({ path: path.join(outDir, `${bp}.png`), fullPage: false });
       const dom = await page.evaluate(extractDom);
       fs.writeFileSync(path.join(outDir, `${bp}.dom.json`), JSON.stringify(dom));
-      const health = await page.evaluate(layoutHealth);
+      const health = { ...(await page.evaluate(layoutHealth)), ...(await page.evaluate(fluidity)) };
       const fontsOk = await page.evaluate(() => document.fonts.check("16px Inter"));
       dumps[bp] = await page.evaluate(integrityDump);
       fs.writeFileSync(path.join(outDir, `${bp}.nodes.json`), JSON.stringify(dumps[bp]));
@@ -283,8 +314,8 @@ async function renderHtml(html, outDir) {
       await ctx.close();
     }
     for (const w of BETWEEN_WIDTHS) {
-      const { ctx, page } = await open(w, 900);
-      result.between[w] = await page.evaluate(layoutHealth);
+      const { ctx, page } = await open(w, w < 768 ? 844 : w < 1280 ? 1024 : 900);
+      result.between[w] = { ...(await page.evaluate(layoutHealth)), ...(await page.evaluate(fluidity)) };
       await ctx.close();
     }
   } finally {

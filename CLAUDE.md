@@ -63,6 +63,13 @@ Organiser tips (Sep 24): name Nebius Token Factory + NVIDIA Nemotron in the desc
 | Coder model | Single-shot match on netflix: Super ~15–27, **Ultra (thinking off) 39–47** (~$0.024/call, 23 s). Thinking on/low → often "no code" (token budget) |
 | Spend | see `var/spend.jsonl` (≈ $1.6 by Oct 1) |
 
+### Council review before Gate A (Oct 1, evening) — verdict: Gate A as written FAIL (miscalibrated)
+- Scaffold alone (no model past perception) already meets desktop ≥ 85 (calcom 85.6 all bps, netflix 84.3); loop adds +5 desktop, all from the deterministic `auto` branch. 48 Nemotron candidates since the scaffold: **0 adopted**. Critique computed but unused. Nemotron's footprint = semantic tag names only.
+- Scaffold is **pinned, not fluid**: 0 fluid classes, fixed widths, root pinned to 390/768/1280; between breakpoints content sits left-pinned (vercel @1100: 582 px dead space), < 390 px scrolls sideways (30 px @360). Below-the-fold content is pushed with magic margins or hidden (netflix desktop footer `xl:hidden`). BETWEEN_WIDTHS check (overflow/overlap only) misses all of this.
+- False claims removed (Oct 1): "never sees the target / images", "can't fake responsive", "Nemotron plans, writes and critiques". Honest wording: *design frames are the input; a vision model and deterministic measurement read them into a text spec; code-writing models receive text measurements only, never image bytes; scoring runs in a separate disposable sandbox; lint + runtime checks forbid embedded images and per-breakpoint copies.*
+- Proposed honest Gate A: baseline = scaffold ("compiler"); loop ≥ +5 worst-bp over it on 2/3 pages and desktop ≥ 85; Nemotron decisive (ablation ≥ 2 pts or ≥ 1 adopted change per run) or labelled "semantic naming only"; responsive honesty at 360/375/500/1024/1600 (0 overflow/overlap, content centre within 5 % of nearest frame, no full-page gap > 1 viewport, nothing hidden only for being below the fold); ≤ $0.15/run.
+- Full report: `out/council/` (scripts + renders).
+
 ## 4. Immediate next steps (in order)
 
 1. Nemotron as structure PLANNER before compiling: semantic grouping (sections, cards, nav, columns) from the spec → scaffold creates real wrappers. Fixes vercel cards; gives Nemotron a decisive role.

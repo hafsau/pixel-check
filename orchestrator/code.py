@@ -1,4 +1,4 @@
-"""Code: Nemotron writes / revises the single App.jsx from the spec (and critiques). Never sees images."""
+"""Code-writing / editing model calls. These models receive text only (spec + measurements), never image bytes."""
 from __future__ import annotations
 
 import re

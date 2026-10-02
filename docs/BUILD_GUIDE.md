@@ -237,7 +237,7 @@ pixel-check/
 |---|---|---|
 | 6.1 `config.py` | Model IDs, reasoning modes, prices, caps, breakpoints from env | Swap a model via env → works |
 | 6.2 `score.py` | Per breakpoint **S = 100 × (0.70·SSIM + 0.20·region + 0.10·text)**; **Match = min(S_m, S_t, S_d)**; mean reported; top-8 diff regions per breakpoint; missing/wrong text. Formula in `docs/SCORING.md` | Identical → 100; blank → < 20; 2-px shift → ≥ 95; perfect desktop + blank mobile → match < 20 |
-| — | Targets go only into a **disposable scoring run** forked from the render checkpoint; coder never sees image data | Grep coder prompts in trace → no image data |
+| — | Targets go only into a **disposable scoring run** forked from the render checkpoint; code-writing models receive text measurements only, never image bytes | Grep coder prompts in trace → no image data |
 | 6.3 `perceive.py` | VLM → one `spec.json`: shared text, colours, per-breakpoint layout changes, approximate boxes. Schema-enforced | ≥ 90% text correct; every layout change listed |
 | 6.4 `plan.py` | Super, **thinking off**, JSON schema → components + responsive strategy each | Every layout change mapped |
 | 6.5 `code.py` | Super, **thinking off**, JSON `{file, notes}` → complete mobile-first `App.jsx` (`md:`, `xl:`), one DOM tree, flex/grid | Round-0 builds clean on 4/5 screens |
@@ -333,9 +333,9 @@ Public YouTube, < 3:00 (aim 2:45), audio covers Token Factory + Nemotron, no cop
 |---|---|---|
 | 0:00–0:20 | AI design-to-code looks right on desktop, breaks on a phone | "Existing tools check one screen size. Pixel-Check is for designers and front-end developers handing off responsive designs." |
 | 0:20–0:35 | 3 frames in; spec review | "A vision model reads the designs once" |
-| 0:35–1:35 | Live run, 3 rows, worst breakpoint highlighted; "sped up 4×" label | "Nemotron 3 Super plans, writes and critiques; every render runs in a network-isolated Token Factory Sandbox at three sizes; three branches per round" |
+| 0:35–1:35 | Live run, 3 rows, worst breakpoint highlighted; "sped up 4×" label | "[REVISE after Gate A — see council review Oct 1: describe Nemotron's actual, measured role]; every render runs in a network-isolated Token Factory Sandbox at three sizes; three branches per round" |
 | 1:35–1:55 | Config D chart | Why this exists |
-| 1:55–2:15 | Anti-cheat demo | "It never sees the target, and it can't fake responsive" |
+| 1:55–2:15 | Anti-cheat demo | "The design frames are the input; code-writing models get text measurements, never image bytes; lint and runtime checks block embedded images and per-breakpoint copies" |
 | 2:15–2:35 | Results incl. held-out + cost/run | Real numbers |
 | 2:35–2:45 | Live resize of output; repo URL | "Built on Nebius Token Factory with NVIDIA Nemotron." |
 

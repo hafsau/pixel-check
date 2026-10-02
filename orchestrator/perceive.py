@@ -29,16 +29,61 @@ Rules: list EVERY visible text exactly as written, top-to-bottom; boxes are pixe
 solid grey rectangles are image placeholders; colours as hex; do not invent anything that is not visible."""
 
 
+def _repair_json(text: str):
+    """Fix the malformations seen from the vision model: number arrays without commas ("[275 20 345 40]"), raw
+    newlines inside strings, trailing commas. Returns parsed JSON or None."""
+    t = re.sub(r"^```(?:json)?\s*|\s*```\s*$", "", (text or "").strip())
+    t = re.sub(r"\[(\s*-?\d+(?:\.\d+)?(?:\s+-?\d+(?:\.\d+)?)+\s*)\]",
+               lambda m: "[" + ", ".join(m.group(1).split()) + "]", t)
+    out, in_str, esc = [], False, False
+    for ch in t:                       # escape raw newlines that occur inside strings
+        if in_str and ch == "\n":
+            out.append("\\n")
+            continue
+        out.append(ch)
+        if esc:
+            esc = False
+        elif ch == "\\":
+            esc = True
+        elif ch == '"':
+            in_str = not in_str
+    t = re.sub(r",\s*([}\]])", r"\1", "".join(out))
+    return parse_json(t)
+
+
 def read_frame(client: TFClient, bp: str, png: bytes) -> dict:
     w, h = config.BREAKPOINTS[bp]
     msg = [{"role": "user", "content": [{"type": "text", "text": FRAME_PROMPT.format(w=w, h=h, bp=bp)}, image_part(png)]}]
-    for attempt in range(2):
-        r = client.chat(config.MODEL_VISION, msg, step=f"perceive {bp}", max_tokens=6000, temperature=0.0)
-        data = parse_json(r.content)
-        if isinstance(data, dict) and isinstance(data.get("texts"), list):
-            data["size"] = [w, h]
-            return data
-    raise ValueError(f"perceive {bp}: unparseable vision output: {r.content[:300]!r}")
+    last = ""
+    for attempt, temp in enumerate((0.0, 0.3)):
+        r = client.chat(config.MODEL_VISION, msg, step=f"perceive {bp}", max_tokens=6000, temperature=temp)
+        last = r.content or ""
+        for data in (parse_json(last), _repair_json(last)):
+            if isinstance(data, dict) and isinstance(data.get("texts"), list):
+                data["size"] = [w, h]
+                return data
+    raise ValueError(f"perceive {bp}: unparseable vision output: {last[:300]!r}")
+
+
+def ocr_fallback(meas: dict) -> dict:
+    """When the vision model fails on a frame: texts straight from OCR, roles guessed from size and position."""
+    lines = meas["text_lines"]
+    sizes = sorted(((l.get("typo") or {}).get("size_px") or l["box"][3]) for l in lines)
+    big = sizes[-1] if sizes else 0
+    texts = []
+    for l in lines:
+        fs = (l.get("typo") or {}).get("size_px") or l["box"][3]
+        inside = any(_frac(l["box"], b["box"]) > 0.8 and b["box"][3] <= 64 for b in meas["blocks"])
+        role = "heading" if fs >= max(big * 0.8, 22) else "button" if inside else "body"
+        texts.append({"text": l["text"], "role": role, "box": l["box"], "size_px": fs})
+    return {"texts": texts, "blocks": [], "layout": "", "fallback": "ocr"}
+
+
+def _frac(box, outer) -> float:
+    x, y, w, h = box
+    iw = max(0, min(x + w, outer[0] + outer[2]) - max(x, outer[0]))
+    ih = max(0, min(y + h, outer[1] + outer[3]) - max(y, outer[1]))
+    return (iw * ih) / (w * h) if w * h else 0.0
 
 
 def _norm(s: str) -> str:
@@ -118,7 +163,8 @@ def merge(vlm: dict, meas: dict) -> dict:
             first = lines[idxs[0]]
             if len(idxs) > 1 or _norm(first["text"]) == _norm(t.get("text", "")) or score >= 0.95:
                 used.update(idxs)
-            item.update(box=box, color=first["color"], on=first["backdrop"], measured=True, lines=len(idxs))
+            item.update(box=box, color=first["color"], on=first["backdrop"], measured=True, lines=len(idxs),
+                        line_boxes=[lines[k]["box"] for k in idxs])
             ty = first.get("typo") or {}
             item["size_px"] = ty.get("size_px") or font_px(first["text"], first["box"][2], first["box"][3], t.get("size_px"))
             if ty:
@@ -211,9 +257,17 @@ def rhythm(frame: dict) -> str:
 
 def perceive(client: TFClient, frames: dict[str, bytes]) -> dict:
     """frames: {bp: png}. Returns {"breakpoints": {bp: merged frame spec}}. Frames read in parallel."""
+    def safe_read(kv):
+        try:
+            return read_frame(client, *kv)
+        except ValueError:
+            return None
     with ThreadPoolExecutor(len(frames)) as ex:
-        vlm = dict(zip(frames, ex.map(lambda kv: read_frame(client, *kv), frames.items())))
+        vlm = dict(zip(frames, ex.map(safe_read, frames.items())))
         meas = dict(zip(frames, ex.map(lambda kv: measure(kv[1]), frames.items())))
+    for bp in frames:   # a frame the vision model couldn't read still gets a spec (OCR-only, flagged)
+        if vlm[bp] is None:
+            vlm[bp] = ocr_fallback(meas[bp])
     return {"breakpoints": {bp: merge(vlm[bp], meas[bp]) for bp in frames}, "raw_vlm": vlm}
 
 
