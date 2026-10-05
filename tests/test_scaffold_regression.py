@@ -27,7 +27,12 @@ FLUID_FLOORS = {"netflix-signin": (88.0, True), "calcom-signup": (80.0, True), "
                 "lambda": (67.0, True), "netflix-signin-lx": (89.0, True), "calcom-signup-lx": (84.0, True),
                 "vercel-pricing-lx": (68.0, True), "lambda-lx": (67.0, True)}
 # compiler ceiling: fluid compiler on DOM oracle specs of the Linux re-captures (tools/oracle_spec.py), Oct 1 evening
-ORACLE_FLOORS = {"calcom-signup-lx": 86.0, "vercel-pricing-lx": 85.0, "lambda-lx": 80.0, "netflix-signin-lx": 80.0}
+ORACLE_FLOORS = {"calcom-signup-lx": 86.0, "vercel-pricing-lx": 85.0, "lambda-lx": 80.0, "netflix-signin-lx": 80.0,
+                 # Oct 5 (council): the pages the desktop-sidebar fix was tuned on + lennysjobs get floors too;
+                 # (floor, fluidity must pass) — lennysjobs (textured background, known limitation) and shadcn accordion
+                 # (mobile layout still weak, 24) overflow at 360–500 px: recorded as known failures, not hidden
+                 "shadcn-tabs-lx": 54.0, "shadcn-accordion-lx": (22.0, False), "notion-pricing-lx": 41.0,
+                 "lennysjobs-lx": (23.0, False)}
 
 
 @pytest.mark.parametrize("page", sorted(FLOORS))
@@ -42,7 +47,9 @@ def test_fluid_page(page, tmp_path):
 
 @pytest.mark.parametrize("page", sorted(ORACLE_FLOORS))
 def test_fluid_oracle_page(page, tmp_path):
-    _check(page, tmp_path, compile_fluid, ORACLE_FLOORS[page], True, oracle=True)
+    f = ORACLE_FLOORS[page]
+    floor, fluid_pass = f if isinstance(f, tuple) else (f, True)
+    _check(page, tmp_path, compile_fluid, floor, fluid_pass, oracle=True)
 
 
 def _check(page, tmp_path, compiler, floor, fluid_pass, oracle=False):

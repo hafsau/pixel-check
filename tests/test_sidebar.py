@@ -33,9 +33,13 @@ def page(with_sidebar: bool):
         if bp != "desktop":      # below desktop's fold: only the smaller frames show the next heading
             texts += [t("Installation", (24, h - 60, 130, 24), 24, "heading", 600)]
         if with_sidebar and bp == "desktop":
+            # a desktop-only header nav row (not part of the sidebar strip) and a header divider
+            texts += [t(n_, (33 + 70 * i, 24, 50, 14), 14, "nav") for i, n_ in enumerate(["Home", "Docs", "Blocks", "Charts"])]
+            blocks += [{"box": [1035, 24, 1, 16], "fill": "#e5e5e5"}]
             texts += [t(f"Component {i}", (35, 110 + 40 * i, 110, 14), 14, "nav") for i in range(16)]
             texts += [t(s_, (1100, 120 + 28 * i, 120, 13), 13, "nav") for i, s_ in   # an "On this page" column
-                      enumerate(["On This Page", "Installation", "Usage", "Composition", "Disabled", "API Reference"])]
+                      enumerate(["On This Page", "Installation", "Usage", "Composition", "Basic", "Multiple", "Disabled",
+                                 "Borders", "Card", "API Reference"])]
         bps[bp] = {"size": [w, h], "background": "#ffffff", "texts": texts, "blocks": blocks}
     return {"breakpoints": bps}
 
@@ -70,7 +74,7 @@ def test_desktop_sidebar_drawn_at_its_design_position(tmp_path):
         assert abs(x - 35) <= 4 and abs(y - (110 + 40 * i)) <= 4, (i, dom[f"Component {i}"])
     x, y = dom["Tabs"][:2]
     assert abs(x - 320) <= 4 and abs(y - 90) <= 6, dom["Tabs"]
-    assert abs(dom["API Reference"][0] - 1100) <= 4 and abs(dom["API Reference"][1] - 260) <= 4, dom["API Reference"]
+    assert abs(dom["API Reference"][0] - 1100) <= 4 and abs(dom["API Reference"][1] - 372) <= 4, dom["API Reference"]
 
 
 REAL = [p for p in ("shadcn-tabs", "shadcn-accordion") if (ROOT / "out" / "specs" / f"{p}-lx.oracle.json").exists()]
@@ -111,3 +115,26 @@ def test_row_order_compares_positions_in_one_frame():
                                                                             t("Body", (320, 300, 400, 16))], "blocks": []}}}
     code = compile_fluid(spec, auto_menu=False)
     assert code.index(">Tabs</") < code.index("w-[32px]"), "the heading comes first in its row"
+
+
+def test_header_nav_and_dividers_are_not_part_of_a_strip():
+    from orchestrator import fluid
+    items = fluid.prepare(page(True))
+    roots = fluid._lift_siblings(fluid._tree2(fluid._rule_regions(fluid._edge_rules(fluid._frames(fluid._glyphs(fluid._decorations(items)))))))
+    strips = fluid._side_strips(roots)
+    names = [getattr(c, "text", None) for _, its, _ in strips for c in its]
+    assert "Home" not in names and "Docs" not in names and "Component 3" in names and "API Reference" in names
+    assert all(box[1] >= 100 for _, _, box in strips), [box for _, _, box in strips]
+
+
+def test_sidebar_page_passes_the_anti_cheat_integrity_check(tmp_path):
+    """An absolutely positioned aside overlapping full-width bands read as a traced layout (100 % of text "pinned"):
+    side columns must be laid out in flow (a row: aside | main | aside), not pinned."""
+    import sys
+    sys.path.insert(0, str(ROOT / "sandbox"))
+    import integrity
+    (tmp_path / "App.jsx").write_text(compile_fluid(page(True), auto_menu=False))
+    subprocess.run(["node", "render.mjs", "--in", str(tmp_path / "App.jsx"), "--out", str(tmp_path)],
+                   cwd=ROOT / "sandbox", capture_output=True, timeout=180)
+    checks = json.loads((tmp_path / "checks.json").read_text())
+    assert integrity.failures(checks, tmp_path) == []

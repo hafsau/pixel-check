@@ -1047,6 +1047,8 @@ def _side_strips(roots: list[Item]) -> list[tuple[str, list[Item], list]]:
             if bp not in c.at or len(c.at) != 1:
                 continue
             x, y, w, h = _box(c, bp)
+            if w <= 3 or h <= 3:          # a divider (a header's separator) is not a column's content
+                continue
             if not any(ov(y, y + h, sy, sy + sh) and ov(x - 8, x + w + 8, sx, sx + sw) for sx, sy, sw, sh in shared):
                 free.append(c)
         free.sort(key=lambda c: _box(c, bp)[0])
@@ -1060,6 +1062,26 @@ def _side_strips(roots: list[Item]) -> list[tuple[str, list[Item], list]]:
             else:
                 groups.append({"items": [c], "x0": x, "x1": x + w})
         for g in groups:
+            # a header nav run is a row, not a column: drop items with another single-frame item in their row close
+            # by (≤ 120 px) outside the strip, until stable (Home · Docs · Components … above a docs sidebar)
+            changed = True
+            while changed and g["items"]:
+                changed = False
+                for c in list(g["items"]):
+                    x, y, w, h = _box(c, bp)
+                    for o in free:
+                        if o in g["items"]:
+                            continue
+                        ox, oy, ow, oh = _box(o, bp)
+                        gap = max(ox - (x + w), x - (ox + ow))
+                        if ov(y, y + h, oy, oy + oh) and gap <= 120:
+                            g["items"].remove(c)
+                            changed = True
+                            break
+            if not g["items"]:
+                continue
+            g["x0"] = min(_box(c, bp)[0] for c in g["items"])
+            g["x1"] = max(_box(c, bp)[0] + _box(c, bp)[2] for c in g["items"])
             y0 = min(_box(c, bp)[1] for c in g["items"])
             y1 = max(_box(c, bp)[1] + _box(c, bp)[3] for c in g["items"])
             beside = any(ov(y0, y1, sy, sy + sh) for _, sy, _, sh in shared)
@@ -1067,6 +1089,17 @@ def _side_strips(roots: list[Item]) -> list[tuple[str, list[Item], list]]:
             if len(g["items"]) >= 4 and y1 - y0 >= 0.3 * VH[bp] and beside and g["x1"] - g["x0"] <= 0.25 * W[bp]:
                 out.append((bp, g["items"], [g["x0"], y0, g["x1"] - g["x0"], y1 - y0]))
     return out
+
+
+def _shift(items: list[Item], bp: str, dx: float):
+    """Move items (and everything inside them) left by dx in one frame — into a column that starts at dx."""
+    for c in items:
+        a = c.at.get(bp)
+        if a:
+            for k in ("box", "ink"):
+                if a.get(k):
+                    a[k] = [a[k][0] - dx] + list(a[k][1:])
+        _shift(c.children, bp, dx)
 
 
 def _merge_variants(items: list[Item]) -> list[Item]:
@@ -1204,6 +1237,9 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
     STATE.update({"all": flat, "intents": intents, "bands": [], "triggers": resolved, **keep})
 
     sides = [] if fragment else _side_strips(roots)
+    if sides:          # one frame's columns (the widest frame that has any)
+        sb = max((bp for bp, _, _ in sides), key=lambda b: BPS.index(b))
+        sides = [x for x in sides if x[0] == sb]
     side_ids = {id(c) for _, its, _ in sides for c in its}
     main = [c for c in roots if id(c) not in side_ids]
     # the frame with most items sets the bands; when its bands do not hold in the other frames, the next frame's
@@ -1219,15 +1255,14 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
         bands = [main]
     member = {id(c): k for k, b in enumerate(bands) for c in b}
     bottom = {bp: max((_box(c, bp)[1] + _box(c, bp)[3] for b in bands for c in b if bp in c.at), default=0) for bp in BPS}
-    nb, last = len(bands), 0
+    nb, last, trail = len(bands), 0, None
     for c in sorted(main, key=lambda c: min(_box(c, bp)[1] / VH[bp] for bp in c.at)):
         if id(c) not in member and ref not in c.at and all(_box(c, bp)[1] >= bottom[bp] - 2 for bp in c.at):
             # below everything the reference frame shows, in every frame that has it (a heading below desktop's
-            # fold): a trailing band of its own, not glued into the reference frame's last band
-            if last < nb:
-                last = nb
-                nb += 1
-            member[id(c)] = last
+            # fold): ONE trailing band (rows laid out inside it), not glued into the reference frame's last band
+            if trail is None:
+                trail, nb = nb, nb + 1
+            member[id(c)] = last = trail
             continue
         last = member.setdefault(id(c), last)
     bands = [b for b in ([c for c in main if member[id(c)] == k] for k in range(nb)) if b]
@@ -1282,30 +1317,69 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
             out += emit_band(k, b, 3)
         _link_segments()
         return "\n".join(out)
+    show = {"mobile": "block md:hidden", "tablet": "hidden md:block xl:hidden", "desktop": "hidden xl:block"}
+
+    def emit_body(indexed, indent):
+        """Body bands; with side columns: the bands above them full width, then a row in flow in that frame —
+        aside | main column | aside (an absolutely pinned aside over full-width bands read as a traced layout)."""
+        if not sides:
+            return [l for k, b in indexed for l in emit_band(k, b, indent)]
+        pad = "  " * indent
+        y_top = min(box[1] for _, _, box in sides)
+        lines, rest = [], list(indexed)
+        while rest:
+            u = _union(rest[0][1], sb)
+            if u is not None and u[1] + u[3] > y_top + 2:
+                break
+            k, b = rest.pop(0)
+            lines += emit_band(k, b, indent)
+        left = [x for x in sides if x[2][0] + x[2][2] <= W[sb] / 2]
+        right = [x for x in sides if x not in left]
+        # the left column reaches the main content beside it (a sidebar column, not a box hugging its links — the
+        # rows inside would right-align against its edge)
+        x1 = max((x[2][0] + x[2][2] for x in left), default=0)
+        beside = [_box(c, sb)[0] for _, b in rest for c in b if sb in c.at and _box(c, sb)[0] >= x1]
+        dx = (min(beside) if beside else x1 + 24) if left else 0
+        rx = min((x[2][0] for x in right), default=W[sb])
+        row_top, P = prev_bottom[sb], PREFIX[sb]
+        lines.append(f'{pad}<div className="{P}flex {P}flex-row {P}items-start w-full">')
+        for _, its, (x, y, w, h) in left:
+            lines.append(f'{pad}  <aside className="{show[sb]} {P}shrink-0 {P}w-[{dx}px] {P}mt-[{max(0, y - row_top)}px]">')
+            lines += _layout(its, {b: [0, y, dx, h] for b in BPS}, indent + 2)
+            lines.append(f"{pad}  </aside>")
+        lines.append(f'{pad}  <div className="w-full {P}flex-1 {P}min-w-0">')
+        moved = [c for _, b in rest for c in b]
+        _shift(moved, sb, dx)            # the main column starts after the left column
+        saved, W[sb] = W[sb], rx - dx
+        try:
+            for k, b in rest:
+                lines += emit_band(k, b, indent + 2)
+        finally:
+            W[sb] = saved
+            _shift(moved, sb, -dx)
+        lines.append(f"{pad}  </div>")
+        for _, its, (x, y, w, h) in right:
+            lines.append(f'{pad}  <aside className="{show[sb]} {P}shrink-0 {P}w-[{W[sb] - rx}px] {P}mt-[{max(0, y - row_top)}px]">')
+            lines += _layout(its, {b: [rx, y, W[sb] - rx, h] for b in BPS}, indent + 2)
+            lines.append(f"{pad}  </aside>")
+        lines.append(f"{pad}</div>")
+        return lines
+
     if tail:
         tail_top = {bp: min((_box(c, bp)[1] for b in tail for c in b if bp in c.at), default=None) for bp in BPS}
         mh = _resp({bp: (f"min-h-[{tail_top[bp]}px]" if tail_top[bp] is not None else "min-h-screen") for bp in BPS})
         out.append(f'      <div className="flex flex-col w-full {mh}">')
-        for k, b in enumerate(body):
-            out += emit_band(k, b, 4)
+        out += emit_body(list(enumerate(body)), 4)
         out.append("      </div>")
         for bp in BPS:
             prev_bottom[bp] = tail_top[bp] if tail_top[bp] is not None else 0
         for k, b in enumerate(tail, len(body)):
             out += emit_band(k, b, 3)
     else:
-        for k, b in enumerate(body):
-            out += emit_band(k, b, 3)
-    show = {"mobile": "block md:hidden", "tablet": "hidden md:block xl:hidden", "desktop": "hidden xl:block"}
-    for bp, its, box in sides:     # side columns: at their design box, only in their frame
-        x, y, w, h = box
-        out.append(f'      <aside className="{show[bp]} absolute left-[{x}px] top-[{y}px] w-[{w}px]">')
-        out += _layout(its, {b: [x, y, w, h] for b in BPS}, 4)
-        out.append("      </aside>")
+        out += emit_body(list(enumerate(body)), 3)
     _link_segments()
     bgs = {bp: spec["breakpoints"].get(bp, {}).get("background", "#ffffff") for bp in BPS}
-    root_cls = (f"{'relative ' if sides else ''}flow-root min-h-screen w-full font-sans "
-                f"{_resp({bp: f'bg-[{bgs[bp]}]' for bp in BPS})}")
+    root_cls = f"flow-root min-h-screen w-full font-sans {_resp({bp: f'bg-[{bgs[bp]}]' for bp in BPS})}"
     head = ('import { useState } from "react";\n\nexport default function App() {\n'
             '  const [menuOpen, setMenuOpen] = useState(false);\n  return (\n') if MENU else "export default function App() {\n  return (\n"
     return head + f'    <div className="{root_cls}">\n' + "\n".join(out) + "\n    </div>\n  );\n}\n"

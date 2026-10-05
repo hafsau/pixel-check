@@ -109,3 +109,13 @@ def test_to_swap_plan_resolves_ids_to_texts_and_occurrences():
     assert sp["slots"][1] == {"text": "View your key metrics.", "nth": 0}
     assert sp["members"][2] == {"trigger": "Reports", "trigger_id": 3,
                                 "slots": ["Reports", "Generate reports.", "You have 5 reports."]}
+
+
+def test_validate_rejects_a_trigger_that_is_also_a_slot():
+    """Council (Oct 5): Nemotron's perception-path plan wired the card title (a slot) as the Overview trigger and still
+    scored 2/2."""
+    import copy
+    p = copy.deepcopy(REPLY)
+    p["members"][0]["trigger"] = 5            # id 5 = the card title "Overview", also slot 0
+    errs = validate(p, build_outline(BASE, EXAMPLE["trigger"]), EXAMPLE)
+    assert any("slot" in e and "trigger" in e for e in errs), errs

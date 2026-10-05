@@ -360,6 +360,10 @@ async function interactHtml(html, scenarios, outDir) {
       const spots = {};     // selector → its box when first seen (click_at clicks that spot later)
       for (const st of sc.steps || []) {
         try {
+          if (st.check) {           // report this element's state (aria) instead of the first trigger's
+            trigger = st.check;
+            continue;
+          }
           if (st.click_at) {
             const sel = st.click_at;
             if (!spots[sel]) {

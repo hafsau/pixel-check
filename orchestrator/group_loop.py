@@ -34,6 +34,24 @@ def load_targets(d: Path, states: list[str]) -> dict:
                         for s in states}}
 
 
+def _n(t) -> str:
+    return " ".join(((t["text"] if isinstance(t, dict) else t) or "").split())
+
+
+def slot_accuracy(gt_base: list, gt_state: list, dom: list) -> tuple[float, list[str]]:
+    """Exact content check against the held-out frame itself: the strings the state shows that the base frame does
+    not (multiset) must be painted in the render, and the strings it no longer shows must be gone. Fuzzy scoring let
+    '9 reports' pass for '5 reports' (council, Oct 5). → (fraction right, what is missing / stale)."""
+    from collections import Counter
+    b, st = Counter(_n(t) for t in gt_base), Counter(_n(t) for t in gt_state)
+    shown = Counter(_n(d) for d in dom if d.get("inked") and d.get("onscreen", True) and _n(d))
+    added, removed = st - b, b - st
+    miss = [f"missing {t!r}" for t in added if shown[t] < st[t]]
+    stale = [f"still shown {t!r}" for t, k in removed.items() if shown[t] > st.get(t, 0)]
+    total = sum(added.values()) + sum(removed.values())
+    return (1.0 if total == 0 else round(1 - (len(miss) + len(stale)) / max(1, len(added) + len(removed)), 3)), miss + stale
+
+
 def example_of(base_spec: dict, given: dict, bp: str = "mobile") -> dict:
     """The example as text: what the given state frame changed (state_diff), with the trigger box."""
     d = state_diff(base_spec["breakpoints"][bp], given["frames"][bp], given["trigger"].get(bp))
@@ -42,9 +60,9 @@ def example_of(base_spec: dict, given: dict, bp: str = "mobile") -> dict:
             "appeared": order(d["appeared"]["texts"]), "disappeared": order(d["disappeared"]["texts"])}
 
 
-def _slots(outline: list[dict], example: dict) -> list[int]:
+def _slots(outline: list[dict], example: dict, exclude: set = frozenset()) -> list[int]:
     gone = [" ".join(t.split()).lower() for t in example["disappeared"]]
-    out, used = [], set()
+    out, used = [], set(exclude)      # never a member's own control (the Overview tab label is not the card title)
     for g in gone:          # the base frame's text the example replaced (not the trigger's own label)
         hit = next((o["id"] for o in outline if o["id"] not in used and not o["example_trigger"] and
                     " ".join(o["text"].split()).lower() == g and (not out or o["box"][1] >= outline[out[-1]]["box"][1] - 4)), None)
@@ -58,7 +76,7 @@ def repeat_plan(outline: list[dict], example: dict) -> dict:
     ex = next(o for o in outline if o["example_trigger"])
     size_w = " ".join(ex["style"].split()[:2])
     members = [o for o in outline if " ".join(o["style"].split()[:2]) == size_w and abs(o["box"][1] - ex["box"][1]) <= 8]
-    slots = _slots(outline, example)
+    slots = _slots(outline, example, {m["id"] for m in members})
     base_txt = [outline[s]["text"] for s in slots]
     appeared = list(example["appeared"])
     # the member selected in the base frame: its label is one of the replaced texts (a tab titles its card)
@@ -67,6 +85,36 @@ def repeat_plan(outline: list[dict], example: dict) -> dict:
     return {"kind": "tabs" if len(members) > 2 else "toggle", "exclusive": True, "initial": init, "slots": slots,
             "members": [{"trigger": m["id"], "content": ex_content if m["id"] == ex["id"] else list(base_txt)}
                         for m in members]}
+
+
+def regex_plan(outline: list[dict], example: dict, notes: str) -> dict:
+    """The honest non-model baseline (council, Oct 5): repeat-detector members, and for each member the quoted
+    strings that follow its first mention in the notes fill its slots in order (a tab titles its card with its own
+    name). Without quotes nothing changes — what is left for a model is notes that do not quote the copy."""
+    import re
+    p = repeat_plan(outline, example)
+    base_txt = [outline[s]["text"] for s in p["slots"]]
+    labels = [outline[m["trigger"]]["text"] for m in p["members"]]
+    init_label = labels[p["initial"]] if p["members"] else ""
+    title = 0 if base_txt and base_txt[0].lower() == init_label.lower() else None
+    known = {p["initial"]} | {i for i, m in enumerate(p["members"]) if outline[m["trigger"]]["example_trigger"]}
+    marks = sorted((m.start(), i) for i, lab in enumerate(labels)
+                   for m in [re.search(r"\b%s\b" % re.escape(lab), notes or "", re.I)] if m)
+    quotes = [(q.start(), (q.group(1) or q.group(2)).strip()) for q in re.finditer(r'"([^"]+)"|\u201c([^\u201d]+)\u201d', notes or "")]
+    for k, (start, i) in enumerate(marks):
+        if i in known:
+            continue
+        end = marks[k + 1][0] if k + 1 < len(marks) else len(notes)
+        qs = [q for at, q in quotes if start <= at < end]
+        if not qs:
+            continue
+        content = list(base_txt)
+        if title is not None:
+            content[title] = labels[i]
+        for j, q in zip([j for j in range(len(base_txt)) if j != title], qs):
+            content[j] = q
+        p["members"][i]["content"] = content
+    return p
 
 
 def template_plan(outline: list[dict], example: dict) -> dict:
@@ -91,8 +139,8 @@ def _member_boxes(base_spec: dict, outline: list[dict], tid: int) -> dict:
 
 def run_group(base_spec: dict, given: dict, targets: dict, notes: str, planner: str, client, runner, out: Path,
               name: str = "group") -> dict:
-    if planner not in ("nemotron", "repeat", "template"):
-        raise ValueError(f"unknown planner {planner!r} (nemotron | repeat | template)")
+    if planner not in ("nemotron", "regex", "repeat", "template"):
+        raise ValueError(f"unknown planner {planner!r} (nemotron | regex | repeat | template)")
     out.mkdir(parents=True, exist_ok=True)
     example = example_of(base_spec, given)
     outline = build_outline(base_spec["breakpoints"]["mobile"], example["trigger"])
@@ -101,6 +149,8 @@ def run_group(base_spec: dict, given: dict, targets: dict, notes: str, planner: 
         plan, info = plan_group(client, base_spec["breakpoints"]["mobile"], example, notes)
     elif planner == "repeat":
         plan = repeat_plan(outline, example)
+    elif planner == "regex":
+        plan = regex_plan(outline, example, notes)
     else:
         plan = template_plan(outline, example)
     if plan["kind"] not in ("tabs", "toggle"):
@@ -123,22 +173,34 @@ def run_group(base_spec: dict, given: dict, targets: dict, notes: str, planner: 
         for s, i in want.items():
             if i is not None:
                 scen.append({"name": f"{bp}.{s}", "bp": bp, "steps": [{"click": f'[data-trigger="{name}{i}"]'}]})
+        if plan["kind"] == "tabs":     # keyboard: from the selected tab, ArrowRight selects the next one
+            i0 = plan.get("initial") or 0
+            nxt = (i0 + 1) % len(sp["members"])
+            scen.append({"name": f"{bp}.{name}.kbd", "bp": bp, "steps": [{"focus": f'[data-trigger="{name}{i0}"]'},
+                                                                          {"key": "ArrowRight"},
+                                                                          {"check": f'[data-trigger="{name}{nxt}"]'}]})
     static = runner(compile_fluid(base_spec, auto_menu=False), [{"name": f"{bp}.base", "bp": bp, "steps": []} for bp in bps],
                     out / "static")
     res_dir = runner(code, scen, out / "run")
     res = json.loads((res_dir / "interact.json").read_text())
     sc = {x["name"]: x for x in res.get("scenarios", [])}
-    verdict = {"members": {}, "base_failures": [], "failures": [], "base_scores": {}}
+    verdict = {"members": {}, "base_failures": [], "failures": [], "base_scores": {}, "keyboard": {}}
     for bp in bps:
         ref = float(_score_full(targets["base"][bp], static, f"{bp}.base", targets["base_texts"].get(bp))["score"])
         got = float(_score_full(targets["base"][bp], res_dir, f"{bp}.base", targets["base_texts"].get(bp))["score"])
         verdict["base_scores"][bp] = round(got, 2)
         if got < ref - 3:
             verdict["base_failures"].append(f"{bp}: before any click {got:.1f} vs static {ref:.1f}")
+    if plan["kind"] == "tabs":
+        for bp in bps:
+            k = sc.get(f"{bp}.{name}.kbd")
+            verdict["keyboard"][bp] = bool(k and k["ok"] and k.get("aria_selected") == "true")
+            if not verdict["keyboard"][bp]:
+                verdict["failures"].append(f"{bp}: ArrowRight from the selected tab does not select the next one")
     given_name = given["name"]
     for s, i in want.items():
         m = verdict["members"].setdefault(s, {"scores": {}, "delta": {}, "pass": False, "held_out": s != given_name,
-                                              "planned": i is not None})
+                                              "planned": i is not None, "slot_accuracy": 0.0, "content_errors": []})
         if i is None:
             continue
         ok = True
@@ -156,7 +218,14 @@ def run_group(base_spec: dict, given: dict, targets: dict, notes: str, planner: 
             # interaction's to fix); wrong content loses the text match and falls below
             m["delta"][bp] = round(m["scores"][bp] - verdict["base_scores"][bp], 2)
             sel = r.get("aria_selected") if plan["kind"] == "tabs" else r.get("aria_pressed")
-            ok = ok and m["delta"][bp] >= -DELTA_TOL and sel == "true"
+            gt_b = json.loads(targets["base_texts"][bp].read_text()) if targets["base_texts"].get(bp) else []
+            gt_s = json.loads(targets["members"][s]["texts"][bp].read_text()) if targets["members"][s]["texts"].get(bp) else []
+            dom_p = res_dir / f"{bp}.{s}.dom.json"
+            acc, errs = slot_accuracy(gt_b, gt_s, json.loads(dom_p.read_text()) if dom_p.exists() else [])
+            m.setdefault("acc", {})[bp] = acc
+            m["content_errors"] += [f"{bp}: {e}" for e in errs]
+            ok = ok and m["delta"][bp] >= -DELTA_TOL and sel == "true" and acc == 1.0 and verdict["keyboard"].get(bp, True)
+        m["slot_accuracy"] = min(m.get("acc", {}).values(), default=0.0)
         m["pass"] = ok and bool(m["scores"])
     held = [v for v in verdict["members"].values() if v["held_out"]]
     score_of = lambda v: min(v["scores"].values()) if v["scores"] else 0.0

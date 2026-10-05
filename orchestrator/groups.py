@@ -70,14 +70,108 @@ def compile_swap(page: str, plan: dict, name: str) -> str:
             code = substitute(code, sl["text"], f"{{{up}_SLOT{k}[{sel}]}}", int(sl.get("nth") or 0))
         except KeyError as e:
             raise PlanError(str(e).strip('"')) from None
-    aria = (lambda i: f'role="tab" aria-selected={{{sel} === {i}}}') if plan.get("kind") == "tabs" else \
-           (lambda i: f"aria-pressed={{{sel} === {i}}}")
-    for i, _ in enumerate(members):
-        code = _add_props(code, f"{name}{i}", f"onClick={{() => {setsel}({i})}} {aria(i)}")
     init = plan.get("initial") if isinstance(plan.get("initial"), int) else 0
+    code = _selected_look(code, name, len(members), init, sel)
+    tabs = plan.get("kind") == "tabs"
+    if tabs:
+        code = _mark_parent(code, f'data-trigger="{name}0"', ' role="tablist"')
+        code = _mark_container(code, [f"{{{up}_SLOT{k}[{sel}]}}" for k in range(len(slots))],
+                               f' role="tabpanel" id="{name}-panel"')
+    for i, _ in enumerate(members):
+        a11y = (f'role="tab" aria-selected={{{sel} === {i}}} aria-controls="{name}-panel" tabIndex={{{sel} === {i} ? 0 : -1}} '
+                f"onKeyDown={{{name}Key({i})}}") if tabs else f"aria-pressed={{{sel} === {i}}}"
+        code = _add_props(code, f"{name}{i}", f"onClick={{() => {setsel}({i})}} {a11y}")
     hooks = [f"const [{sel}, {setsel}] = useState({init});"]
+    if tabs:     # arrow keys move the selection and the focus (roving tabindex), Home / End jump
+        n = len(members)
+        hooks.append(f"const {name}Key = (i) => (e) => {{ const j = e.key === \"ArrowRight\" ? (i + 1) % {n} : "
+                     f"e.key === \"ArrowLeft\" ? (i + {n - 1}) % {n} : e.key === \"Home\" ? 0 : e.key === \"End\" ? {n - 1} : -1; "
+                     f"if (j < 0) return; e.preventDefault(); {setsel}(j); "
+                     f"document.querySelector(`[data-trigger=\"{name}${{j}}\"]`)?.focus(); }};")
     hooks += [f"const {up}_SLOT{k} = [{', '.join(json.dumps(mb['slots'][k], ensure_ascii=False) for mb in members)}];"
               for k in range(len(slots))]
     start = code.index("export default function App() {") + len("export default function App() {")
     code = code[:start] + "\n" + "\n".join("  " + h for h in hooks) + code[start:]
     return _imports(code, {"useState"})
+
+
+_VIS = re.compile(r"^(?:[\w-]+:)*(?:bg-|border|rounded|shadow)")
+_TXT = re.compile(r"^(?:[\w-]+:)*(?:text-\[#|font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black)\b)")
+
+
+def _opening(code: str, trigger: str) -> re.Match:
+    m = re.search(r'<(\w+)[^<>]*data-trigger="%s"[^<>]*?/?>' % re.escape(trigger), code)
+    if not m:
+        raise PlanError(f'no element with data-trigger="{trigger}" in the page')
+    return m
+
+
+def _label(code: str, m: re.Match) -> re.Match | None:
+    """The first text element directly inside a trigger that wraps its label (a pill around a <span>)."""
+    close = code.find(f"</{m.group(1)}>", m.end())
+    inner = code[m.end():close]
+    k = re.search(r'<(?:span|p|a)\b[^<>]*className="([^"]*)"', inner)
+    return k and (m.end() + k.start(1), m.end() + k.end(1), k.group(1))
+
+
+def _selected_look(code: str, name: str, n: int, init: int, sel: str) -> str:
+    """The selected member's look (pill background / border / radius / shadow, label colour and weight) follows the
+    selection; layout classes stay. Read from the base frame's selected member and one unselected sibling."""
+    def classes(i):
+        m = _opening(code, f"{name}{i}")
+        cm = re.search(r'className="([^"]*)"', m.group(0))
+        lab = _label(code, m)
+        toks = cm.group(1).split() if cm else []
+        txt = [t for t in (lab[2].split() if lab else toks) if _TXT.match(t)]
+        return [t for t in toks if _VIS.match(t)], txt
+    other = next(i for i in range(n) if i != init)
+    sel_vis, sel_txt = classes(init)
+    uns_vis, uns_txt = classes(other)
+    on, off = " ".join(sel_vis + sel_txt), " ".join(uns_vis + uns_txt)
+    for i in range(n):
+        m = _opening(code, f"{name}{i}")
+        lab = _label(code, m)
+        if lab:            # the label inherits the button's colour / weight
+            code = code[:lab[0]] + " ".join(t for t in lab[2].split() if not _TXT.match(t)) + code[lab[1]:]
+            m = _opening(code, f"{name}{i}")
+        tag = m.group(0)
+        cm = re.search(r'className="([^"]*)"', tag)
+        static = " ".join(t for t in (cm.group(1).split() if cm else []) if not _VIS.match(t) and not _TXT.match(t))
+        dyn = f'className={{`{static} ${{{sel} === {i} ? "{on}" : "{off}"}}`}}'
+        new = tag.replace(cm.group(0), dyn) if cm else tag.replace(f'data-trigger="{name}{i}"', f'data-trigger="{name}{i}" {dyn}')
+        code = code[:m.start()] + new + code[m.end():]
+    return code
+
+
+def _ind(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _mark_parent(code: str, needle: str, attrs: str) -> str:
+    """Add attributes to the opening tag of the element enclosing the line containing `needle` (indentation)."""
+    lines = code.split("\n")
+    ti = next(i for i, l in enumerate(lines) if needle in l)
+    pi = next((j for j in range(ti - 1, -1, -1) if lines[j].strip().startswith("<") and _ind(lines[j]) < _ind(lines[ti])), None)
+    if pi is None:
+        return code
+    lines[pi] = re.sub(r"^(\s*<\w+)", lambda mm: mm.group(1) + attrs, lines[pi], count=1)
+    return "\n".join(lines)
+
+
+def _mark_container(code: str, needles: list[str], attrs: str) -> str:
+    """Add attributes to the smallest element enclosing every line that contains one of `needles`."""
+    lines = code.split("\n")
+    hit = [i for i, l in enumerate(lines) if any(nd in l for nd in needles)]
+    if not hit:
+        return code
+    lo, hi, m = hit[0], hit[-1], min(_ind(lines[i]) for i in hit)
+    for j in range(lo - 1, -1, -1):
+        l = lines[j]
+        if not l.strip().startswith("<") or l.strip().startswith("</") or _ind(l) >= m:
+            continue
+        close = next((k for k in range(j + 1, len(lines)) if _ind(lines[k]) == _ind(l) and lines[k].strip().startswith("</")), None)
+        if close is not None and close > hi:
+            lines[j] = re.sub(r"^(\s*<\w+)", lambda mm: mm.group(1) + attrs, l, count=1)
+            return "\n".join(lines)
+        m = min(m, _ind(l))
+    return code

@@ -425,3 +425,23 @@ export default function App() {
     res = run(p, [{"name": "mobile.tabs1", "bp": "mobile", "steps": [{"click": '[data-trigger="tabs1"]'}]}], tmp_path / "o")
     r = res["scenarios"][0]
     assert r["aria_selected"] == "true" and r["aria_pressed"] is None
+
+
+def test_compiled_tabs_behave_in_the_browser(tmp_path):
+    """Selected look and keyboard, rendered: clicking Analytics moves the white pill to it; from the focused first tab,
+    ArrowRight selects the second (the `check` step reports that element's aria)."""
+    from orchestrator.groups import compile_swap
+    from test_groups import PILL_PAGE, PILL_PLAN
+    p = tmp_path / "tabs.jsx"
+    p.write_text(compile_swap(PILL_PAGE, PILL_PLAN, "tabs"))
+    res = run(p, [{"name": "mobile.base", "bp": "mobile", "steps": []},
+                  {"name": "mobile.tabs1", "bp": "mobile", "steps": [{"click": '[data-trigger="tabs1"]'}]},
+                  {"name": "mobile.kbd", "bp": "mobile", "steps": [{"focus": '[data-trigger="tabs0"]'}, {"key": "ArrowRight"},
+                                                                   {"check": '[data-trigger="tabs1"]'}]}], tmp_path / "o")
+    r = {x["name"]: x for x in res["scenarios"]}
+    assert r["mobile.tabs1"]["aria_selected"] == "true" and r["mobile.kbd"]["aria_selected"] == "true", r
+    base, sel = img(tmp_path / "o" / "mobile.base.png"), img(tmp_path / "o" / "mobile.tabs1.png")
+    white = lambda im: (im.sum(axis=2) > 740)
+    assert white(base).sum() > 300 and white(sel).sum() > 100
+    xs_base, xs_sel = np.nonzero(white(base))[1], np.nonzero(white(sel))[1]
+    assert xs_sel.mean() > xs_base.mean() + 20                                # the pill moved right, to Analytics

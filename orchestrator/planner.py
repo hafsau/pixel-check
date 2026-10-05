@@ -97,6 +97,9 @@ def validate(plan: dict, outline: list[dict], example: dict) -> list[str]:
     if ex_ids and not set(ex_ids) & set(trig):
         errs.append(f"the example trigger (id {ex_ids[0]}) must be a member")
     slots = plan.get("slots") or []
+    both = set(trig) & set(slots)
+    if both:      # the card title is what the selection swaps, not a control (Nemotron wired it as the Overview tab)
+        errs.append(f"outline id(s) {sorted(both)} used as a trigger and as a slot")
     if kind in ("tabs", "toggle"):
         if not slots:
             errs.append("tabs / toggle need slots")
