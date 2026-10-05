@@ -68,3 +68,57 @@ def _check(page, tmp_path, compiler, floor, fluid_pass, oracle=False):
     assert c.get("inputs_typeable", 0) == c.get("inputs", 0) and c.get("buttons_focusable", 0) == c.get("buttons", 0)
     if fluid_pass:
         assert fluidity.report(checks)["pass"], fluidity.report(checks)["fails"]
+
+
+def test_duplicate_labels_match_across_breakpoints_by_style_not_order():
+    """shadcn docs: desktop shows "Tabs" twice — a 14 px sidebar link (first in the list) and the 30 px page heading;
+    mobile has only the heading. Matching by order tied the mobile heading to the sidebar link (the page compiled
+    nearly blank, 5 / 100)."""
+    from orchestrator import fluid
+
+    def t(text, box, size, role):
+        return {"text": text, "box": list(box), "size_px": size, "role": role, "color": "#000000", "weight": 600}
+    spec = {"breakpoints": {
+        "mobile": {"size": [390, 844], "background": "#ffffff", "blocks": [],
+                   "texts": [t("Tabs", (24, 80, 70, 30), 30, "heading"), t("Installation", (24, 838, 130, 24), 24, "heading")]},
+        "desktop": {"size": [1280, 800], "background": "#ffffff", "blocks": [],
+                    "texts": [t("Tabs", (40, 300, 40, 14), 14, "nav"), t("Installation", (1100, 120, 80, 13), 13, "nav"),
+                              t("Tabs", (420, 90, 70, 30), 30, "heading"), t("Installation", (420, 700, 130, 24), 24, "heading")]}}}
+    items = fluid.prepare(spec)
+    head = next(c for c in items if c.kind == "text" and c.text == "Tabs" and "mobile" in c.at)
+    assert head.at["desktop"]["fs"] == 30 and fluid._box(head, "desktop")[1] < 120
+    inst = next(c for c in items if c.kind == "text" and c.text == "Installation" and "mobile" in c.at)
+    assert inst.at["desktop"]["fs"] == 24 and fluid._box(inst, "desktop")[1] > 600
+
+
+def test_label_only_in_a_different_role_and_size_is_not_matched():
+    """shadcn docs: the 24 px "Installation" heading is below desktop's fold; desktop only shows a 13 px sidebar link
+    with that label — not the same element (it pulled the mobile heading into the desktop sidebar)."""
+    from orchestrator import fluid
+
+    def t(text, box, size, role):
+        return {"text": text, "box": list(box), "size_px": size, "role": role, "color": "#000000", "weight": 600}
+    spec = {"breakpoints": {
+        "mobile": {"size": [390, 844], "background": "#ffffff", "blocks": [],
+                   "texts": [t("Tabs", (24, 80, 70, 30), 30, "heading"), t("Installation", (24, 820, 130, 24), 24, "heading")]},
+        "desktop": {"size": [1280, 800], "background": "#ffffff", "blocks": [],
+                    "texts": [t("Installation", (35, 664, 65, 13), 13, "nav"), t("Tabs", (420, 90, 90, 48), 48, "heading")]}}}
+    items = fluid.prepare(spec)
+    inst = [c for c in items if c.kind == "text" and c.text == "Installation"]
+    assert len(inst) == 2 and all(len(c.at) == 1 for c in inst)
+    tabs = [c for c in items if c.kind == "text" and c.text == "Tabs"]
+    assert len(tabs) == 1 and set(tabs[0].at) == {"mobile", "desktop"}            # 30 → 48 px heading still matches
+
+
+def test_heading_not_matched_to_a_smaller_link_with_another_role():
+    """shadcn accordion: tablet's 19 px "Usage" heading was tied to desktop's 13 px "on this page" link (ratio 1.46,
+    heading vs link) — the column then could not be set apart and the tablet compiled to 14."""
+    from orchestrator import fluid
+
+    def t(text, box, size, role):
+        return {"text": text, "box": list(box), "size_px": size, "role": role, "color": "#000000", "weight": 600}
+    spec = {"breakpoints": {
+        "tablet": {"size": [768, 1024], "background": "#ffffff", "blocks": [], "texts": [t("Usage", (65, 946, 57, 18), 19, "heading")]},
+        "desktop": {"size": [1280, 800], "background": "#ffffff", "blocks": [], "texts": [t("Usage", (1033, 158, 38, 13), 13, "link")]}}}
+    us = [c for c in fluid.prepare(spec) if c.kind == "text" and c.text == "Usage"]
+    assert len(us) == 2 and all(len(c.at) == 1 for c in us)

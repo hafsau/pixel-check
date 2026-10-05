@@ -255,6 +255,12 @@ def _text_body(c: Item, br: tuple | None) -> str:
 
 
 def _text(c: Item, indent: int, vis: dict, pos: str) -> list[str]:
+    lines = _text_inner(c, indent, vis, pos)
+    name = getattr(c, "trigger", None)       # a tab label / accordion question that is its own trigger
+    return _mark_trigger(lines, name) if name and len(lines) == 1 and "<input" not in lines[0] else lines
+
+
+def _text_inner(c: Item, indent: int, vis: dict, pos: str) -> list[str]:
     pad = "  " * indent
     a = {bp: c.at.get(bp) or c.at[next(iter(c.at))] for bp in BPS}
     multi = {bp: a[bp].get("lines", 1) > 1 for bp in BPS}
@@ -555,7 +561,13 @@ def _layout(items: list[Item], frame: dict, indent: int, depth: int = 0) -> list
     out = []
     prev_bottom = {bp: frame[bp][1] for bp in BPS}
     for row in _row_groups(items):
-        row.sort(key=lambda c: _box(c, next((bp for bp in ("desktop", "tablet", "mobile") if bp in c.at)))[0])
+        # order by position in ONE frame (the one most of the row is in); an item absent there by its relative x in
+        # its own frame — mobile-only icons at x 294 / 390 sorted before a desktop heading at x 320 / 1280
+        common = max(("desktop", "tablet", "mobile"), key=lambda bp: sum(1 for c in row if bp in c.at))
+        rel = lambda c: (_box(c, common)[0] if common in c.at else
+                         _box(c, next(bp for bp in ("desktop", "tablet", "mobile") if bp in c.at))[0] * W[common]
+                         / W[next(bp for bp in ("desktop", "tablet", "mobile") if bp in c.at)])
+        row.sort(key=rel)
         rcls, mt, per = {}, {}, {}
         for bp in BPS:
             p = sorted([c for c in row if bp in c.at], key=lambda c: _box(c, bp)[0])
@@ -1020,6 +1032,43 @@ def _synth(roots: list[Item]):
     walk(roots)
 
 
+def _side_strips(roots: list[Item]) -> list[tuple[str, list[Item], list]]:
+    """Columns only one frame has, beside the main content (a docs sidebar, an "on this page" list): single-frame
+    items that never overlap horizontally with shared content at the same height, clustered by x; a strip has 4+
+    items spanning 30 %+ of the frame height. They drove the band structure of every frame (shadcn docs: 17 on
+    mobile with the desktop frame, 72 without) → compiled apart as one aside each. → [(bp, items, box)]"""
+    def ov(a0, a1, b0, b1):
+        return min(a1, b1) - max(a0, b0) > 0
+    out = []
+    for bp in BPS:
+        shared = [_box(c, bp) for c in roots if bp in c.at and len(c.at) > 1]
+        free = []
+        for c in roots:
+            if bp not in c.at or len(c.at) != 1:
+                continue
+            x, y, w, h = _box(c, bp)
+            if not any(ov(y, y + h, sy, sy + sh) and ov(x - 8, x + w + 8, sx, sx + sw) for sx, sy, sw, sh in shared):
+                free.append(c)
+        free.sort(key=lambda c: _box(c, bp)[0])
+        groups = []
+        for c in free:     # a column: each item overlaps the group's x-range by half its width (no chaining)
+            x, _, w, _ = _box(c, bp)
+            g = next((g for g in groups if min(x + w, g["x1"]) - max(x, g["x0"]) >= 0.5 * max(1, min(w, g["x1"] - g["x0"]))), None)
+            if g:
+                g["items"].append(c)
+                g["x0"], g["x1"] = min(g["x0"], x), max(g["x1"], x + w)
+            else:
+                groups.append({"items": [c], "x0": x, "x1": x + w})
+        for g in groups:
+            y0 = min(_box(c, bp)[1] for c in g["items"])
+            y1 = max(_box(c, bp)[1] + _box(c, bp)[3] for c in g["items"])
+            beside = any(ov(y0, y1, sy, sy + sh) for _, sy, _, sh in shared)
+            # narrow (a sidebar / "on this page" list); calcom's desktop-only marketing half is content, not a strip
+            if len(g["items"]) >= 4 and y1 - y0 >= 0.3 * VH[bp] and beside and g["x1"] - g["x0"] <= 0.25 * W[bp]:
+                out.append((bp, g["items"], [g["x0"], y0, g["x1"] - g["x0"], y1 - y0]))
+    return out
+
+
 def _merge_variants(items: list[Item]) -> list[Item]:
     """The same text read slightly differently per frame (you're / you’re, a dropped word) became separate items
     with disjoint frames: one element duplicated, which also broke the fold logic. Merge near-identical texts."""
@@ -1031,6 +1080,11 @@ def _merge_variants(items: list[Item]) -> list[Item]:
             continue
         for b in texts[i + 1:]:
             if id(b) in gone or set(a.at) & set(b.at) or min(len(a.text), len(b.text)) < 12:
+                continue
+            fa = max((v.get("fs") or 0) for v in a.at.values()) or 1
+            fb = max((v.get("fs") or 0) for v in b.at.values()) or 1
+            r = max(fa, fb) / max(1, min(fa, fb))
+            if r > 2.2 or (r > 1.25 and a.role != b.role):   # a heading and a sidebar link with the same words
                 continue
             if difflib.SequenceMatcher(None, a.text.lower(), b.text.lower()).ratio() >= 0.9:
                 a.at.update(b.at)
@@ -1052,16 +1106,29 @@ def _apply_triggers(items: list[Item], triggers: dict | None) -> dict:
         target = best if best is not None and score(best) / max(len(boxes), 1) >= 0.5 else None
         if target is None:
             # (at least ~ the trigger's size: a hamburger bar under the trigger's centre is not its control)
+            texts = [c for c in items if c.kind == "text"]
+
+            def others(h, bp, b):    # labels inside the holder but outside the trigger box (a tab list's other tabs)
+                return any(bp in t.at and _centre(_box(t, bp), h.at[bp]["box"], 0) and not _centre(_box(t, bp), b, 0)
+                           for t in texts)
             holders = [c for c in blocks if any(bp in c.at and _centre(b, c.at[bp]["box"], 0) and
                                                 0.8 * b[2] * b[3] <= c.at[bp]["box"][2] * c.at[bp]["box"][3] <= 8 * b[2] * b[3]
-                                                for bp, b in boxes.items())]
+                                                and not others(c, bp, b) for bp, b in boxes.items())]
             target = min(holders, key=lambda c: min(c.at[bp]["box"][2] * c.at[bp]["box"][3] for bp in c.at), default=None)
         if target is None:
-            inside = [c for c in items if any(bp in c.at and _centre(_box(c, bp), b, 0) for bp, b in boxes.items())]
-            if len(inside) == 1 and inside[0].kind == "block":
-                # one icon inside a larger button box (vercel: 24 px icon, 44 px button): mark the icon itself — a
-                # bigger synthetic holder regrouped the rows around it and moved the page
-                target = inside[0]
+            # contained in the trigger box (with a little slack), not just centred there: the tab list around a tab
+            # label is not inside the label's trigger
+            def contained(c, bp, b, pad=4):
+                x, y, w, h = _box(c, bp)
+                return x >= b[0] - pad and y >= b[1] - pad and x + w <= b[0] + b[2] + pad and y + h <= b[1] + b[3] + pad
+            inside = [c for c in items if any(bp in c.at and _centre(_box(c, bp), b, 0) and contained(c, bp, b)
+                                              for bp, b in boxes.items())]
+            labels = [c for c in inside if c.kind == "text"]
+            if len(inside) == 1 or len(labels) == 1:
+                # one icon or one label inside a larger button box (vercel: 24 px icon in a 44 px button; a tab label;
+                # an accordion question beside its chevron): mark it itself — a synthetic holder regrouped the rows
+                # around it and moved the page
+                target = labels[0] if labels else inside[0]
             elif inside:
                 target = Item(f"trigger:{name}", "block")
                 target.at = {bp: {"box": list(b), "fill": None, "border": None, "radius": None, "shadow": False}
@@ -1089,7 +1156,8 @@ def _mark_trigger(lines: list[str], name: str) -> list[str]:
     m = re.match(r"<(\w+)", stripped)
     tag = m.group(1)
     rest = stripped[m.end():]
-    rest = rest.replace(' type="button"', "").replace(' aria-hidden="true"', "")   # a button stays visible to AT
+    rest = rest.replace(' type="button"', "").replace(' aria-hidden="true"', "").replace(' href="#"', "")
+    # (a button stays visible to assistive tech; a link turned button drops its href)
     lines = list(lines)
     cm = re.search(r'className="([^"]*)"', rest)
     if len(lines) == 1 and stripped.rstrip().endswith("/>") and cm:
@@ -1135,15 +1203,34 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
     STATE.clear()
     STATE.update({"all": flat, "intents": intents, "bands": [], "triggers": resolved, **keep})
 
-    ref = max(BPS, key=lambda bp: sum(1 for c in roots if bp in c.at))
-    bands = _bands(roots, ref)
-    if not bands or not _bands_consistent(bands):
-        bands = [roots]
+    sides = [] if fragment else _side_strips(roots)
+    side_ids = {id(c) for _, its, _ in sides for c in its}
+    main = [c for c in roots if id(c) not in side_ids]
+    # the frame with most items sets the bands; when its bands do not hold in the other frames, the next frame's
+    # may (shadcn accordion: desktop's bands overlapped on mobile, mobile's held everywhere)
+    bands, ref = None, None
+    for cand in sorted(BPS, key=lambda bp: -sum(1 for c in main if bp in c.at)):
+        b = _bands(main, cand)
+        if b and _bands_consistent(b):
+            bands, ref = b, cand
+            break
+    if bands is None:
+        ref = max(BPS, key=lambda bp: sum(1 for c in main if bp in c.at))
+        bands = [main]
     member = {id(c): k for k, b in enumerate(bands) for c in b}
-    last = 0
-    for c in sorted(roots, key=lambda c: min(_box(c, bp)[1] / VH[bp] for bp in c.at)):
+    bottom = {bp: max((_box(c, bp)[1] + _box(c, bp)[3] for b in bands for c in b if bp in c.at), default=0) for bp in BPS}
+    nb, last = len(bands), 0
+    for c in sorted(main, key=lambda c: min(_box(c, bp)[1] / VH[bp] for bp in c.at)):
+        if id(c) not in member and ref not in c.at and all(_box(c, bp)[1] >= bottom[bp] - 2 for bp in c.at):
+            # below everything the reference frame shows, in every frame that has it (a heading below desktop's
+            # fold): a trailing band of its own, not glued into the reference frame's last band
+            if last < nb:
+                last = nb
+                nb += 1
+            member[id(c)] = last
+            continue
         last = member.setdefault(id(c), last)
-    bands = [b for b in ([c for c in roots if member[id(c)] == k] for k in range(len(bands))) if b]
+    bands = [b for b in ([c for c in main if member[id(c)] == k] for k in range(nb)) if b]
     # trailing bands absent from a frame are below that frame's fold
     tail_start = len(bands)
     for k in range(len(bands) - 1, 0, -1):
@@ -1209,9 +1296,16 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
     else:
         for k, b in enumerate(body):
             out += emit_band(k, b, 3)
+    show = {"mobile": "block md:hidden", "tablet": "hidden md:block xl:hidden", "desktop": "hidden xl:block"}
+    for bp, its, box in sides:     # side columns: at their design box, only in their frame
+        x, y, w, h = box
+        out.append(f'      <aside className="{show[bp]} absolute left-[{x}px] top-[{y}px] w-[{w}px]">')
+        out += _layout(its, {b: [x, y, w, h] for b in BPS}, 4)
+        out.append("      </aside>")
     _link_segments()
     bgs = {bp: spec["breakpoints"].get(bp, {}).get("background", "#ffffff") for bp in BPS}
-    root_cls = f"flow-root min-h-screen w-full font-sans {_resp({bp: f'bg-[{bgs[bp]}]' for bp in BPS})}"
+    root_cls = (f"{'relative ' if sides else ''}flow-root min-h-screen w-full font-sans "
+                f"{_resp({bp: f'bg-[{bgs[bp]}]' for bp in BPS})}")
     head = ('import { useState } from "react";\n\nexport default function App() {\n'
             '  const [menuOpen, setMenuOpen] = useState(false);\n  return (\n') if MENU else "export default function App() {\n  return (\n"
     return head + f'    <div className="{root_cls}">\n' + "\n".join(out) + "\n    </div>\n  );\n}\n"

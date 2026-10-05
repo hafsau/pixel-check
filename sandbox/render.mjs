@@ -387,7 +387,12 @@ async function interactHtml(html, scenarios, outDir) {
           r.ok = false; r.error = String(e.message || e).split("\n")[0].slice(0, 200); break;
         }
       }
-      if (trigger) r.aria_expanded = await page.locator(trigger).first().getAttribute("aria-expanded").catch(() => null);
+      if (trigger) {
+        const t = page.locator(trigger).first();
+        r.aria_expanded = await t.getAttribute("aria-expanded").catch(() => null);
+        r.aria_selected = await t.getAttribute("aria-selected").catch(() => null);   // tabs
+        r.aria_pressed = await t.getAttribute("aria-pressed").catch(() => null);     // toggles
+      }
       if (trigger) {        // where the render put the trigger (the open-look check looks there)
         const tb = await page.locator(trigger).first().boundingBox().catch(() => null);
         r.trigger_box = tb ? [tb.x, tb.y, tb.width, tb.height].map(Math.round) : null;

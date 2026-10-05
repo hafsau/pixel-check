@@ -393,3 +393,42 @@ def test_trigger_look_solid_block():
     look = trigger_look(base, state, [332, 10, 44, 44])
     assert look["shape"] == "block" and look["box"] == [0, 16, 44, 12], look
     assert look["fill"] == "#d4d4d4" and look["trigger_size"] == [44, 44]
+
+
+# Gate B': tabs (content swapped in place) and an exclusive accordion (one answer closes, another opens)
+def test_tab_swap_is_its_own_kind():
+    base = frame([("Overview", (32, 380, 70, 14)), ("Analytics", (128, 380, 70, 14)),
+                  ("Overview", (60, 440, 80, 16)), ("View your key metrics", (60, 470, 240, 40))],
+                 [((48, 425, 280, 140), "#ffffff")])
+    state = frame([("Overview", (32, 380, 70, 14)), ("Analytics", (128, 380, 70, 14)),
+                   ("Analytics", (60, 440, 80, 16)), ("Track performance", (60, 470, 240, 40))],
+                  [((48, 425, 280, 140), "#ffffff")])
+    d = state_diff(base, state, trigger_box=[128, 376, 77, 25])
+    assert d["kind"] == "swap"
+    assert names(d["appeared"]["texts"]) == ["Analytics", "Track performance"]
+    assert names(d["disappeared"]["texts"]) == ["Overview", "View your key metrics"]
+    assert d["panel"] == [60, 440, 240, 70]                              # where the swapped content sits
+
+
+def test_moved_block_is_moved_not_appeared():
+    """An accordion row's divider shifts down when an answer opens above it: same size and fill, shifted."""
+    base = frame([("Q2", (60, 400, 200, 16))], [((60, 430, 260, 1), "#e5e5e5")])
+    state = frame([("Q2", (60, 470, 200, 16))], [((60, 500, 260, 1), "#e5e5e5")])
+    d = state_diff(base, state)
+    assert d["appeared"]["blocks"] == [] and d["disappeared"]["blocks"] == []
+    assert [m["box"] for m in d["moved_blocks"]] == [[60, 500, 260, 1]]
+
+
+def test_exclusive_accordion_switch():
+    """Q1's answer closes, Q2's answer opens below Q2; Q3 moves. The panel is Q2's answer only; Q1's closing is
+    reported as `closed`."""
+    base = frame([("Q1", (60, 340, 200, 16)), ("A1 shipping", (60, 370, 260, 48)),
+                  ("Q2", (60, 440, 200, 16)), ("Q3", (60, 480, 200, 16))],
+                 [((60, 430, 260, 1), "#e5e5e5"), ((60, 470, 260, 1), "#e5e5e5")])
+    state = frame([("Q1", (60, 340, 200, 16)), ("Q2", (60, 380, 200, 16)), ("A2 returns", (60, 410, 260, 64)),
+                   ("Q3", (60, 500, 200, 16))],
+                  [((60, 370, 260, 1), "#e5e5e5"), ((60, 490, 260, 1), "#e5e5e5")])
+    d = state_diff(base, state, trigger_box=[60, 441, 260, 16])
+    assert d["kind"] == "inline" and d["panel"] == [60, 410, 260, 64]
+    assert names(d["disappeared"]["texts"]) == ["A1 shipping"] and d["closed"] == [60, 370, 260, 48]
+    assert d["appeared"]["blocks"] == []

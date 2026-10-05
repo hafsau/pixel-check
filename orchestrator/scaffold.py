@@ -73,17 +73,46 @@ def _collect(spec: dict, anchored: bool = False) -> list[Item]:
         frame = spec["breakpoints"].get(bp)
         if not frame:
             continue
-        seen: dict[str, int] = {}
         frame_texts: list[tuple[str, list]] = []
-        for t in frame["texts"]:
-            if not t.get("box") or t.get("approx") and not t.get("inside_block"):
-                continue
+        valid = [t for t in frame["texts"] if t.get("box") and not (t.get("approx") and not t.get("inside_block"))
+                 and _norm(t["text"])]
+        H = (frame.get("size") or [0, 844])[1] or 844
+        ref = lambda t: (float(t.get("size_px") or t["box"][3]), t.get("role") or "other", t["box"][1] / H)
+        # duplicate labels in one frame: each takes the earlier frames' item it resembles most (size, role, relative
+        # y), not the next by list order — desktop's 14 px sidebar "Tabs" came before the 30 px page heading that is
+        # the mobile frame's only "Tabs" (the page compiled nearly blank)
+        occ: dict[int, int] = {}
+        groups: dict[str, list] = {}
+        for t in valid:
+            groups.setdefault(_norm(t["text"]), []).append(t)
+        for k, ts in groups.items():
+            prev = [n for n in range(1, 200) if f"t:{k}#{n}" in items]
+            cost = lambda t, n: (abs(ref(t)[0] - items[f"t:{k}#{n}"].ref[0]) / max(ref(t)[0], items[f"t:{k}#{n}"].ref[0], 1)
+                                 + (0.5 if ref(t)[1] != items[f"t:{k}#{n}"].ref[1] else 0)
+                                 + 0.5 * abs(ref(t)[2] - items[f"t:{k}#{n}"].ref[2]))
+            def same_kind(t, n):     # a 24 px heading is not a 13 px sidebar link with the same label
+                a, b = ref(t), items[f"t:{k}#{n}"].ref
+                r = max(a[0], b[0]) / max(1.0, min(a[0], b[0]))
+                return r <= 2.2 and (r <= 1.25 or a[1] == b[1])   # roles vary per frame, sizes then stay close
+            pairs = sorted((cost(t, n), i, n) for i, t in enumerate(ts) for n in prev
+                           if hasattr(items[f"t:{k}#{n}"], "ref") and same_kind(t, n))
+            used_t, used_n = set(), set()
+            for _, i, n in pairs:
+                if i not in used_t and n not in used_n:
+                    occ[id(ts[i])] = n
+                    used_t.add(i)
+                    used_n.add(n)
+            nxt = max(prev, default=0)
+            for i, t in enumerate(ts):
+                if i not in used_t:
+                    nxt += 1
+                    occ[id(t)] = nxt
+        for t in valid:
             k = _norm(t["text"])
-            if not k:
-                continue
-            seen[k] = seen.get(k, 0) + 1
-            key = f"t:{k}#{seen[k]}"
+            key = f"t:{k}#{occ[id(t)]}"
             it = items.setdefault(key, Item(key, "text"))
+            if not hasattr(it, "ref"):
+                it.ref = ref(t)
             # roles vary per frame (the same placeholder was "input-placeholder" on mobile, "label" on desktop): keep the
             # most specific one seen
             role = t.get("role", "other")

@@ -207,3 +207,37 @@ def test_single_icon_trigger_keeps_its_look_in_a_child():
     assert "aria-hidden" not in tag                                      # a button must not hide from assistive tech
     inner = code[code.index(tag) + len(tag):].split("</button>")[0]
     assert "absolute inset-0" in inner and "bg-[#d4d4d8]" in inner
+
+
+def test_single_text_trigger_is_marked_in_place():
+    """A tab label / accordion question is its own trigger: one text inside the trigger box → that text element becomes
+    the button (a synthetic holder around it moved the layout on shadcn / notion)."""
+    frames = {bp: {"texts": [text("Overview", (40, 380, 60, 14), "nav"), text("Analytics", (128, 380, 60, 14), "nav"),
+                             text("Hello world", (24, 500, 200, 16))], "blocks": []} for bp in SIZES}
+    code = compile_fluid(spec(frames), triggers={"tabs1": {"mobile": [124, 376, 77, 25], "tablet": [124, 376, 77, 25]}},
+                         auto_menu=False)
+    tag = element_with_marker(code, "tabs1")
+    assert tag and tag.startswith("<button")
+    assert code[code.index(tag) + len(tag):].startswith("Analytics</button>")
+    assert fluid.STATE["triggers"]["tabs1"] != "trigger:tabs1"
+
+
+def test_a_block_holding_other_labels_is_not_the_triggers_holder():
+    """shadcn tabs / notion toggle: the tab list (or segmented control) block contains the clicked label AND its
+    siblings — marking it made the whole control one button. A holder holds only what lies in the trigger box."""
+    frames = {bp: {"texts": [text("Overview", (60, 382, 60, 14), "nav"), text("Analytics", (138, 382, 60, 14), "nav"),
+                             text("Reports", (212, 382, 50, 14), "nav"), text("Hello world", (24, 500, 200, 16))],
+                   "blocks": [block((47, 373, 297, 32), "#f5f5f5", ["Overview", "Analytics", "Reports"])]} for bp in SIZES}
+    code = compile_fluid(spec(frames), triggers={"tabs1": {"mobile": [128, 376, 77, 25]}}, auto_menu=False)
+    tag = element_with_marker(code, "tabs1")
+    assert tag and code[code.index(tag) + len(tag):].startswith("Analytics</button>"), tag
+
+
+def test_label_with_an_icon_marks_the_label():
+    """shadcn accordion: the trigger row holds the question and a chevron; a synthetic wrapper around both moved the
+    desktop layout. One label inside (plus icons) → the label is the button; layout unchanged."""
+    frames = {bp: {"texts": [text("What is your return policy?", (65, 453, 200, 16)), text("Hello world", (24, 600, 200, 16))],
+                   "blocks": [block((305, 453, 16, 16), "#d4d4d8")]} for bp in SIZES}
+    code = compile_fluid(spec(frames), triggers={"q2": {"mobile": [65, 441, 260, 42]}}, auto_menu=False)
+    tag = element_with_marker(code, "q2")
+    assert tag and code[code.index(tag) + len(tag):].startswith("What is your return policy?</button>"), tag

@@ -38,3 +38,25 @@ Per page: the 3 static frames (as now) + state frames, each `{bp, state name, tr
 
 ## Working rule (Hafsa, Oct 2)
 TDD throughout: every change starts with a failing test (behaviour + edge cases); full suite green before hand-off.
+
+## Nemotron's job after Gate B (Hafsa, Oct 2): generalise + notes
+The deterministic template (`orchestrator/fallback.py`) wires every interaction the frames fully specify (4/4 in the
+sandbox). Nemotron gets the part measured facts cannot give:
+1. **Generalise from one state frame**: the designer opens ONE item (one FAQ row, one tab, one card); Nemotron finds
+   the elements that behave the same way (the other rows / tabs) in the compiled page outline and plans their
+   interactions (trigger → what it reveals, where).
+2. **Designer notes**: short plain-language notes ("Yearly shows Pro $16/mo, Team $40/mo"; "each question opens its
+   answer: …") are mapped to elements, states and content. What a sibling reveals is NOT in any frame — its content
+   must come from notes; without notes the behaviour is wired with the example's structure and the gap is reported.
+Nemotron outputs a verified **interaction plan** (JSON: interactions → trigger element, kind, content source); code is
+assembled deterministically (template wiring + panels compiled from the example's structure with the planned
+content). Every planned interaction gets generated sandbox tests.
+
+**Evaluation (held out)**: per dev page, capture the given state frame plus 2+ other sibling states that neither path
+sees; notes written once from the live page before any run (stored with the capture, never tuned). Score: held-out
+sibling states passing (state score ≥ 75 + behaviour checks) and their mean state score.
+
+**Gate B' (~Oct 8)**: 2+ dev pages with sibling interactions (accordion / tabs / toggle) in the first viewport;
+Nemotron plan ≥ +10 held-out state score over the template (which only wires the given trigger) **and** over a
+deterministic repeat-detector baseline (same-style rows wired like the example — the honest non-model alternative);
+static score unchanged; ≤ $0.15/run all-in. Council review before it counts.

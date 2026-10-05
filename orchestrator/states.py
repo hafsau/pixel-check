@@ -173,13 +173,28 @@ def state_diff(base: dict, state: dict, trigger_box=None) -> dict:
                 kept_b.add(i)
                 kept_s.add(j)
                 break
+    # blocks that only shifted (an accordion row's divider pushed down): same size, fill and x → moved, not new
+    moved_b = []
+    cand = sorted(((abs(bb[i]["box"][1] - sb[j]["box"][1]), i, j)
+                   for i in range(len(bb)) if i not in kept_b for j in range(len(sb)) if j not in kept_s
+                   if all(abs(bb[i]["box"][k] - sb[j]["box"][k]) <= 2 for k in (0, 2, 3)) and _fill_close(bb[i], sb[j])),
+                  key=lambda c: c[0])
+    for _, i, j in cand:
+        if i not in kept_b and j not in kept_s:
+            kept_b.add(i)
+            kept_s.add(j)
+            moved_b.append(dict(sb[j], from_box=bb[i]["box"]))
     appeared_t = [st[j] for j in us]
     appeared_b = [sb[j] for j in range(len(sb)) if j not in kept_s]
     gone_t = [bt[i] for i in ub]
     gone_b = [bb[i] for i in range(len(bb)) if i not in kept_b]
     trig = {"appeared": {"texts": [], "blocks": []}, "disappeared": {"texts": [], "blocks": []}}
     if trigger_box:
-        inside = lambda x: _in_area(x["box"], trigger_box)
+        # contained in the trigger's box (an icon), not merely centred there: an accordion answer can open right
+        # where its question used to be
+        tb, pad = trigger_box, 6
+        inside = lambda x: (_in_area(x["box"], tb) and x["box"][0] >= tb[0] - pad and x["box"][1] >= tb[1] - pad and
+                            x["box"][0] + x["box"][2] <= tb[0] + tb[2] + pad and x["box"][1] + x["box"][3] <= tb[1] + tb[3] + pad)
         trig = {"appeared": {"texts": [t for t in appeared_t if inside(t)], "blocks": [b for b in appeared_b if inside(b)]},
                 "disappeared": {"texts": [t for t in gone_t if inside(t)], "blocks": [b for b in gone_b if inside(b)]}}
         appeared_t = [t for t in appeared_t if not inside(t)]
@@ -187,16 +202,24 @@ def state_diff(base: dict, state: dict, trigger_box=None) -> dict:
         gone_t = [t for t in gone_t if not inside(t)]
         gone_b = [b for b in gone_b if not inside(b)]
     panel = _union([t["box"] for t in appeared_t] + [b["box"] for b in appeared_b])
+    gone = _union([t["box"] for t in gone_t])
+    closed = None
     covered = bool(panel) and any(_centre(t["box"])[1] > panel[1] for t in gone_t)
     kind = classify(panel, W, H, covered)
+    if kind == "inline" and gone and not moved and _iou(panel, gone) >= 0.4:
+        kind = "swap"            # content replaced in place (a tab, a billing toggle) — overlays/drawers stay theirs
+    elif kind == "inline" and gone_t:
+        closed = gone            # another inline panel closed (an exclusive accordion)
     return {
         "appeared": {"texts": appeared_t, "blocks": appeared_b},
         "disappeared": {"texts": gone_t, "blocks": gone_b},
         "trigger_changes": trig,
         "persisted": {"texts": persisted, "blocks": [sb[j] for j in sorted(kept_s)]},
         "moved": moved,
+        "moved_blocks": moved_b,
         "kind": kind,
         "panel": panel,
+        "closed": closed,
     }
 
 

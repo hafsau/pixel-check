@@ -404,3 +404,24 @@ def test_base_mismatch_names_what_is_visible(good, tmp_path):
     v = evaluate(out, t, "menu")
     f = [x for x in v["failures"] if "before any click" in x]
     assert f and "(empty)" in f[0], v["failures"]
+
+
+def test_harness_reports_selection_aria(tmp_path):
+    """Swap groups (tabs / toggles) report selection via aria-selected / aria-pressed, not aria-expanded."""
+    p = tmp_path / "tabs.jsx"
+    p.write_text('''import { useState } from "react";
+
+export default function App() {
+  const [sel, setSel] = useState(0);
+  return (
+    <div className="min-h-screen bg-white p-[20px]">
+      <button type="button" data-trigger="tabs0" role="tab" aria-selected={sel === 0} onClick={() => setSel(0)}>One</button>
+      <button type="button" data-trigger="tabs1" role="tab" aria-selected={sel === 1} onClick={() => setSel(1)}>Two</button>
+      <p>{["First", "Second"][sel]}</p>
+    </div>
+  );
+}
+''')
+    res = run(p, [{"name": "mobile.tabs1", "bp": "mobile", "steps": [{"click": '[data-trigger="tabs1"]'}]}], tmp_path / "o")
+    r = res["scenarios"][0]
+    assert r["aria_selected"] == "true" and r["aria_pressed"] is None
