@@ -23,7 +23,7 @@ export async function getText(url: string): Promise<string> {
 
 export type Load<T> = { status: 'loading' } | { status: 'error'; error: string } | { status: 'ready'; data: T };
 
-function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): Load<T> {
+export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): Load<T> {
   const [state, setState] = useState<Load<T>>({ status: 'loading' });
   useEffect(() => {
     let alive = true;

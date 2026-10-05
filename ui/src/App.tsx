@@ -7,12 +7,17 @@ import { ResultPage } from './pages/ResultPage';
 import { NotFound } from './pages/NotFound';
 import { InteractionPage } from './pages/InteractionPage';
 import { GroupPage } from './pages/GroupPage';
+import { LiveRunPage } from './pages/LiveRunPage';
 
 function Routes() {
   const path = usePath();
   if (path === '/' || path === '') return <HomePage />;
   let m = matchPath('/run/:id/result', path);
   if (m) return <ResultPage key={m.id} id={m.id} />;
+  m = matchPath('/live/:id/result', path);
+  if (m) return <LiveRunPage key={`${m.id}-r`} id={m.id} result />;
+  m = matchPath('/live/:id', path);
+  if (m) return <LiveRunPage key={m.id} id={m.id} />;
   m = matchPath('/interaction/:id', path);
   if (m) return <InteractionPage key={m.id} id={m.id} />;
   m = matchPath('/group/:id', path);

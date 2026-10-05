@@ -14,13 +14,13 @@ export function ResultPage({ id }: { id: string }) {
   const r = useRun(id);
   if (r.status === 'loading') return <Loading label="Loading result…" />;
   if (r.status === 'error') return <ErrorView title="Run not found" detail={r.error} />;
-  return <ResultView run={r.data} />;
+  return <ResultView run={r.data} asset={(rel) => runAsset(r.data.id, rel)} basePath={`/run/${encodeURIComponent(r.data.id)}`} />;
 }
 
-function ResultView({ run }: { run: Run }) {
+export function ResultView({ run, asset, basePath }: { run: Run; asset: (rel: string) => string; basePath: string }) {
   const res = run.result;
   const best = run.candidates.find((c) => c.id === res.best);
-  const code = useText(best?.code ? runAsset(run.id, best.code) : null);
+  const code = useText(best?.code ? asset(best.code) : null);
   const bps = run.breakpoints?.length ? run.breakpoints : [...DEFAULT_BPS];
   const sandboxUsd = run.candidates.reduce((a, c) => a + (c.sandbox_cost || 0), 0);
   const worstBp = bps.reduce<string | null>((w, b) => (w == null || (res.per_bp[b.name] ?? 101) < (res.per_bp[w] ?? 101) ? b.name : w), null);
@@ -30,9 +30,9 @@ function ResultView({ run }: { run: Run }) {
       <RunHeader
         run={run}
         subtitle="Result"
-        back={{ to: `/run/${encodeURIComponent(run.id)}`, label: 'Back to replay' }}
+        back={{ to: basePath, label: 'Back to the run' }}
         actions={
-          <Link to={`/run/${encodeURIComponent(run.id)}`} className="btn">
+          <Link to={basePath} className="btn">
             <IconArrowLeft /> Replay
           </Link>
         }

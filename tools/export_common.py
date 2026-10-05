@@ -36,8 +36,9 @@ def image(src: Path, out_dir: Path, rel: str) -> str | None:
     return f"{rel}.webp"
 
 
-def fresh_bundle(bundle_id: str) -> Path:
-    out = RUNS / bundle_id
+def fresh_bundle(bundle_id: str, root: Path | None = None) -> Path:
+    """An empty bundle folder: ui/public/runs/<id>/, or `root` itself (a live run exports into its own folder)."""
+    out = Path(root) if root else RUNS / bundle_id
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)

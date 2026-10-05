@@ -63,3 +63,13 @@ INITIAL_SAMPLES = int(os.environ.get("INITIAL_SAMPLES", "0"))
 BRANCHES = int(os.environ.get("BRANCHES", "3"))
 MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", "0"))
 STOP_MATCH = float(os.environ.get("STOP_MATCH", "92"))
+
+# Live mode (orchestrator/api.py; CLAUDE.md §6): off unless switched on; passcode only from the environment
+LIVE_ENABLED = os.environ.get("LIVE_ENABLED", "0") == "1"
+LIVE_PASSCODE = os.environ.get("LIVE_PASSCODE", "")
+LIVE_DAILY_RUNS = int(os.environ.get("LIVE_DAILY_RUNS", "10"))
+LIVE_TOTAL_RUNS = int(os.environ.get("LIVE_TOTAL_RUNS", "40"))
+LIVE_RUN_BUDGET_USD = float(os.environ.get("LIVE_RUN_BUDGET_USD", "0.30"))
+LIVE_ORIGINS = [o for o in os.environ.get("LIVE_ORIGINS", "http://localhost:5173").split(",") if o]
+LIVE_DIR = os.environ.get("LIVE_DIR", "var/live")
+

@@ -21,5 +21,9 @@ function dropRunsFromBuild(): Plugin {
 
 export default defineConfig({
   plugins: [react(), dropRunsFromBuild()],
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    // npm run dev against a local `uvicorn orchestrator.api:app --port 8000` (live mode); override with PC_API_PROXY
+    proxy: { '/api': { target: process.env.PC_API_PROXY || 'http://localhost:8000', changeOrigin: true } },
+  },
 });

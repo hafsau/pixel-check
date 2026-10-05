@@ -1,0 +1,12 @@
+# Pixel-Check orchestrator + tools (Python 3.12). Sandbox runtime deps live in sandbox/Dockerfile; UI in ui/package.json.
+fastapi==0.115.14
+uvicorn==0.32.1
+python-multipart==0.0.32
+httpx==0.28.1
+openai==3.22.0
+python-dotenv==1.2.3
+numpy==2.5.3
+pillow==12.3.0
+scipy==1.18.1
+scikit-image==0.26.0
+pytest==9.1.1

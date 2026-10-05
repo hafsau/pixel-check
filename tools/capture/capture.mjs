@@ -313,6 +313,14 @@ try {
       await page.screenshot({ path: path.join(outDir, `${bp}${suffix}.bcoded.png`), fullPage: false });
     }
     meta.breakpoints[bp] = { width: w, height: h, media_replaced: replaced };
+    // login / checkout pages are not rebuilt from a URL (live mode refuses them): count their fields
+    const sens = await page.evaluate(() => ({
+      password: document.querySelectorAll("input[type=password]").length,
+      payment: document.querySelectorAll('input[autocomplete^="cc-"], input[name*="card" i], input[name*="cvc" i], ' +
+        'input[name*="cvv" i], iframe[src*="stripe" i], iframe[name*="card" i]').length,
+    }));
+    meta.sensitive = { password: Math.max(meta.sensitive?.password || 0, sens.password),
+                       payment: Math.max(meta.sensitive?.payment || 0, sens.payment) };
     console.log(`${slug} ${bp} ${w}x${h} media_replaced=${replaced}`);
     await ctx.close();
   }

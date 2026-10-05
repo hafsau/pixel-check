@@ -23,10 +23,12 @@ export function RunPage({ id }: { id: string }) {
   if (r.status === 'loading') return <Loading label="Loading run…" />;
   if (r.status === 'error') return <ErrorView title="Run not found" detail={r.error} />;
   if (!r.data.candidates?.length) return <ErrorView title="This run has no candidates" />;
-  return <RunView run={r.data} />;
+  return <RunView run={r.data} asset={(rel) => runAsset(r.data.id, rel)} basePath={`/run/${encodeURIComponent(r.data.id)}`} />;
 }
 
-function RunView({ run }: { run: Run }) {
+/** The replay of one static run. `asset` resolves bundle-relative paths (replay folder or the live API's files base);
+ * `basePath` is this view's own route, so the Result link works for replays (/run/<id>) and live runs (/live/<id>). */
+export function RunView({ run, asset, basePath, banner }: { run: Run; asset: (rel: string) => string; basePath: string; banner?: React.ReactNode }) {
   const pb = usePlayback(run, true); // open on the final candidate; Play restarts from the first
   const [mode, setMode] = useState<CompareMode>('slider');
   const [follow, setFollow] = useState<'step' | 'best'>('best');
@@ -41,10 +43,10 @@ function RunView({ run }: { run: Run }) {
   useEffect(() => {
     run.candidates.slice(pb.index + 1, pb.index + 3).forEach((c) =>
       Object.values(c.renders ?? {}).forEach((rel) => {
-        if (rel) new Image().src = runAsset(run.id, rel);
+        if (rel) new Image().src = asset(rel);
       }),
     );
-  }, [run, pb.index]);
+  }, [run, pb.index, asset]);
 
   return (
     <div className="page pt-6">
@@ -52,12 +54,13 @@ function RunView({ run }: { run: Run }) {
         run={run}
         subtitle={`${run.label ? `${run.label} · ` : ''}${run.candidates.length} ${run.candidates.length === 1 ? 'candidate' : 'candidates'} · ${run.rounds.length} ${run.rounds.length === 1 ? 'round' : 'rounds'} · ${fmtDate(run.created)}`}
         actions={
-          <Link to={`/run/${encodeURIComponent(run.id)}/result`} className="btn">
+          <Link to={`${basePath}/result`} className="btn">
             Result <IconArrowRight />
           </Link>
         }
       />
 
+      {banner}
       <div className="sticky top-0 z-30 -mx-gutter mt-5 bg-bg/90 px-gutter py-2 backdrop-blur sm:mx-0 sm:px-0">
         <PlaybackControls pb={pb} />
       </div>
@@ -85,8 +88,8 @@ function RunView({ run }: { run: Run }) {
               <BreakpointRow
                 key={bp.name}
                 bp={bp}
-                designSrc={d ? runAsset(run.id, d) : null}
-                renderSrc={rr ? runAsset(run.id, rr) : null}
+                designSrc={d ? asset(d) : null}
+                renderSrc={rr ? asset(rr) : null}
                 candidate={shown}
                 mode={mode}
               />

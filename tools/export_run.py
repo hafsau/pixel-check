@@ -62,12 +62,12 @@ def _page_of(design_dir: Path) -> str:
 
 
 def export(run_dir: Path, design_dir: Path, title: str | None = None, label: str | None = None,
-           index: bool = True) -> Path:
+           index: bool = True, out_root: Path | None = None) -> Path:
     events = [json.loads(l) for l in (run_dir / "trace.jsonl").read_text().splitlines() if l.strip()]
     result = json.loads((run_dir / "result.json").read_text())
     start = next((e for e in events if e["kind"] == "run_start"), {})
     cfg = start.get("cfg") or {}
-    out = fresh_bundle(run_dir.name)
+    out = fresh_bundle(run_dir.name, out_root)
     design = {bp: image(design_dir / f"{bp}.png", out, f"design/{bp}") for bp, _, _ in BPS}
     cands = []
     for e in events:
