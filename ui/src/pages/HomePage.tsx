@@ -12,8 +12,9 @@ export function HomePage() {
           One codebase. Every breakpoint. <span className="text-accent">Verified.</span>
         </h1>
         <p className="mt-4 max-w-2xl text-base text-ink-muted sm:text-lg">
-          Give Pixel-Check the mobile, tablet and desktop frames of one screen. An agent writes a single React + Tailwind
-          codebase, renders it at all three sizes, scores each render against its frame and keeps fixing it.
+          Give Pixel-Check the mobile, tablet and desktop frames of one screen. It writes a single React + Tailwind codebase,
+          renders it at all three sizes in a sandbox and scores each render against its frame. Add a state frame and it
+          wires the interaction too — then tests it.
         </p>
         <ul className="mt-5 flex flex-wrap gap-2" aria-label="Breakpoints">
           {DEFAULT_BPS.map((b) => (

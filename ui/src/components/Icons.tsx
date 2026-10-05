@@ -98,3 +98,24 @@ export const IconChevron = () => (
     <path d="M6 4l4 4-4 4" />
   </Svg>
 );
+export const IconX = () => (
+  <Svg>
+    <path d="M4 4l8 8M12 4l-8 8" />
+  </Svg>
+);
+export const IconMinus = () => (
+  <Svg>
+    <path d="M4 8h8" />
+  </Svg>
+);
+export const IconRevise = () => (
+  <Svg>
+    <path d="M12.5 6A5 5 0 0 0 3.6 5M3.5 10a5 5 0 0 0 8.9 1" />
+    <path d="M3.5 2.5V5.2h2.7M12.5 13.5v-2.7H9.8" />
+  </Svg>
+);
+export const IconCursor = () => (
+  <Svg>
+    <path d="M4 2.5l8 5-3.6.9L7 12.5 4 2.5z" />
+  </Svg>
+);

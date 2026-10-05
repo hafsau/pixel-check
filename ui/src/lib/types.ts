@@ -23,6 +23,8 @@ export interface RunResult {
   per_bp: PerBp;
   best: string;
   spend_usd: number;
+  spend_model_usd?: number | null;
+  spend_sandbox_usd?: number | null;
   wall_s: number;
   history: number[];
 }
@@ -49,6 +51,9 @@ export interface Candidate {
   sandbox_cost: number;
   renders: Partial<Record<BpName, string>>;
   code: string | null;
+  components?: Partial<Record<BpName, Record<string, number>>> | null;
+  fluidity?: Fluidity | null;
+  controls?: Controls | null;
 }
 
 export interface Strategy {
@@ -66,7 +71,7 @@ export interface Critique {
 
 export interface EditBatch {
   round: number;
-  kind: 'auto' | 'class';
+  kind: 'auto' | 'class' | 'tools';
   applied: number | null;
   edits: unknown[];
 }
@@ -83,8 +88,13 @@ export interface ModelCall {
 }
 
 export interface Run {
+  type?: 'static';
   id: string;
   title: string;
+  label?: string | null;
+  page?: string;
+  cfg?: Record<string, unknown>;
+  pipeline?: Pipeline;
   created: number;
   models: Record<string, string>;
   breakpoints: Breakpoint[];
@@ -104,4 +114,240 @@ export function candidateStatus(c: Candidate): CandidateStatus {
   if (c.disqualified) return 'disqualified';
   if (!c.checkpoint && Object.keys(c.renders).length === 0) return 'no-render';
   return 'scored';
+}
+
+// ---------------------------------------------------------------------------------------------
+// Static-run extras (tools/export_run.py, Oct 5 schema). All optional: older bundles lack them.
+
+export interface FluidWidth {
+  overflow: number;
+  overlaps: number;
+  centre_drift: number;
+  max_gap: number;
+  bg_covers: boolean;
+  ok: boolean;
+}
+
+export interface Fluidity {
+  pass: boolean;
+  fails: string[];
+  widths: Record<string, FluidWidth>;
+}
+
+export interface Controls {
+  inputs?: number;
+  inputs_typeable?: number;
+  buttons?: number;
+  buttons_focusable?: number;
+  links?: number;
+  links_with_href?: number;
+  clickable_divs?: number;
+}
+
+export interface Pipeline {
+  compiler: 'fluid' | 'scaffold' | null;
+  intent_plan: { cards: { name: string | null; count: number }[]; bands: Record<string, string>; dropped: unknown[]; usd: number | null } | null;
+  structure_plans: { tags: Record<string, string>; applied: number | null; segments: number | null }[];
+  intent_adoption: { winner: string; adopted: boolean; match: number; fluid_fails: number } | null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Replay index (ui/public/runs/index.json). Entries without "type" come from the Oct 1 exporter.
+
+export type BundleType = 'static' | 'interaction' | 'group';
+
+export interface StaticEntry {
+  type: 'static';
+  id: string;
+  title: string;
+  label?: string | null;
+  page?: string;
+  match: number;
+  per_bp: PerBp;
+  created: number;
+  usd?: number | null;
+  fluid_pass?: boolean | null;
+  thumb?: string | null;
+}
+
+export interface InteractionEntryVariant {
+  writer: string;
+  pass: boolean;
+  attempts: number;
+  usd: number | null;
+  state_scores: PerBp;
+}
+
+export interface InteractionEntry {
+  type: 'interaction';
+  id: string;
+  title: string;
+  page: string;
+  state: string;
+  kind: string | null;
+  created: number;
+  bps: BpName[];
+  variants: InteractionEntryVariant[];
+  thumb?: string | null;
+}
+
+export interface GroupEntry {
+  type: 'group';
+  id: string;
+  title: string;
+  page: string;
+  created: number;
+  given: string | null;
+  held: string[];
+  review?: string | null;
+  variants: { planner: string; notes: string | null; oracle: boolean; held_out_pass: number; held_out_total: number; held_out_delta: number }[];
+  thumb?: string | null;
+}
+
+export type IndexEntry = StaticEntry | InteractionEntry | GroupEntry;
+
+// ---------------------------------------------------------------------------------------------
+// Interaction bundle (tools/export_interaction.py → interaction.json)
+
+export type ScenarioSlot = 'base' | 'open' | 'closed' | 'esc' | 'kbd';
+
+export interface CheckScore {
+  bp: BpName;
+  check: 'opens' | 'closes' | 'escape' | 'keyboard' | (string & {});
+  score: number;
+}
+
+export interface SandboxRun {
+  op_id: string | null;
+  status: string | null;
+  elapsed_s: number | null;
+  wall_s: number | null;
+  cost: number | null;
+}
+
+export interface SandboxTotals {
+  runs: number;
+  vm_s: number;
+  wall_s: number;
+  usd: number;
+}
+
+export interface Attempt {
+  attempt: number;
+  pass: boolean;
+  infra: boolean;
+  failures: string[];
+  state_scores: PerBp;
+  base_scores: PerBp;
+  checks: CheckScore[];
+  sections: Record<string, string>;
+  code: string | null;
+  sandbox: SandboxRun | null;
+  captures: Partial<Record<BpName, Partial<Record<ScenarioSlot, string>>>>;
+  panels?: Partial<Record<BpName, unknown>>;
+}
+
+export type Writer = 'template' | 'nemotron' | (string & {});
+
+export interface Variant {
+  key: string;
+  writer: Writer;
+  source: 'sandbox' | 'local';
+  oracle: boolean;
+  pass: boolean;
+  best_attempt: number | null;
+  model_usd: number | null;
+  sandbox_usd: number | null;
+  usd: number | null;
+  seconds: number | null;
+  kind?: string | null;
+  base_expected: PerBp;
+  sandbox: SandboxTotals;
+  static: { renders: Partial<Record<BpName, string>>; sandbox: SandboxTotals } | null;
+  attempts: Attempt[];
+}
+
+export interface RepeatRun {
+  name: string;
+  pass: boolean;
+  best_attempt: number | null;
+  attempts: number;
+  first_pass_attempt: number | null;
+  usd: number | null;
+  model_usd: number | null;
+  sandbox_usd: number | null;
+  seconds: number | null;
+  matches_variant: string | null;
+  attempt_scores: { pass: boolean; state_scores: PerBp; failures: string[] }[];
+}
+
+export interface RepeatSet {
+  label: string;
+  writer: Writer;
+  source: string;
+  runs: RepeatRun[];
+}
+
+export interface Interaction {
+  type: 'interaction';
+  id: string;
+  title: string;
+  page: string;
+  state: string;
+  kind: string | null;
+  created: number;
+  breakpoints: Breakpoint[];
+  design: Partial<Record<BpName, { base: string | null; state: string | null }>>;
+  trigger: Partial<Record<BpName, [number, number, number, number] | null>>;
+  writer_model?: string;
+  variants: Variant[];
+  repeats: RepeatSet[];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sibling-group bundle (tools/export_group.py → group.json)
+
+export interface GroupMember {
+  scores: PerBp;
+  delta: PerBp;
+  pass: boolean;
+  held_out: boolean;
+  planned: boolean;
+}
+
+export interface GroupVariant {
+  key: string;
+  planner: string;
+  notes: string | null;
+  oracle: boolean;
+  kind: string | null;
+  held_out_pass: number;
+  held_out_total: number;
+  held_out_mean: number;
+  held_out_delta: number;
+  base_scores: PerBp;
+  members: Record<string, GroupMember>;
+  failures: string[];
+  model_usd: number | null;
+  sandbox_usd: number | null;
+  seconds: number | null;
+  sandbox: SandboxTotals;
+  renders: Partial<Record<BpName, Record<string, string>>>;
+  code: string | null;
+  plan: { trigger: number | string | null; content: string[] }[];
+}
+
+export interface Group {
+  type: 'group';
+  id: string;
+  title: string;
+  page: string;
+  created: number;
+  review: string | null;
+  breakpoints: Breakpoint[];
+  members: string[];
+  given: string | null;
+  held: string[];
+  design: Partial<Record<BpName, Record<string, string>>>;
+  variants: GroupVariant[];
 }

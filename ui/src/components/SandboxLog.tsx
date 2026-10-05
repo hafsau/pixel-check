@@ -14,9 +14,9 @@ export function SandboxLog({ run, onSelect, selectedId }: { run: Run; onSelect: 
         Sandbox renders
       </h2>
       <p className="mt-1 text-xs text-ink-muted">
-        {rendered} candidates rendered at 3 sizes in network-isolated <strong className="font-semibold text-ink">Token Factory Sandboxes</strong>. Checkpoint IDs identify each render run.
+        {rendered} {rendered === 1 ? 'candidate' : 'candidates'} rendered at 3 sizes in network-isolated <strong className="font-semibold text-ink">Token Factory Sandboxes</strong>. Checkpoint IDs identify each render run.
       </p>
-      <div className="mt-4 max-h-[22rem] overflow-auto rounded-md border border-line">
+      <div className="relative mt-4 max-h-[22rem] overflow-auto rounded-md border border-line">
         <table className="table">
           <caption className="sr-only">Sandbox checkpoint per candidate</caption>
           <thead className="sticky top-0 z-10">

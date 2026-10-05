@@ -7,7 +7,8 @@ export function AgentLog({ run }: { run: Run }) {
   const calls = run.calls;
   const t0 = calls.length ? Math.min(...calls.map((c) => c.t)) : 0;
   const sum = (f: (c: ModelCall) => number) => calls.reduce((a, c) => a + (f(c) || 0), 0);
-  const roles = Object.entries(run.models ?? {});
+  const used = new Set(calls.map((c) => c.model));
+  const roles = Object.entries(run.models ?? {}).filter(([role, id]) => role === 'vision' || used.has(id) || !calls.length);
 
   return (
     <section aria-labelledby="log-title" className="card card-pad">
@@ -34,7 +35,7 @@ export function AgentLog({ run }: { run: Run }) {
         )}
       </div>
 
-      <div className="mt-4 max-h-[28rem] overflow-auto rounded-md border border-line">
+      <div className="relative mt-4 max-h-[28rem] overflow-auto rounded-md border border-line">
         <table className="table">
           <caption className="sr-only">Model calls: step, model, thinking mode, tokens in and out, cost, latency</caption>
           <thead className="sticky top-0 z-10">

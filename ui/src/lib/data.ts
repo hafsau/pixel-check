@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Run, RunSummary } from './types';
+import type { Group, IndexEntry, Interaction, Run } from './types';
+import { normalizeIndex } from './bundle';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 
@@ -39,11 +40,16 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): Load<T> {
   return state;
 }
 
-export function useRunIndex(): Load<RunSummary[]> {
-  return useLoad(async () => {
-    const list = await getJson<RunSummary[]>(`${BASE}/runs/index.json`);
-    return [...list].sort((a, b) => b.created - a.created);
-  }, []);
+export function useRunIndex(): Load<IndexEntry[]> {
+  return useLoad(async () => normalizeIndex(await getJson<unknown>(`${BASE}/runs/index.json`)), []);
+}
+
+export function useInteraction(id: string): Load<Interaction> {
+  return useLoad(() => getJson<Interaction>(runAsset(id, 'interaction.json')), [id]);
+}
+
+export function useGroup(id: string): Load<Group> {
+  return useLoad(() => getJson<Group>(runAsset(id, 'group.json')), [id]);
 }
 
 export function useRun(id: string): Load<Run> {

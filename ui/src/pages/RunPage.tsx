@@ -16,6 +16,7 @@ import { AgentLog } from '../components/AgentLog';
 import { SandboxLog } from '../components/SandboxLog';
 import { RunHeader } from '../components/RunHeader';
 import { IconArrowRight } from '../components/Icons';
+import { PipelinePanel } from '../components/PipelinePanel';
 
 export function RunPage({ id }: { id: string }) {
   const r = useRun(id);
@@ -26,9 +27,12 @@ export function RunPage({ id }: { id: string }) {
 }
 
 function RunView({ run }: { run: Run }) {
-  const pb = usePlayback(run);
+  const pb = usePlayback(run, true); // open on the final candidate; Play restarts from the first
   const [mode, setMode] = useState<CompareMode>('slider');
-  const [follow, setFollow] = useState<'step' | 'best'>('step');
+  const [follow, setFollow] = useState<'step' | 'best'>('best');
+  useEffect(() => {
+    if (pb.playing) setFollow('step'); // watching the replay: show every candidate as it arrives
+  }, [pb.playing]);
   const bps = run.breakpoints?.length ? run.breakpoints : [...DEFAULT_BPS];
   const shown = follow === 'best' && pb.best ? pb.best : pb.shown;
   const activeRound = pb.shown.round;
@@ -46,7 +50,7 @@ function RunView({ run }: { run: Run }) {
     <div className="page pt-6">
       <RunHeader
         run={run}
-        subtitle={`${run.candidates.length} candidates · ${run.rounds.length} rounds · ${fmtDate(run.created)}`}
+        subtitle={`${run.label ? `${run.label} · ` : ''}${run.candidates.length} ${run.candidates.length === 1 ? 'candidate' : 'candidates'} · ${run.rounds.length} ${run.rounds.length === 1 ? 'round' : 'rounds'} · ${fmtDate(run.created)}`}
         actions={
           <Link to={`/run/${encodeURIComponent(run.id)}/result`} className="btn">
             Result <IconArrowRight />
@@ -106,7 +110,8 @@ function RunView({ run }: { run: Run }) {
           }}
         />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 [&>*]:min-w-0">
-          <CritiquePanel critiques={run.critiques ?? []} activeRound={activeRound} />
+          {run.pipeline && <PipelinePanel run={run} shown={shown} />}
+          {(!!run.critiques?.length || !run.pipeline) && <CritiquePanel critiques={run.critiques ?? []} activeRound={activeRound} />}
           <SandboxLog
             run={run}
             selectedId={shown.id}
