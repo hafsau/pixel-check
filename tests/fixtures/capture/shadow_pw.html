@@ -1,0 +1,2 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Shadow</title></head><body><x-login></x-login>
+<script>customElements.define("x-login", class extends HTMLElement { constructor() { super(); this.attachShadow({mode: "open"}).innerHTML = "<input type='password'>"; } });</script></body></html>

@@ -69,9 +69,14 @@ class Sandbox:
         raise RuntimeError("file upload failed after retries")
 
     def run(self, command: str, *, image: str = config.RUNTIME_IMAGE, files: dict[str, bytes] | None = None,
-            disposable: bool = False, timeout_s: int = config.SANDBOX_TIMEOUT_S, networking: bool = False) -> RunResult:
+            disposable: bool = False, timeout_s: int = config.SANDBOX_TIMEOUT_S, networking: bool = False,
+            step: str = "sandbox") -> RunResult:
         """networking stays OFF for every render/score run; only the dev capture tool turns it on (to load the page
         being captured in the scoring image's Linux Chromium)."""
+        from .tf_client import Ledger, SpendCapExceeded
+        ledger = Ledger(config.LEDGER_PATH)
+        if ledger.total() >= config.SPEND_CAP_USD:      # sandbox runs cost credits too: same global cap as models
+            raise SpendCapExceeded(f"global spend ${ledger.total():.2f} ≥ cap ${config.SPEND_CAP_USD:.2f}")
         mapped = {path: {"uuid": self.upload(data), "mode": "0644"} for path, data in (files or {}).items()}
         body = {
             "image": image, "command": command, "shell": True,
@@ -95,6 +100,9 @@ class Sandbox:
         res = (op.get("metadata") or {}).get("result") or {}
         out, err, state = res.get("stdout") or {}, res.get("stderr") or {}, res.get("state") or {}
         resources = res.get("resources") or {}
+        if resources.get("cost"):         # recorded before returning, like every model call
+            ledger.add({"ts": time.time(), "kind": "sandbox", "step": step, "op": op_id,
+                        "usd": float(resources["cost"]), "elapsed_s": resources.get("elapsed_time")})
         return RunResult(
             op_id=op_id, status=op.get("status"), exit_code=state.get("exit_code"),
             timed_out=bool(state.get("timed_out")), stdout=_decode(out), stderr=_decode(err),

@@ -1,4 +1,4 @@
-"""Live mode API: upload the three frames of one screen, Pixel-Check runs the pipeline in the background (perceive →
+"""Live mode API: upload the three frames of one screen, PixelCheck runs the pipeline in the background (perceive →
 compile → render + score in Token Factory Sandboxes), the web app polls progress and replays the result bundle.
 
     uvicorn orchestrator.api:app --port 8000          (LIVE_ENABLED=1 LIVE_PASSCODE=… in the environment)
@@ -24,7 +24,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -45,28 +45,31 @@ def _scrub(msg: str) -> str:
 class _Caps:
     """Daily + total run counts, persisted (a restart must not reset the total)."""
 
-    def __init__(self, path: Path, daily: int, total: int):
-        self.path, self.daily, self.total = path, daily, total
+    def __init__(self, path: Path, daily: int, total: int, per_ip: int | None = None):
+        self.path, self.daily, self.total, self.per_ip = path, daily, total, per_ip
         self.lock = threading.Lock()
 
-    def _read(self) -> list[float]:
+    def _read(self) -> list:
         try:
-            return json.loads(self.path.read_text())
+            return [r if isinstance(r, list) else [r, None] for r in json.loads(self.path.read_text())]
         except (FileNotFoundError, json.JSONDecodeError):
             return []
 
-    def left(self) -> tuple[int, int]:
+    def left(self, ip: str | None = None) -> tuple[int, int]:
         runs = self._read()
         today = time.strftime("%Y-%m-%d")
-        n_today = sum(1 for t in runs if time.strftime("%Y-%m-%d", time.localtime(t)) == today)
-        return max(0, self.daily - n_today), max(0, self.total - len(runs))
+        todays = [r for r in runs if time.strftime("%Y-%m-%d", time.localtime(r[0])) == today]
+        d = self.daily - len(todays)
+        if ip is not None and self.per_ip:          # one visitor cannot use up the whole day
+            d = min(d, self.per_ip - sum(1 for r in todays if r[1] == ip))
+        return max(0, d), max(0, self.total - len(runs))
 
-    def take(self) -> bool:
+    def take(self, ip: str | None = None) -> bool:
         with self.lock:
-            d, t = self.left()
+            d, t = self.left(ip)
             if d <= 0 or t <= 0:
                 return False
-            runs = self._read() + [time.time()]
+            runs = self._read() + [[time.time(), ip]]
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(runs))
             return True
@@ -133,19 +136,88 @@ def _is_ip(host: str) -> bool:
         return False
 
 
+def _bare(url: str) -> str:
+    """Stored / shown without query or fragment (they can carry private data)."""
+    from urllib.parse import urlsplit, urlunsplit
+    u = urlsplit(url)
+    return urlunsplit((u.scheme, u.netloc, u.path, "", ""))
+
+
+def _policy(url: str) -> dict | None:
+    from urllib.parse import urlsplit
+    from . import policy
+    u = urlsplit(url)
+    return policy.check_host(u.hostname or "") or policy.check_query(u.query)
+
+
+def _policy_or_422(url: str):
+    from . import policy
+    r = _policy(url)
+    if r:
+        raise HTTPException(422, policy.refusal(r))
+
+
+def _verify_capture(meta: dict, resolver):
+    """Where the capture really went: every redirect hop and the final URL must be public and allowed, the server IP
+    public, and the page must not present itself as a high-risk service (title / og:site_name)."""
+    import ipaddress
+    from . import policy
+    nav = meta.get("navigation")
+    if not nav or not nav.get("final_url"):
+        raise _Refused("PixelCheck could not verify where the page led, so nothing was rebuilt")
+    for u in list(nav.get("hops") or []) + [nav["final_url"]]:
+        try:
+            _check_url(u, resolver)
+        except HTTPException:
+            raise _Refused("the page redirected to an address that is not a public web page — only public web pages "
+                           "can be captured") from None
+        r = _policy(u)
+        if r:
+            raise _Refused(policy.refusal(r))
+    ip = nav.get("server_ip")
+    if ip:
+        try:
+            ok = ipaddress.ip_address(ip).is_global
+        except ValueError:
+            ok = False
+        if not ok:
+            raise _Refused("the page was served from an address that is not public — only public web pages can be captured")
+    page = meta.get("page") or {}
+    r = policy.check_page(page.get("title", ""), page.get("site_name", ""))
+    if r:
+        raise _Refused(policy.refusal(r))
+
+
 def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | None = None, capture=None,
                resolver=None) -> FastAPI:
     from . import config
     s = {"enabled": config.LIVE_ENABLED, "passcode": config.LIVE_PASSCODE, "daily": config.LIVE_DAILY_RUNS,
-         "total": config.LIVE_TOTAL_RUNS, "origins": config.LIVE_ORIGINS}
+         "total": config.LIVE_TOTAL_RUNS, "origins": config.LIVE_ORIGINS, "per_ip": config.LIVE_PER_IP_DAILY,
+         "trust_proxy": config.LIVE_TRUST_PROXY, "url_allow": config.LIVE_URL_ALLOW}
     s.update(settings or {})
     root = Path(live_dir or config.LIVE_DIR)
     root.mkdir(parents=True, exist_ok=True)
-    caps = _Caps(root / "caps.json", s["daily"], s["total"])
+    caps = _Caps(root / "caps.json", s["daily"], s["total"], s.get("per_ip"))
+
+    def visitor(request: Request) -> str:
+        """The client address; X-Forwarded-For only behind a trusted proxy (else anyone could pick an address)."""
+        if s.get("trust_proxy"):
+            fwd = request.headers.get("x-forwarded-for", "")
+            if fwd.strip():
+                return fwd.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+    for st_p in root.glob("*/status.json"):     # runs live in threads: a restart orphans unfinished ones
+        try:
+            st = json.loads(st_p.read_text())
+        except json.JSONDecodeError:
+            continue
+        if st.get("state") in ("queued", "running"):
+            st.update(state="failed", error="the server restarted during this run; please start it again")
+            st_p.write_text(json.dumps(st))
     run_pipeline = pipeline or default_pipeline
     run_capture = capture or default_capture
     resolve = resolver or _resolve
-    app = FastAPI(title="Pixel-Check live", docs_url=None, redoc_url=None)
+    app = FastAPI(title="PixelCheck live", docs_url=None, redoc_url=None)
     app.add_middleware(CORSMiddleware, allow_origins=list(s["origins"] or []), allow_methods=["GET", "POST"],
                        allow_headers=["*"])
 
@@ -169,14 +241,21 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             write_status(rid, state="running")
             if url is not None:          # capture the page at the three breakpoints first (sandbox, network on)
                 frames, meta = run_capture(url, run_dir, emit)
+                _verify_capture(meta or {}, resolve)
                 sens = (meta or {}).get("sensitive") or {}
-                if sens.get("password") or sens.get("payment"):
-                    raise _Refused("this page has password or payment fields — Pixel-Check does not rebuild login or "
-                                   "checkout pages from a URL; upload your own design frames instead")
+                if any(sens.get(k) for k in ("password", "payment", "signin", "crypto")):
+                    raise _Refused("this page has sign-in, password, payment or wallet fields — PixelCheck does not "
+                                   "rebuild login, checkout or wallet pages from a URL; upload your own design frames instead")
                 (run_dir / "frames").mkdir(parents=True, exist_ok=True)
                 for bp, data in frames.items():
                     (run_dir / "frames" / f"{bp}.png").write_bytes(data)
             result = run_pipeline(rid, frames, run_dir, emit)
+            if url is not None:          # rebuilt from someone's page: say where it came from, in the code itself
+                from urllib.parse import urlsplit
+                note = (f"// Generated by PixelCheck from a capture of {urlsplit(url).hostname} on "
+                        f"{time.strftime('%Y-%m-%d')}. Replace third-party text and branding before use.\n")
+                for jsx in (run_dir / "bundle").rglob("App.jsx"):
+                    jsx.write_text(note + jsx.read_text())
             write_status(rid, state="done", stages=stages, result=result,
                          bundle=f"/api/runs/{rid}/files/run.json" if (run_dir / "bundle" / "run.json").exists() else None)
         except _Refused as e:
@@ -190,8 +269,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         return {"live": bool(s["enabled"]), "runs_left_today": d, "runs_left_total": t}
 
     @app.post("/api/runs", status_code=202)
-    async def start(mobile: UploadFile = File(...), tablet: UploadFile = File(...), desktop: UploadFile = File(...),
-                    passcode: str = Form("")):
+    async def start(request: Request, mobile: UploadFile = File(...), tablet: UploadFile = File(...),
+                    desktop: UploadFile = File(...), passcode: str = Form("")):
         if not s["enabled"]:
             raise HTTPException(503, "live mode is switched off; replays still work")
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
@@ -203,7 +282,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 raise HTTPException(413, f"{bp}: the frame is larger than {MAX_BYTES // (1024 * 1024)} MB")
             _check_png(bp, data)
             frames[bp] = data
-        if not caps.take():
+        if not caps.take(visitor(request)):
             raise HTTPException(429, "the live-run limit is reached; replays still work")
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         run_dir = root / rid
@@ -215,7 +294,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         return {"id": rid}
 
     @app.post("/api/runs/url", status_code=202)
-    def start_url(url: str = Form(""), owns: str = Form(""), passcode: str = Form("")):
+    def start_url(request: Request, url: str = Form(""), owns: str = Form(""), passcode: str = Form("")):
         if not s["enabled"]:
             raise HTTPException(503, "live mode is switched off; replays still work")
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
@@ -223,11 +302,18 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         if owns.strip().lower() not in ("true", "1", "yes", "on"):
             raise HTTPException(422, "confirm that you own this page or have permission to rebuild it")
         url = _check_url(url, resolve)
-        if not caps.take():
+        _policy_or_422(url)
+        allow = [h.lower() for h in (s.get("url_allow") or [])]
+        if allow:
+            from urllib.parse import urlsplit
+            host = (urlsplit(url).hostname or "").lower()
+            if not any(host == h or host.endswith("." + h) for h in allow):
+                raise HTTPException(422, f"this demo only rebuilds pages from: {', '.join(allow)}")
+        if not caps.take(visitor(request)):
             raise HTTPException(429, "the live-run limit is reached; replays still work")
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         (root / rid).mkdir(parents=True)
-        write_status(rid, id=rid, state="queued", stages=[], created=time.time(), source={"url": url})
+        write_status(rid, id=rid, state="queued", stages=[], created=time.time(), source={"url": _bare(url)})
         threading.Thread(target=worker, args=(rid, None, url), daemon=True).start()
         return {"id": rid}
 
@@ -281,7 +367,7 @@ def default_capture(url: str, run_dir: Path, emit) -> tuple[dict[str, bytes], di
     emit("capture")
     script = (Path(__file__).resolve().parents[1] / "tools" / "capture" / "capture.mjs").read_bytes()
     cmd = (f"cd /opt/pc && node /opt/pc/capture.mjs page {shlex.quote(url)} --out /work/cap --fonts /opt/pc/fonts "
-           f"--wait 2000")
+           f"--wait 2000 --block-private")
     sb = Sandbox()
     r = sb.run(cmd, files={"/opt/pc/capture.mjs": script}, timeout_s=300, networking=True)
     if r.exit_code != 0 or not r.result_image:

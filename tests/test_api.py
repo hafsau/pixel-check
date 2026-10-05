@@ -45,7 +45,7 @@ def client(tmp_path, pipeline=fake_pipeline, **settings):
     return TestClient(create_app(pipeline=pipeline, live_dir=tmp_path, settings=s))
 
 
-def wait_done(c, rid, timeout=5):
+def wait_done(c, rid, timeout=20):   # generous: the machine may be busy (parallel builds)
     t0 = time.time()
     while time.time() - t0 < timeout:
         st = c.get(f"/api/runs/{rid}").json()
@@ -179,3 +179,17 @@ def test_live_mode_is_off_unless_the_environment_switches_it_on(monkeypatch):
 def test_enabled_without_a_passcode_refuses_everyone(tmp_path):
     r = client(tmp_path, passcode="").post("/api/runs", files=frames(), data={"passcode": ""})
     assert r.status_code == 403
+
+
+def test_runs_left_running_by_a_restart_are_marked_failed(tmp_path):
+    """Runs live in threads: after a restart a 'running' run would poll forever (council, Oct 5)."""
+    from orchestrator.api import create_app
+    for rid, state in (("20261005-100000-aaaaaa", "running"), ("20261005-100001-bbbbbb", "queued"),
+                       ("20261005-100002-cccccc", "done")):
+        (tmp_path / rid).mkdir()
+        (tmp_path / rid / "status.json").write_text(json.dumps({"state": state, "stages": []}))
+    c = TestClient(create_app(pipeline=fake_pipeline, live_dir=tmp_path, settings={"enabled": True, "passcode": "x"}))
+    a = c.get("/api/runs/20261005-100000-aaaaaa").json()
+    assert a["state"] == "failed" and "restart" in a["error"]
+    assert c.get("/api/runs/20261005-100001-bbbbbb").json()["state"] == "failed"
+    assert c.get("/api/runs/20261005-100002-cccccc").json()["state"] == "done"

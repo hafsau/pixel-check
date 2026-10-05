@@ -45,3 +45,13 @@ Test: `gates/g3_vision.py` — 5 dev captures × {desktop, mobile}; ground truth
 
 Gemma misses: "Netflix" (logo → grey block, correctly unreadable), "Password" (hidden label), "$20" (1 case), "9 days", "Toggle theme" (icon-only aria text). Box accuracy not yet measured.
 Decision: **Gemma 3 27B** reads the designs (perceive) and does the visual critique. No NVIDIA VLM on Public endpoints; Nemotron-Nano-V2-12b (Dedicated) still to price.
+
+## Live mode from a URL — network guardrails (Oct 5)
+- The page capture runs in a Token Factory sandbox with networking ON (capture only). Pixel-Check blocks private /
+  loopback / link-local (incl. 169.254.169.254) / reserved addresses itself: a redirect preflight checks every hop
+  before the browser navigates, and every request the page makes is checked (DNS lookup) and aborted if private
+  (`tools/capture/capture.mjs --block-private`); the API re-checks the final URL, every hop and the server IP.
+- We did **not** probe whether a networking sandbox can reach the provider's metadata service or private ranges —
+  that would be testing Nebius's infrastructure without authorisation. Open question for Nebius (FEEDBACK):
+  are sandbox egress rules restricting internal addresses?
+- Real guarded capture: hafsausmani.com in 19 s, navigation recorded, nothing blocked, verification passed.

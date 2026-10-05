@@ -9,6 +9,8 @@
 //   --oracle also dump <bp>.oracle.json (exact text lines + computed styles + painted boxes from the live DOM) and
 //            <bp>.notext.png (text made transparent) — the oracle spec for error attribution (tools/oracle_spec.py)
 import { chromium } from "playwright";
+import dns from "node:dns/promises";
+import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -234,18 +236,118 @@ function oracleDom([vw, vh]) {
   return { texts, blocks, background: pageBg && pageBg.a > 0.5 ? hex(pageBg) : htmlBg && htmlBg.a > 0.5 ? hex(htmlBg) : "#ffffff" };
 }
 
+// live mode (--block-private): never reach localhost / private / link-local / reserved addresses — checked for the
+// redirect chain before the browser goes (preflight) and for every request the page makes (route + DNS lookup)
+const BLOCK_PRIVATE = process.argv.includes("--block-private");
+const blocked = new Set();
+
+function privateIp(ip) {
+  const v = net.isIP(ip);
+  if (v === 4) {
+    const [a, b] = ip.split(".").map(Number);
+    return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19));
+  }
+  if (v === 6) {
+    const x = ip.toLowerCase();
+    if (x === "::" || x === "::1" || /^f[cd]/.test(x) || /^fe[89ab]/.test(x) || /^ff/.test(x)) return true;
+    const m = x.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    return m ? privateIp(m[1]) : false;
+  }
+  return true;
+}
+
+async function allowed(u) {
+  let x;
+  try { x = new URL(u); } catch { return false; }
+  if (x.protocol === "data:" || x.protocol === "blob:" || x.protocol === "about:") return true;
+  if (x.protocol === "file:") return url.startsWith("file:");          // dev fixtures only
+  if (x.protocol !== "http:" && x.protocol !== "https:") return false;
+  const host = x.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  if (net.isIP(host)) return !privateIp(host);
+  try {
+    const addrs = await dns.lookup(host, { all: true });
+    return addrs.every((a) => !privateIp(a.address));
+  } catch { return true; }                                             // unresolvable: the request fails anyway
+}
+
+async function preflight(start) {
+  const hops = [start];
+  let cur = start;
+  for (let i = 0; i < 6; i++) {
+    if (!(await allowed(cur))) { blocked.add(cur); throw new Error(`blocked: ${cur} is not a public address`); }
+    if (!/^https?:/.test(cur)) return hops;
+    let r;
+    try { r = await fetch(cur, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15000) }); }
+    catch { return hops; }
+    const loc = r.status >= 300 && r.status < 400 && r.headers.get("location");
+    if (!loc) return hops;
+    cur = new URL(loc, cur).href;
+    hops.push(cur);
+  }
+  throw new Error("blocked: too many redirects");
+}
+
+function sensitiveScan() {
+  // runs in each frame, before media are replaced: forms in the document and in open shadow roots
+  const roots = [document];
+  for (let i = 0; i < roots.length; i++)
+    for (const el of roots[i].querySelectorAll("*")) if (el.shadowRoot) roots.push(el.shadowRoot);
+  const q = (sel) => roots.reduce((n, r) => n + r.querySelectorAll(sel).length, 0);
+  // innerText keeps block boundaries ("Sign in" + "Next" must not read as "Sign inNext")
+  const text = roots.map((r) => (r.body ? r.body.innerText : r.textContent) || "").join(" ");
+  const named = (rx) => roots.reduce((n, r) => n + [...r.querySelectorAll("input, textarea, select")].filter((e) =>
+    rx.test(`${e.name || ""} ${e.id || ""} ${e.getAttribute("autocomplete") || ""} ${e.getAttribute("aria-label") || ""}`)).length, 0);
+  const password = q('input[type=password], [autocomplete~="current-password"], [autocomplete~="new-password"], ' +
+    '[autocomplete~="one-time-code"], input[name*="otp" i]');
+  const payment = q('[autocomplete^="cc-"], iframe[src*="stripe" i], iframe[src*="braintree" i], iframe[src*="adyen" i], ' +
+    'iframe[name*="card" i]') + named(/\b(card.?number|cardnumber|cvc|cvv|iban|routing|sort.?code|account.?number)\b/i);
+  const ident = q('input[type=email], [autocomplete~="username"], [autocomplete~="email"]') + named(/\b(user(name)?|login|identifier)\b/i);
+  const signin = ident && /\b(sign|log)\s?in\b|\bcontinue with\b|\bforgot (your )?password\b/i.test(text) ? ident : 0;
+  const crypto = /seed phrase|recovery phrase|secret recovery|connect (your )?wallet|private key/i.test(text) ? 1 : 0;
+  return { password, payment, signin, crypto };
+}
+
 const outDir = path.join(OUT_ROOT, slug);
 fs.mkdirSync(outDir, { recursive: true });
+let preHops = null;
+if (BLOCK_PRIVATE) {
+  try { preHops = await preflight(url); }
+  catch (e) { console.error(String(e.message || e)); process.exit(3); }
+}
 const browser = await chromium.launch();
-const meta = { slug, url, captured_at: new Date().toISOString(), dev_only: true, breakpoints: {} };
+const meta = { slug, url, captured_at: new Date().toISOString(), dev_only: true, breakpoints: {},
+               sensitive: { password: 0, payment: 0, signin: 0, crypto: 0 } };
 try {
   for (const [bp, [w, h]] of Object.entries(BPS)) {
     if (ONLY.length && !ONLY.includes(bp)) continue;
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
     const page = await ctx.newPage();
+    if (BLOCK_PRIVATE) {
+      await ctx.route("**/*", async (route) => {
+        const u = route.request().url();
+        if (await allowed(u)) return route.continue();
+        blocked.add(u);
+        return route.abort("blockedbyclient");
+      });
+    }
     // "networkidle" never comes on some pages (lambda.ai: background requests) — load, then idle if it comes
-    await page.goto(url, { waitUntil: "load", timeout: 60000 });
+    const resp = await page.goto(url, { waitUntil: "load", timeout: 60000 });
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    if (!meta.navigation) {              // where the capture really went (checked again by the live API)
+      const chain = [];
+      for (let r = resp && resp.request(); r; r = r.redirectedFrom()) chain.unshift(r.url());
+      const addr = resp ? await resp.serverAddr().catch(() => null) : null;
+      meta.navigation = { final_url: page.url(), hops: preHops || (chain.length ? chain : [url]),
+                          server_ip: addr ? addr.ipAddress : null, blocked: [] };
+      meta.page = await page.evaluate(() => ({ title: document.title || "",
+        site_name: (document.querySelector('meta[property="og:site_name"]') || {}).content || "" }));
+    }
+    for (const f of page.frames()) {     // before media are replaced (an iframe becomes a grey block)
+      const s2 = await f.evaluate(sensitiveScan).catch(() => null);
+      if (s2) for (const k of Object.keys(s2)) meta.sensitive[k] = Math.max(meta.sensitive[k], s2[k]);
+    }
     await page.addStyleTag({ content: NORMALISE_CSS + (hideCss ? `${hideCss}{display:none!important}` : "") });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(extraWait);
@@ -313,18 +415,12 @@ try {
       await page.screenshot({ path: path.join(outDir, `${bp}${suffix}.bcoded.png`), fullPage: false });
     }
     meta.breakpoints[bp] = { width: w, height: h, media_replaced: replaced };
-    // login / checkout pages are not rebuilt from a URL (live mode refuses them): count their fields
-    const sens = await page.evaluate(() => ({
-      password: document.querySelectorAll("input[type=password]").length,
-      payment: document.querySelectorAll('input[autocomplete^="cc-"], input[name*="card" i], input[name*="cvc" i], ' +
-        'input[name*="cvv" i], iframe[src*="stripe" i], iframe[name*="card" i]').length,
-    }));
-    meta.sensitive = { password: Math.max(meta.sensitive?.password || 0, sens.password),
-                       payment: Math.max(meta.sensitive?.payment || 0, sens.payment) };
+
     console.log(`${slug} ${bp} ${w}x${h} media_replaced=${replaced}`);
     await ctx.close();
   }
 } finally {
   await browser.close();
 }
+if (meta.navigation) meta.navigation.blocked = [...blocked];
 fs.writeFileSync(path.join(outDir, STATE ? `meta-${STATE}.json` : "meta.json"), JSON.stringify(meta, null, 2));

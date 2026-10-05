@@ -72,4 +72,7 @@ LIVE_TOTAL_RUNS = int(os.environ.get("LIVE_TOTAL_RUNS", "40"))
 LIVE_RUN_BUDGET_USD = float(os.environ.get("LIVE_RUN_BUDGET_USD", "0.30"))
 LIVE_ORIGINS = [o for o in os.environ.get("LIVE_ORIGINS", "http://localhost:5173").split(",") if o]
 LIVE_DIR = os.environ.get("LIVE_DIR", "var/live")
+LIVE_PER_IP_DAILY = int(os.environ.get("LIVE_PER_IP_DAILY", "3"))
+LIVE_TRUST_PROXY = os.environ.get("LIVE_TRUST_PROXY", "0") == "1"     # set behind Render / a reverse proxy
+LIVE_URL_ALLOW = [h for h in os.environ.get("LIVE_URL_ALLOW", "").split(",") if h]   # empty = any allowed public page
 

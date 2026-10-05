@@ -1,0 +1,20 @@
+{
+  "banking": ["chase.com", "bankofamerica.com", "wellsfargo.com", "citi.com", "citibank.com", "usbank.com", "capitalone.com",
+              "pnc.com", "truist.com", "schwab.com", "fidelity.com", "vanguard.com", "americanexpress.com", "discover.com",
+              "barclays.com", "barclays.co.uk", "hsbc.com", "hsbc.co.uk", "lloydsbank.com", "natwest.com", "santander.com",
+              "santander.co.uk", "monzo.com", "revolut.com", "starlingbank.com", "n26.com", "ing.com", "bnpparibas.com",
+              "deutsche-bank.de", "commbank.com.au", "westpac.com.au", "anz.com", "nab.com.au", "rbc.com", "td.com",
+              "scotiabank.com", "icicibank.com", "hdfcbank.com", "sbi.co.in", "ally.com", "sofi.com", "chime.com", "wise.com",
+              "robinhood.com", "navyfederal.org", "usaa.com", "regions.com", "citizensbank.com", "keybank.com", "mtb.com"],
+  "payment": ["paypal.com", "stripe.com", "squareup.com", "venmo.com", "cash.app", "klarna.com", "afterpay.com", "adyen.com",
+              "checkout.com", "braintreepayments.com", "payoneer.com", "zellepay.com", "westernunion.com", "moneygram.com",
+              "alipay.com", "paytm.com", "razorpay.com", "mollie.com", "affirm.com", "skrill.com"],
+  "crypto": ["coinbase.com", "binance.com", "kraken.com", "gemini.com", "crypto.com", "metamask.io", "blockchain.com",
+             "ledger.com", "trezor.io", "bitfinex.com", "bybit.com", "okx.com", "kucoin.com", "bitstamp.net", "uniswap.org",
+             "phantom.app", "exodus.com", "trustwallet.com", "opensea.io"],
+  "healthcare": ["mychart.com", "mychart.org", "kaiserpermanente.org", "unitedhealthcare.com", "cigna.com", "aetna.com",
+                 "humana.com", "anthem.com", "zocdoc.com", "teladoc.com", "onemedical.com", "myhealth.va.gov"],
+  "sign-in": ["accounts.google.com", "login.microsoftonline.com", "login.live.com", "appleid.apple.com", "okta.com",
+              "auth0.com", "login.yahoo.com", "id.atlassian.com", "signin.aws.amazon.com", "login.salesforce.com",
+              "onelogin.com", "duosecurity.com", "pingidentity.com", "auth.services.adobe.com"]
+}
