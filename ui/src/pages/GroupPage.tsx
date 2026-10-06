@@ -39,7 +39,7 @@ function GroupView({ g }: { g: Group }) {
           <IconArrowLeft /> All runs
         </Link>
         <p className="eyebrow mt-1">Experiment</p>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{splitTitle(g.title).title}</h1>
+        <h1 className="display text-2xl sm:text-3xl">{splitTitle(g.title).title}</h1>
         <div className="flex flex-wrap items-center gap-1.5">
           {splitTitle(g.title).note && <span className="chip border-dashed">{splitTitle(g.title).note}</span>}
           <span className="chip">Given: {g.given ? cap(g.given) : '—'}</span>
@@ -85,7 +85,7 @@ function GroupView({ g }: { g: Group }) {
               {g.variants.map((x) => (
                 <tr key={x.key} className={x.key === v.key ? 'bg-accent/5' : ''}>
                   <td>
-                    <button type="button" aria-pressed={x.key === v.key} onClick={() => setVkey(x.key)} className="rounded-sm text-left font-medium text-accent underline-offset-2 hover:underline aria-pressed:text-ink aria-pressed:no-underline">
+                    <button type="button" aria-pressed={x.key === v.key} onClick={() => setVkey(x.key)} className="rounded-sm text-left font-medium text-accent-strong underline-offset-2 hover:underline aria-pressed:text-ink aria-pressed:no-underline">
                       {PLANNER[x.planner] ?? x.planner}
                     </button>
                   </td>

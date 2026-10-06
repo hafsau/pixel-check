@@ -17,6 +17,8 @@ export default {
         'ink-faint': c('ink-faint'),
         accent: c('accent'),
         'accent-ink': c('accent-ink'),
+        'accent-strong': c('accent-strong'),
+        'accent-2': c('accent-2'),
         good: c('good'),
         ok: c('ok'),
         warn: c('warn'),
@@ -28,6 +30,7 @@ export default {
       fontFamily: {
         sans: 'var(--font-sans)',
         mono: 'var(--font-mono)',
+        pixel: 'var(--font-pixel)',
       },
       borderRadius: {
         sm: 'var(--radius-sm)',
@@ -36,8 +39,12 @@ export default {
         lg: 'var(--radius-lg)',
         pill: 'var(--radius-pill)',
       },
+      letterSpacing: {
+        display: 'var(--tracking-display)',
+      },
       boxShadow: {
         card: 'var(--shadow-card)',
+        lift: 'var(--shadow-lift)',
       },
       maxWidth: {
         content: 'var(--content-max)',

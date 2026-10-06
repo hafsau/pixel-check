@@ -53,3 +53,11 @@ export function splitTitle(t: string): { title: string; note: string | null } {
   const m = t.match(/^(.*\S)\s*\(([^()]+)\)\s*$/);
   return m ? { title: m[1], note: m[2] } : { title: t, note: null };
 }
+
+/** Where a card's "Code" link goes: the run page's Code tab, or an interaction's assembled App.jsx. */
+export function codeHref(e: { type: BundleType; id: string }): string | null {
+  const id = encodeURIComponent(e.id);
+  if (e.type === 'static') return `/run/${id}#code`;
+  if (e.type === 'interaction') return `/interaction/${id}#code`;
+  return null;
+}

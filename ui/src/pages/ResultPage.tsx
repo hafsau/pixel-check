@@ -9,6 +9,7 @@ import { StatTile } from '../components/StatTile';
 import { CodeViewer } from '../components/CodeViewer';
 import { LivePreview } from '../components/LivePreview';
 import { IconArrowLeft } from '../components/Icons';
+import { DownloadProject, runProjectMeta } from '../components/DownloadProject';
 
 export function ResultPage({ id }: { id: string }) {
   const r = useRun(id);
@@ -17,7 +18,7 @@ export function ResultPage({ id }: { id: string }) {
   return <ResultView run={r.data} asset={(rel) => runAsset(r.data.id, rel)} basePath={`/run/${encodeURIComponent(r.data.id)}`} />;
 }
 
-export function ResultView({ run, asset, basePath }: { run: Run; asset: (rel: string) => string; basePath: string }) {
+export function ResultView({ run, asset, basePath, sourceHost }: { run: Run; asset: (rel: string) => string; basePath: string; sourceHost?: string | null }) {
   const res = run.result;
   const best = run.candidates.find((c) => c.id === res.best);
   const code = useText(best?.code ? asset(best.code) : null);
@@ -29,18 +30,21 @@ export function ResultView({ run, asset, basePath }: { run: Run; asset: (rel: st
     <div className="page pt-6">
       <RunHeader
         run={run}
-        subtitle="Result"
+        subtitle={sourceHost ? `Result · from ${sourceHost}` : 'Result'}
         back={{ to: basePath, label: 'Back to the run' }}
         actions={
-          <Link to={basePath} className="btn">
-            <IconArrowLeft /> Replay
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to={basePath} className="btn">
+              <IconArrowLeft /> Replay
+            </Link>
+            {code.status === 'ready' && code.data && <DownloadProject code={code.data} meta={runProjectMeta(run, sourceHost, bps)} />}
+          </div>
         }
       />
 
       <section aria-label="Final scores" className="mt-6">
         <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <StatTile label="Match" value={fmtScore(res.match)} tone={BAND_TEXT[bandOf(res.match)]} hint={`${bandLabel(res.match)}${worstBp ? ` · ${worstBp} worst` : ''}`} />
+          <StatTile label="Match" value={fmtScore(res.match)} pixel tone={BAND_TEXT[bandOf(res.match)]} hint={`${bandLabel(res.match)}${worstBp ? ` · ${worstBp} worst` : ''}`} />
           {bps.map((b) => (
             <StatTile key={b.name} label={cap(b.name)} value={fmtScore(res.per_bp[b.name])} tone={b.name === worstBp ? BAND_TEXT[bandOf(res.per_bp[b.name])] : ''} hint={`${b.width}×${b.height}`} />
           ))}
@@ -58,12 +62,17 @@ export function ResultView({ run, asset, basePath }: { run: Run; asset: (rel: st
           <>
             <LivePreview code={code.data} />
             <section aria-labelledby="code-title" className="card card-pad">
-              <h2 id="code-title" className="h2">
-                Code
-              </h2>
-              <p className="mb-4 mt-1 text-xs text-ink-muted">
-                Best candidate <code className="font-mono">{res.best}</code> — one responsive file, no per-breakpoint copies.
-              </p>
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 id="code-title" className="h2">
+                    Code
+                  </h2>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    Best candidate <code className="font-mono">{res.best}</code> — one responsive file, no per-breakpoint copies.
+                  </p>
+                </div>
+                <DownloadProject code={code.data} meta={runProjectMeta(run, sourceHost, bps)} />
+              </div>
               <CodeViewer code={code.data} />
             </section>
           </>

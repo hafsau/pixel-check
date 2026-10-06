@@ -1,10 +1,11 @@
 import type { StaticEntry } from '../lib/types';
 import { Link } from '../lib/router';
 import { runAsset } from '../lib/data';
-import { entryHref, splitTitle } from '../lib/bundle';
-import { BAND_TEXT, bandLabel, bandOf, fmtScore } from '../lib/score';
+import { codeHref, entryHref, splitTitle } from '../lib/bundle';
+import { bandLabel } from '../lib/score';
 import { fmtDate, fmtUsd } from '../lib/format';
-import { BpBars } from './BpBars';
+import { BpBullets } from './viz/BpBullets';
+import { ScoreRing } from './viz/ScoreRing';
 import { Thumb } from './Thumb';
 import { IconArrowRight } from './Icons';
 
@@ -31,20 +32,25 @@ export function RunCard({ run }: { run: StaticEntry }) {
               )}
             </p>
           </div>
-          <div className="shrink-0 text-right">
-            <p className={`text-2xl font-semibold leading-none num ${BAND_TEXT[bandOf(run.match)]}`}>{fmtScore(run.match)}</p>
-            <p className="mt-1 text-[11px] text-ink-muted">Match</p>
+          <div className="flex shrink-0 flex-col items-center gap-1">
+            <ScoreRing score={run.match} size={56} />
+            <p className="text-[11px] text-ink-muted" aria-hidden="true">Match</p>
           </div>
         </header>
-        <BpBars perBp={run.per_bp} />
+        <BpBullets perBp={run.per_bp} />
         <footer className="mt-auto flex items-center justify-between gap-2 text-xs text-ink-muted">
           <span className="truncate">
             {bandLabel(run.match)}
             {run.usd != null && <> · {fmtUsd(run.usd, 3)} all-in</>}
             <span className="sr-only"> · recorded {fmtDate(run.created)}</span>
           </span>
-          <span className="inline-flex shrink-0 items-center gap-1 font-medium text-ink group-hover:text-accent">
-            Replay <IconArrowRight />
+          <span className="flex shrink-0 items-center gap-3">
+            <Link to={codeHref(run)!} className="relative z-10 rounded-sm font-medium text-ink-muted underline decoration-line underline-offset-2 hover:text-ink" aria-label={`Code of ${t.title}`}>
+              Code
+            </Link>
+            <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent-strong">
+              Replay <IconArrowRight />
+            </span>
           </span>
         </footer>
       </div>

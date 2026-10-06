@@ -1,6 +1,9 @@
 import type { Breakpoint, Candidate, Run } from '../lib/types';
-import { BAND_TEXT, bandLabel, bandOf, fmtScore } from '../lib/score';
-import { BpBars } from './BpBars';
+import { bandLabel } from '../lib/score';
+import { BpBullets } from './viz/BpBullets';
+import { ScoreRing } from './viz/ScoreRing';
+import { WidthStrip } from './viz/WidthStrip';
+import { fluidityCells } from '../lib/viz';
 import { ScoreChart } from './ScoreChart';
 
 /** Match (worst breakpoint) big, per-breakpoint scores, and Match over rounds. */
@@ -12,8 +15,8 @@ export function ScorePanel({ run, best, completedRound, bps }: { run: Run; best:
           Match · current best
         </h2>
         {best ? (
-          <div className="mt-2 flex items-end gap-3" aria-live="polite">
-            <p className={`text-6xl font-semibold leading-none tracking-tight num ${BAND_TEXT[bandOf(best.match)]}`}>{fmtScore(best.match)}</p>
+          <div className="mt-3 flex items-center gap-4" aria-live="polite">
+            <ScoreRing score={best.match} size={88} />
             <div className="pb-1 text-xs text-ink-muted">
               <p className="font-medium text-ink">{bandLabel(best.match)}</p>
               <p>
@@ -28,7 +31,19 @@ export function ScorePanel({ run, best, completedRound, bps }: { run: Run; best:
         )}
       </div>
 
-      {best && <BpBars perBp={best.per_bp} bps={bps.map((b) => b.name)} />}
+      {best && (
+        <div>
+          <h3 className="eyebrow mb-2">Per breakpoint</h3>
+          <BpBullets perBp={best.per_bp} bps={bps.map((b) => b.name)} legend />
+        </div>
+      )}
+
+      {best?.fluidity && (
+        <div>
+          <h3 className="eyebrow mb-2">Between breakpoints</h3>
+          <WidthStrip cells={fluidityCells(best.fluidity)} height="h-4" />
+        </div>
+      )}
 
       <div>
         <h3 className="eyebrow mb-2">Match over rounds</h3>

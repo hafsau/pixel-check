@@ -55,3 +55,29 @@ export function Link({ to, onClick, ...rest }: AnchorHTMLAttributes<HTMLAnchorEl
   };
   return <a href={to} onClick={handle} {...rest} />;
 }
+
+const HASH_EVENT = 'pc-hash';
+
+/** The current location.hash, kept in sync with navigation, back/forward and setHash(). */
+export function useHash(): string {
+  const [hash, setH] = useState(() => window.location.hash);
+  useEffect(() => {
+    const on = () => setH(window.location.hash);
+    window.addEventListener('hashchange', on);
+    window.addEventListener('popstate', on);
+    window.addEventListener(HASH_EVENT, on);
+    return () => {
+      window.removeEventListener('hashchange', on);
+      window.removeEventListener('popstate', on);
+      window.removeEventListener(HASH_EVENT, on);
+    };
+  }, []);
+  return hash;
+}
+
+/** Replace the hash without scrolling or adding a history entry (tab state that should deep-link). */
+export function setHash(hash: string) {
+  const url = window.location.pathname + window.location.search + hash;
+  window.history.replaceState(window.history.state, '', url);
+  window.dispatchEvent(new Event(HASH_EVENT));
+}

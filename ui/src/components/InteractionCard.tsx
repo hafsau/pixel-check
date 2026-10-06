@@ -1,7 +1,7 @@
 import type { InteractionEntry } from '../lib/types';
 import { Link } from '../lib/router';
 import { runAsset } from '../lib/data';
-import { entryHref, splitTitle } from '../lib/bundle';
+import { codeHref, entryHref, splitTitle } from '../lib/bundle';
 import { cap, fmtUsd } from '../lib/format';
 import { fmtScore } from '../lib/score';
 import { writerName } from '../lib/interactions';
@@ -42,8 +42,11 @@ export function InteractionCard({ e }: { e: InteractionEntry }) {
             </div>
           ))}
         </dl>
-        <footer className="mt-auto flex justify-end text-xs">
-          <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent">
+        <footer className="mt-auto flex items-center justify-end gap-3 text-xs">
+          <Link to={codeHref(e)!} className="relative z-10 rounded-sm font-medium text-ink-muted underline decoration-line underline-offset-2 hover:text-ink" aria-label={`Code of ${t.title}`}>
+            Code
+          </Link>
+          <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent-strong">
             Tests &amp; attempts <IconArrowRight />
           </span>
         </footer>

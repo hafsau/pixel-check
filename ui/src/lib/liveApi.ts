@@ -72,3 +72,20 @@ export function useLivePoll(id: string): [PollState, () => void] {
 
   return [state, () => dispatch({ type: 'retry' })];
 }
+
+export async function startUrlRun(url: string, owns: boolean, passcode: string): Promise<{ ok: true; id: string } | { ok: false; status: number; message: string }> {
+  const fd = new FormData();
+  fd.append('url', url.trim());
+  fd.append('owns', owns ? 'true' : 'false');
+  fd.append('passcode', passcode);
+  try {
+    const res = await fetch(joinUrl(apiBase(), '/api/runs/url'), { method: 'POST', body: fd });
+    const b = await body(res);
+    if (!res.ok) return { ok: false, status: res.status, message: apiErrorMessage(res.status, b) };
+    const id = (b as { id?: unknown } | null)?.id;
+    if (typeof id !== 'string') return { ok: false, status: res.status, message: apiErrorMessage(500, null) };
+    return { ok: true, id };
+  } catch {
+    return { ok: false, status: 0, message: apiErrorMessage(0, null) };
+  }
+}

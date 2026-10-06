@@ -1,0 +1,38 @@
+/*
+ * Self-hosted Geist (SIL OFL 1.1, Vercel) via Fontsource — latin subset only, font-display: swap.
+ * Budget ≤ 120 KB woff2 in total (checked in src/lib/brand.test.ts):
+ *   Geist variable 100–900 ≈ 29 KB · Geist Mono 400 + 500 ≈ 20 KB · Geist Pixel 400 ≈ 17 KB.
+ * Code previews keep Inter + IBM Plex Mono (src/lib/previewDoc.ts) — the fonts the generated code is scored with.
+ */
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/geist/files/geist-latin-wght-normal.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('@fontsource/geist-mono/files/geist-mono-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('@fontsource/geist-mono/files/geist-mono-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Pixel';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('@fontsource/geist-pixel/files/geist-pixel-latin-400-normal.woff2') format('woff2');
+}

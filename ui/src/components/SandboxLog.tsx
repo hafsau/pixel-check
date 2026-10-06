@@ -35,7 +35,7 @@ export function SandboxLog({ run, onSelect, selectedId }: { run: Run; onSelect: 
               return (
                 <tr key={c.id} className={c.id === selectedId ? 'bg-accent/5' : ''}>
                   <td>
-                    <button type="button" className="rounded-sm font-mono text-xs text-accent underline-offset-2 hover:underline" onClick={() => onSelect(c.id)}>
+                    <button type="button" className="rounded-sm font-mono text-xs text-accent-strong underline-offset-2 hover:underline" onClick={() => onSelect(c.id)}>
                       {c.id}
                     </button>
                   </td>

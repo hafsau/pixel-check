@@ -1,3 +1,4 @@
+@import './fonts.css';
 @import './tokens.css';
 
 @tailwind base;
@@ -16,10 +17,15 @@
   }
   body {
     @apply bg-bg min-h-screen overflow-x-hidden;
-    font-feature-settings: 'cv11', 'ss01', 'tnum';
+    text-rendering: optimizeLegibility;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
   }
   ::selection {
-    @apply bg-accent/20;
+    @apply bg-accent/25;
   }
   :focus-visible {
     @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-bg;
@@ -42,13 +48,21 @@
 
   /* type */
   .eyebrow {
-    @apply text-xs font-semibold uppercase tracking-[0.08em] text-ink-muted;
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-ink-muted;
+  }
+  .display {
+    @apply font-semibold tracking-display;
+    line-height: 1.02;
   }
   .h1 {
-    @apply text-4xl font-semibold tracking-tight sm:text-5xl;
+    @apply display text-4xl sm:text-5xl;
   }
   .h2 {
-    @apply text-lg font-semibold tracking-tight;
+    @apply text-lg font-semibold tracking-[-0.02em];
+  }
+  .pixel {
+    @apply font-pixel font-normal tracking-normal;
+    font-feature-settings: 'tnum';
   }
   .muted {
     @apply text-ink-muted;
@@ -73,7 +87,13 @@
     @apply inline-flex min-h-[36px] items-center justify-center gap-2 rounded-md border border-line bg-surface px-3 text-sm font-medium text-ink transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn border-transparent bg-accent text-accent-ink hover:bg-accent/90;
+    @apply btn border-transparent bg-accent font-semibold text-accent-ink hover:bg-accent/90;
+  }
+  .btn-lg {
+    @apply min-h-[44px] rounded-md px-4 text-[15px];
+  }
+  .link {
+    @apply rounded-sm font-medium text-accent-strong underline decoration-accent/40 underline-offset-2 hover:decoration-accent;
   }
   .btn-ghost {
     @apply btn border-transparent bg-transparent;
@@ -125,4 +145,62 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ---- PixelCheck mark: hover replays "expand" — frames grow out of the shared bottom-left corner, check draws. ---- */
+.pc-mark .pc-f {
+  transform-box: view-box;
+  transform-origin: 3px 29px;
+}
+.pc-mark .pc-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :is(a, button, .pc-hover):hover > .pc-logo .pc-f,
+  :is(a, button, .pc-hover):hover > .pc-mark .pc-f,
+  .pc-hover:hover .pc-f {
+    animation: pc-grow 520ms var(--ease) both;
+  }
+  :is(a, button, .pc-hover):hover .pc-f2 {
+    animation-delay: 60ms;
+  }
+  :is(a, button, .pc-hover):hover .pc-f3 {
+    animation-delay: 120ms;
+  }
+  :is(a, button, .pc-hover):hover .pc-check {
+    animation: pc-draw 520ms 160ms var(--ease) both;
+  }
+  :is(a, button, .pc-hover):hover .pc-px rect {
+    animation: pc-pop 300ms var(--ease) both;
+  }
+}
+@keyframes pc-grow {
+  from {
+    transform: scale(0.35);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes pc-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes pc-pop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* failing heat-strip cells carry a hatch, so they differ from passing ones without colour */
+.pc-hatch {
+  background-image: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.38) 0 2px, transparent 2px 5px);
 }

@@ -2,7 +2,8 @@ import type { Candidate, Run } from '../lib/types';
 import { cap, fmtUsd } from '../lib/format';
 import { fmtScore } from '../lib/score';
 import { ModelName } from './ModelName';
-import { StatusIcon } from './PassPill';
+import { WidthStrip } from './viz/WidthStrip';
+import { fluidityCells } from '../lib/viz';
 
 /**
  * What produced this candidate, step by step: perception model, Nemotron's structure plans and whether they were
@@ -61,14 +62,7 @@ export function PipelinePanel({ run, shown }: { run: Run; shown: Candidate }) {
               <p>
                 Between breakpoints (candidate <code className="font-mono">{shown.id}</code>): no sideways scroll, no overlaps, content stays centred.
               </p>
-              <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Fluidity per width">
-                {Object.entries(fl.widths).filter(([w]) => /^\d+$/.test(w)).map(([w, x]) => (
-                  <li key={w} className={`chip num ${x.ok ? '' : 'border-bad/30 bg-bad/10 text-bad'}`} title={`overflow ${x.overflow}px · overlaps ${x.overlaps} · centre drift ${x.centre_drift}`}>
-                    <StatusIcon status={x.ok ? 'pass' : 'fail'} />
-                    {w}px
-                  </li>
-                ))}
-              </ul>
+              <WidthStrip cells={fluidityCells(fl)} className="mt-2 max-w-sm" />
               {fl.fails.length > 0 && <p className="mt-1.5 text-xs text-bad">Fails at: {fl.fails.map((f) => (/^\d+$/.test(String(f)) ? `${f}px` : cap(String(f)))).join(', ')}</p>}
             </>
           ) : (

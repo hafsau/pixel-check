@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Run } from '../lib/types';
 import { Link } from '../lib/router';
 import { useLoad } from '../lib/data';
-import { apiBase, liveFilesBase, resolveAsset, stageProgress, type PollState, type StageState } from '../lib/live';
+import { apiBase, failureNotice, liveFilesBase, resolveAsset, runDuration, sourceHost, stageProgress, type LiveStatus, type PollState, type StageState } from '../lib/live';
 import { useLivePoll } from '../lib/liveApi';
 import { fmtSecs, fmtUsd } from '../lib/format';
 import { RunView } from './RunPage';
@@ -13,11 +13,12 @@ import { IconAlert, IconArrowLeft, IconCheck, IconMinus, IconX } from '../compon
 /** /live/<id> and /live/<id>/result: progress while the run works, then the normal Run / Result view from the API's bundle. */
 export function LiveRunPage({ id, result = false }: { id: string; result?: boolean }) {
   const [poll, retry] = useLivePoll(id);
-  if (poll.phase === 'done') return <LiveResult id={id} result={result} usd={poll.status?.result?.usd ?? null} />;
+  if (poll.phase === 'done') return <LiveResult id={id} result={result} usd={poll.status?.result?.usd ?? null} source={poll.status?.source} />;
   return <LiveProgress id={id} poll={poll} retry={retry} />;
 }
 
-function LiveResult({ id, result, usd }: { id: string; result: boolean; usd: number | null }) {
+function LiveResult({ id, result, usd, source }: { id: string; result: boolean; usd: number | null; source?: LiveStatus['source'] }) {
+  const host = sourceHost(source);
   const base = useMemo(() => liveFilesBase(apiBase(), id), [id]);
   const asset = useCallback((rel: string) => resolveAsset(base, rel) ?? '', [base]);
   const run = useLoad<Run>(async () => {
@@ -29,15 +30,16 @@ function LiveResult({ id, result, usd }: { id: string; result: boolean; usd: num
   if (run.status === 'error') return <ErrorView title="Could not load this live run" detail={run.error} />;
   if (!run.data.candidates?.length) return <ErrorView title="This live run produced no candidates" />;
   const basePath = `/live/${encodeURIComponent(id)}`;
-  if (result) return <ResultView run={run.data} asset={asset} basePath={basePath} />;
+  if (result) return <ResultView run={run.data} asset={asset} basePath={basePath} sourceHost={host} />;
   return (
     <RunView
       run={run.data}
       asset={asset}
       basePath={basePath}
+      sourceHost={host}
       banner={
         <p className="mt-4 rounded-md border border-accent/30 bg-accent/5 px-3 py-2 text-xs text-ink-muted">
-          <strong className="font-semibold text-ink">Live run</strong> — made just now from your frames with real models on Nebius Token Factory and real renders in
+          <strong className="font-semibold text-ink">Live run</strong> — made just now from {host ? <>a capture of <span className="font-medium text-ink">{host}</span></> : 'your frames'} with real models on Nebius Token Factory and real renders in
           Token Factory Sandboxes{usd != null ? ` · model cost ${fmtUsd(usd, 4)}` : ''}. It is not added to the replay list.
         </p>
       }
@@ -62,6 +64,9 @@ function LiveProgress({ id, poll, retry }: { id: string; poll: PollState; retry:
   const elapsed = useElapsed(poll.status?.created, poll.phase === 'polling');
   const active = stages.find((s) => s.state === 'active');
   const failed = poll.phase === 'failed';
+  const notice = failureNotice(poll.status?.error ?? poll.error);
+  const refused = failed && notice.kind === 'refused';
+  const pageUrl = poll.status?.source?.url;
 
   return (
     <div className="page pt-6">
@@ -69,8 +74,13 @@ function LiveProgress({ id, poll, retry }: { id: string; poll: PollState; retry:
         <IconArrowLeft /> Back
       </Link>
       <p className="eyebrow mt-3">Live run</p>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{failed ? 'The run failed' : poll.phase === 'offline' ? 'Lost contact with the server' : 'Working on your frames…'}</h1>
+      <h1 className="display mt-1 text-2xl sm:text-3xl">{failed ? notice.title : poll.phase === 'offline' ? 'Lost contact with the server' : pageUrl ? 'Working on the page…' : 'Working on your frames…'}</h1>
       <p className="mt-1 break-all font-mono text-[11px] text-ink-faint">{id}</p>
+      {pageUrl && (
+        <p className="mt-2 max-w-2xl break-all text-sm text-ink-muted">
+          From <span className="font-mono text-[13px] text-ink">{pageUrl}</span>
+        </p>
+      )}
 
       <section aria-labelledby="progress-title" className="card card-pad mt-6 max-w-2xl">
         <div className="flex items-baseline justify-between gap-3">
@@ -99,11 +109,12 @@ function LiveProgress({ id, poll, retry }: { id: string; poll: PollState; retry:
         {st.state === 'queued' && poll.phase === 'polling' && <p className="mt-4 text-xs text-ink-muted">Queued — starting in a moment.</p>}
 
         {failed && (
-          <div role="alert" className="mt-5 rounded-md border border-bad/30 bg-bad/5 p-3 text-sm">
-            <p className="font-semibold text-bad">{poll.error}</p>
-            {poll.status && <p className="mt-1 text-xs text-ink-muted">Nothing was added to the replay list. You can try again with the same frames; it counts as a new run.</p>}
+          <div role="alert" className={`mt-5 rounded-md border p-3 text-sm ${refused ? 'border-warn/40 bg-warn/10' : 'border-bad/30 bg-bad/5'}`}>
+            <p className={`font-semibold ${refused ? 'text-ink' : 'text-bad'}`}>{notice.message}</p>
+            {refused && <p className="mt-1 text-xs text-ink-muted">This is a safety rule, not an error: nothing from the page was rebuilt.</p>}
+            {poll.status && !refused && <p className="mt-1 text-xs text-ink-muted">Nothing was added to the replay list. You can try again; it counts as a new run.</p>}
             <Link to="/#live" className="btn mt-3">
-              {poll.status ? 'Try again' : 'Start a new run'}
+              {refused ? 'Upload frames instead' : poll.status ? 'Try again' : 'Start a new run'}
             </Link>
           </div>
         )}
@@ -122,8 +133,8 @@ function LiveProgress({ id, poll, retry }: { id: string; poll: PollState; retry:
 
         <p className="mt-5 border-t border-line pt-4 text-xs text-ink-muted">
           This is a real run: a vision model and Nemotron on <strong className="font-semibold text-ink">Nebius Token Factory</strong>, renders and scoring in{' '}
-          <strong className="font-semibold text-ink">Token Factory Sandboxes</strong>. It usually takes 45–90 seconds. Keep this page open; the result
-          appears here.
+          <strong className="font-semibold text-ink">Token Factory Sandboxes</strong>
+          {pageUrl ? ', after the page is captured in a sandbox' : ''}. It usually takes {runDuration(st)}. Keep this page open; the result appears here.
         </p>
       </section>
     </div>
@@ -146,7 +157,7 @@ function StageIcon({ state, n }: { state: StageState; n: number }) {
     );
   if (state === 'active')
     return (
-      <span className={`${base} border-accent bg-accent/10 text-accent`} aria-hidden="true">
+      <span className={`${base} border-accent bg-accent/10 text-accent-strong`} aria-hidden="true">
         <span className="h-3 w-3 animate-spin rounded-pill border-2 border-accent border-t-transparent motion-reduce:animate-none" />
       </span>
     );

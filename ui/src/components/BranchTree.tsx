@@ -151,7 +151,7 @@ function TreeNode({
         </span>
         <span className="flex w-full items-center justify-between gap-1">
           <code className="font-mono text-[10px] text-ink-faint">{c.id}</code>
-          {isBest && <span className="text-[10px] font-semibold text-accent">BEST</span>}
+          {isBest && <span className="text-[10px] font-semibold text-accent-strong">BEST</span>}
         </span>
       </button>
       {c.reason && (

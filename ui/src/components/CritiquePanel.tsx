@@ -29,7 +29,7 @@ export function CritiquePanel({ critiques, activeRound }: { critiques: Critique[
                       on <code className="font-mono">{c.parent}</code>
                     </span>
                   )}
-                  {c.round === activeRound && <span className="chip ml-auto border-accent/30 bg-accent/10 text-accent">Now playing</span>}
+                  {c.round === activeRound && <span className="chip ml-auto border-accent/30 bg-accent/10 text-accent-strong">Now playing</span>}
                 </summary>
                 <div className="flex flex-col gap-4 border-t border-line px-3 py-3">
                   {c.diagnosis && (

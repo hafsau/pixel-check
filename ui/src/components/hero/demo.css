@@ -1,0 +1,269 @@
+/* The hero's demo page. Sized by its frame (container "demo"), never by the viewport. Uses the cobalt accent-2 so the
+   signal orange stays reserved for what the sweep finds. */
+.dm-frame {
+  container: demo / inline-size;
+}
+.dm {
+  --dm-pad: 20px;
+  --dm-gap: 16px;
+  font-family: var(--font-sans);
+  color: rgb(var(--c-ink));
+  background: rgb(var(--c-surface));
+  padding: 0 var(--dm-pad) 40px;
+  min-height: 100%;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.dm * {
+  box-sizing: border-box;
+}
+.dm-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 64px;
+  border-bottom: 1px solid rgb(var(--c-line));
+}
+.dm-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+.dm-logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: rgb(var(--c-accent-2));
+  box-shadow: inset -6px -6px 0 rgb(var(--c-accent-2) / 0.55);
+}
+.dm-links {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 28px;
+  color: rgb(var(--c-ink-muted));
+  font-size: 14px;
+}
+.dm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 10px;
+  background: rgb(var(--c-accent-2));
+  color: #fff;
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+}
+:root[data-theme='dark'] .dm-btn {
+  color: rgb(var(--c-bg));
+}
+.dm-btn-sm {
+  height: 36px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+.dm-btn-ghost {
+  background: transparent;
+  color: rgb(var(--c-ink)) !important;
+  box-shadow: inset 0 0 0 1px rgb(var(--c-line));
+}
+.dm-hero {
+  display: grid;
+  gap: 28px;
+  padding: 40px 0 32px;
+}
+.dm-kicker {
+  display: inline-block;
+  margin: 0 0 14px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgb(var(--c-accent-2) / 0.1);
+  color: rgb(var(--c-accent-2));
+  font-size: 13px;
+  font-weight: 600;
+}
+.dm-h {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  font-weight: 600;
+}
+.dm-p {
+  margin: 14px 0 0;
+  color: rgb(var(--c-ink-muted));
+  max-width: 36em;
+}
+.dm-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+.dm-art {
+  border-radius: 16px;
+  background: rgb(var(--c-surface-2));
+  padding: 18px;
+  min-height: 180px;
+}
+.dm-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.dm-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dm-col-h {
+  height: 8px;
+  width: 50%;
+  border-radius: 4px;
+  background: rgb(var(--c-ink) / 0.18);
+}
+.dm-card {
+  height: 44px;
+  border-radius: 8px;
+  background: rgb(var(--c-surface));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  border-left: 3px solid rgb(var(--c-accent-2));
+}
+.dm-card-1 {
+  height: 62px;
+  border-left-color: rgb(var(--c-good));
+}
+.dm-card-2 {
+  border-left-color: rgb(var(--c-ink) / 0.3);
+}
+.dm-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 20px 0;
+  border-block: 1px solid rgb(var(--c-line));
+}
+.dm-stat b {
+  display: block;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+.dm-stat span {
+  color: rgb(var(--c-ink-muted));
+  font-size: 13px;
+}
+.dm-pricing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--dm-gap);
+  padding-top: 32px;
+}
+.dm-plan {
+  border: 1px solid rgb(var(--c-line));
+  border-radius: 14px;
+  padding: 22px;
+  background: rgb(var(--c-surface));
+}
+.dm-plan-hi {
+  border-color: rgb(var(--c-accent-2));
+  box-shadow: 0 0 0 3px rgb(var(--c-accent-2) / 0.15);
+}
+.dm-plan-name {
+  margin: 0;
+  font-weight: 600;
+}
+.dm-price {
+  margin: 6px 0 14px;
+  color: rgb(var(--c-ink-muted));
+  font-size: 14px;
+}
+.dm-price b {
+  color: rgb(var(--c-ink));
+  font-size: 30px;
+  letter-spacing: -0.03em;
+}
+.dm-plan ul {
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  color: rgb(var(--c-ink-muted));
+}
+.dm-plan li::before {
+  content: '✓ ';
+  color: rgb(var(--c-good));
+}
+.dm-plan .dm-btn {
+  width: 100%;
+}
+
+/* measured element the sweep caught (set by HeroSweep while its width fails) */
+.dm [data-offender] {
+  outline: 3px dashed rgb(var(--c-accent));
+  outline-offset: 3px;
+}
+
+@container demo (min-width: 600px) {
+  .dm {
+    --dm-pad: 32px;
+  }
+  .dm-links {
+    display: flex;
+  }
+  .dm-h {
+    font-size: 44px;
+  }
+  .dm-pricing {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dm-plan:last-child {
+    grid-column: 1 / -1;
+  }
+}
+@container demo (min-width: 900px) {
+  .dm-hero {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 40px;
+    padding: 64px 0 48px;
+  }
+  .dm-h {
+    font-size: 52px;
+  }
+  .dm-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container demo (min-width: 1080px) {
+  .dm {
+    --dm-pad: 48px;
+    --dm-gap: 24px;
+  }
+  .dm-plan:last-child {
+    grid-column: auto;
+  }
+  .dm-pricing {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  /* the deliberate bug: 48 px padding + three 346 px minimum cards + 2 × 24 px gaps end at 1134 px */
+  .dm[data-variant='before'] .dm-pricing {
+    grid-template-columns: repeat(3, minmax(346px, 1fr));
+  }
+}
+@container demo (min-width: 1280px) {
+  .dm > * {
+    max-width: 1160px;
+    margin-inline: auto;
+  }
+  .dm-h {
+    font-size: 60px;
+  }
+}

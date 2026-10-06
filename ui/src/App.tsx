@@ -8,10 +8,12 @@ import { NotFound } from './pages/NotFound';
 import { InteractionPage } from './pages/InteractionPage';
 import { GroupPage } from './pages/GroupPage';
 import { LiveRunPage } from './pages/LiveRunPage';
+import { BrandPage } from './pages/BrandPage';
 
 function Routes() {
   const path = usePath();
   if (path === '/' || path === '') return <HomePage />;
+  if (path === '/brand') return <BrandPage />;
   let m = matchPath('/run/:id/result', path);
   if (m) return <ResultPage key={m.id} id={m.id} />;
   m = matchPath('/live/:id/result', path);

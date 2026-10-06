@@ -66,7 +66,7 @@ export function apiErrorMessage(status: number, body: unknown): string {
       : '';
   switch (status) {
     case 0:
-      return 'Could not reach the Pixel-Check server. Check your connection and try again.';
+      return 'Could not reach the PixelCheck server. Check your connection and try again.';
     case 403:
       return 'That passcode is not right. It is in the Devpost testing notes.';
     case 413:
@@ -86,7 +86,7 @@ export function apiErrorMessage(status: number, body: unknown): string {
 // ------------------------------------------------------------------------------------------------ polling
 
 export type LiveState = 'queued' | 'running' | 'done' | 'failed';
-export type StageId = 'perceive' | 'compile' | 'bundle';
+export type StageId = 'capture' | 'perceive' | 'compile' | 'bundle';
 
 export interface LiveStatus {
   state: LiveState;
@@ -95,6 +95,7 @@ export interface LiveStatus {
   bundle?: string | null;
   error?: string;
   created?: number;
+  source?: { url?: string } | null;
 }
 
 export interface PollState {
@@ -132,6 +133,7 @@ export function pollReducer(s: PollState, e: PollEvent): PollState {
   }
 }
 
+const CAPTURE = { id: 'capture' as const, label: 'Capturing the page' };
 const STAGES: { id: StageId; label: string }[] = [
   { id: 'perceive', label: 'Reading the frames' },
   { id: 'compile', label: 'Compiling, rendering and scoring in the sandbox' },
@@ -140,10 +142,11 @@ const STAGES: { id: StageId; label: string }[] = [
 
 export type StageState = 'pending' | 'active' | 'done' | 'failed';
 
-export function stageProgress(st: Pick<LiveStatus, 'state' | 'stages'>): { id: StageId; label: string; state: StageState; t?: number }[] {
-  const seen = STAGES.map((s) => st.stages.find((x) => x.stage === s.id));
+export function stageProgress(st: Pick<LiveStatus, 'state' | 'stages' | 'source'>): { id: StageId; label: string; state: StageState; t?: number }[] {
+  const list = st.source?.url ? [CAPTURE, ...STAGES] : STAGES;
+  const seen = list.map((s) => st.stages.find((x) => x.stage === s.id));
   const last = seen.reduce((acc, x, i) => (x ? i : acc), -1);
-  return STAGES.map((s, i) => {
+  return list.map((s, i) => {
     let state: StageState = 'pending';
     if (st.state === 'done') state = 'done';
     else if (st.state === 'running') state = i < Math.max(last, 0) ? 'done' : i === Math.max(last, 0) ? 'active' : 'pending';
@@ -172,4 +175,53 @@ export function resolveAsset(filesBase: string, rel: string): string | null {
   const parts = rel.replace(/^\.\//, '').split('/');
   if (parts.some((p) => p === '..' || p === '')) return null;
   return filesBase + parts.map(encodeURIComponent).join('/');
+}
+
+// ------------------------------------------------------------------------------------------------ URL runs
+
+const LOCAL_HOST = /^(localhost|.*\.localhost|.*\.local|.*\.internal|0\.0\.0\.0|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|\[?::1\]?)$/i;
+
+/** Friendly client-side check mirroring api._check_url (the server also resolves the host). → message or null. */
+export function validatePageUrl(raw: string): string | null {
+  const v = raw.trim();
+  if (!v) return 'Enter the address of a public web page.';
+  if (v.length > 2000) return 'The address is too long.';
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(v)) return 'Start the address with https:// — e.g. https://example.com/pricing.';
+  if (!/^https?:/i.test(v)) return 'Only http:// and https:// pages can be captured.';
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    return 'Enter a full address with a host name, e.g. https://example.com/pricing.';
+  }
+  if (!u.hostname) return 'Enter a full address with a host name, e.g. https://example.com/pricing.';
+  if (u.username || u.password) return 'Remove the user name or password from the address.';
+  if (u.port && u.port !== '80' && u.port !== '443') return 'Only standard ports (80 / 443) are supported.';
+  if (LOCAL_HOST.test(u.hostname)) return 'Only public web pages can be captured — not local or private addresses.';
+  return null;
+}
+
+export function urlReady(url: string, owns: boolean, passcode: string): boolean {
+  return validatePageUrl(url) === null && owns && passcode.trim().length > 0;
+}
+
+const REFUSAL = /password or payment fields/i;
+
+/** A failed run's error → what the progress page says. The login / checkout refusal is a decision, not a crash. */
+export function failureNotice(error: string | undefined): { kind: 'refused' | 'error'; title: string; message: string } {
+  if (error && REFUSAL.test(error)) return { kind: 'refused', title: 'This page was not rebuilt', message: cap(error) };
+  return { kind: 'error', title: 'The run failed', message: error || 'The run failed.' };
+}
+
+export function runDuration(st: Pick<LiveStatus, 'source'> & Partial<LiveStatus>): string {
+  return st.source?.url ? '2–7 minutes' : '45–90 seconds';
+}
+
+export function sourceHost(source: { url?: string } | null | undefined): string | null {
+  if (!source?.url) return null;
+  try {
+    return new URL(source.url).hostname || null;
+  } catch {
+    return null;
+  }
 }

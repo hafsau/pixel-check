@@ -41,7 +41,7 @@ export function GroupCard({ e }: { e: GroupEntry }) {
           </p>
         )}
         <footer className="mt-auto flex justify-end text-xs">
-          <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent">
+          <span className="inline-flex items-center gap-1 font-medium text-ink group-hover:text-accent-strong">
             Open <IconArrowRight />
           </span>
         </footer>

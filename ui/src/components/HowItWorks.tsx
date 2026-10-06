@@ -1,45 +1,92 @@
-/** The pipeline as it runs today (Oct 5): measured facts → deterministic compiler → sandbox render + score → interactions. */
-const STEPS: { name: string; detail: string }[] = [
-  { name: 'Perceive', detail: 'A vision model reads the text; OCR and pixel measurement give boxes, colours and type' },
-  { name: 'Compile', detail: 'One fluid React + Tailwind file; Nemotron names regions and finds repeated cards' },
-  { name: 'Render', detail: 'At 390 / 768 / 1280 px and 5 widths between, in a network-isolated Token Factory Sandbox' },
-  { name: 'Score', detail: 'Each render against its frame, 0–100. Match = the worst breakpoint' },
-  { name: 'Interactions', detail: 'From state frames: Nemotron writes the wiring, generated tests run in the sandbox' },
+import type { ReactNode } from 'react';
+
+/** Three visual steps (≤ 8 words each); the scope and honesty notes sit in a compact footnote. */
+const STEPS: { name: string; line: string; art: ReactNode }[] = [
+  { name: 'Capture', line: 'Three frames — or a page you own.', art: <CaptureArt /> },
+  { name: 'Compile', line: 'One fluid React + Tailwind codebase.', art: <CompileArt /> },
+  { name: 'Prove', line: 'Rendered, measured and scored at every width.', art: <ProveArt /> },
 ];
 
 export function HowItWorks() {
   return (
-    <section aria-labelledby="how-title" className="section">
+    <section id="how" aria-labelledby="how-title" className="section scroll-mt-6" tabIndex={-1}>
       <h2 id="how-title" className="eyebrow">
         How it works
       </h2>
-      <ol className="mt-3 grid gap-3 sm:grid-cols-5 sm:gap-0">
+      <ol className="mt-4 grid gap-3 md:grid-cols-3">
         {STEPS.map((s, i) => (
-          <li key={s.name} className="relative flex items-start gap-3 sm:flex-col sm:gap-2 sm:pr-6">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-pill border border-line bg-surface text-xs font-semibold num">
-              {i + 1}
-            </span>
-            {i < STEPS.length - 1 && <span aria-hidden="true" className="absolute left-9 right-2 top-3.5 hidden h-px bg-line sm:block" />}
-            <div>
-              <p className="text-sm font-semibold">{s.name}</p>
-              <p className="text-xs text-ink-muted">{s.detail}</p>
+          <li key={s.name} className="card flex items-center gap-4 p-4 sm:p-5 md:flex-col md:items-start">
+            <div className="grid h-[72px] w-[104px] shrink-0 place-items-center rounded-md bg-surface-2 text-ink md:h-[96px] md:w-full">{s.art}</div>
+            <div className="min-w-0">
+              <p className="flex items-baseline gap-2">
+                <span className="font-mono text-[11px] text-ink-faint num" aria-hidden="true">
+                  0{i + 1}
+                </span>
+                <span className="text-base font-semibold tracking-[-0.02em]">{s.name}</span>
+              </p>
+              <p className="mt-0.5 text-sm text-ink-muted">{s.line}</p>
             </div>
           </li>
         ))}
       </ol>
-      <div className="mt-5 grid gap-3 text-sm text-ink-muted md:grid-cols-2">
-        <p>
-          Every model call runs on <strong className="font-semibold text-ink">Nebius Token Factory</strong>;{' '}
-          <strong className="font-semibold text-ink">NVIDIA Nemotron</strong> plans the page structure and writes the interaction code, and every render and
-          test runs in a <strong className="font-semibold text-ink">Token Factory Sandbox</strong>. Code-writing models get text measurements only, never
-          image bytes; scoring runs in a separate disposable sandbox.
-        </p>
-        <p>
-          <strong className="font-semibold text-ink">Scope:</strong> static responsive layout with working basic controls — real inputs, buttons, links and a
-          mobile menu toggle. Designed states (an open menu, an expanded answer) are built only when a state frame shows them. Where a deterministic
-          baseline does as well as the model, the runs say so.
-        </p>
-      </div>
+      <p className="mt-4 max-w-4xl text-xs leading-relaxed text-ink-muted">
+        <span className="font-semibold text-ink">Notes.</span> Every model call runs on Nebius Token Factory; NVIDIA Nemotron plans the page structure and
+        writes interaction code. Code-writing models get text measurements, never image bytes; every render, test and score runs in a Token Factory
+        Sandbox. Scope: static responsive layout with working basic controls; designed states only from a state frame. On some tasks a deterministic
+        baseline matches the model — the runs say so.
+      </p>
     </section>
+  );
+}
+
+/* --- small illustrations: single-colour line art in currentColor, orange for the one "signal" detail --- */
+
+function CaptureArt() {
+  return (
+    <svg width="96" height="60" viewBox="0 0 96 60" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x="4" y="14" width="16" height="32" rx="3" />
+      <rect x="26" y="10" width="26" height="36" rx="3" />
+      <rect x="58" y="12" width="34" height="24" rx="3" />
+      <path d="M58 40h34" opacity=".35" />
+      <g stroke="rgb(var(--c-accent))" strokeWidth="1.75" strokeLinecap="round">
+        <path d="M2 52h18M26 52h26M58 52h34" />
+      </g>
+      <g fill="currentColor" stroke="none" opacity=".35">
+        <rect x="8" y="19" width="8" height="2" rx="1" />
+        <rect x="30" y="15" width="14" height="2" rx="1" />
+        <rect x="62" y="17" width="16" height="2" rx="1" />
+      </g>
+    </svg>
+  );
+}
+
+function CompileArt() {
+  return (
+    <svg width="96" height="60" viewBox="0 0 96 60" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 18 10 30l12 12M74 18l12 12-12 12" />
+      <path d="M54 12 42 48" stroke="rgb(var(--c-accent))" />
+      <g strokeWidth="1.5" opacity=".35">
+        <path d="M30 24h8M30 30h4M30 36h7M60 24h6M62 30h4M58 36h8" />
+      </g>
+    </svg>
+  );
+}
+
+function ProveArt() {
+  return (
+    <svg width="96" height="60" viewBox="0 0 96 60" aria-hidden="true">
+      <g fill="currentColor">
+        <rect x="6" y="14" width="40" height="10" opacity=".13" />
+        <rect x="46" y="14" width="32" height="10" opacity=".07" />
+        <rect x="78" y="14" width="12" height="10" opacity=".03" />
+        <rect x="6" y="17" width="78" height="4" rx="1" />
+      </g>
+      <rect x="77" y="11" width="2" height="16" fill="rgb(var(--c-accent))" />
+      <g fill="rgb(var(--c-good))">
+        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+          <rect key={i} x={6 + i * 12} y="36" width="10" height="8" rx="2" />
+        ))}
+      </g>
+    </svg>
   );
 }

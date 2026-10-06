@@ -1,33 +1,39 @@
 /*
- * Pixel-Check design tokens — the ONE place to restyle the app.
+ * PixelCheck design tokens — the ONE place to restyle the app. "Signal" palette: warm paper + signal orange.
  *
  * Colours are space-separated RGB channels so Tailwind can apply opacity
  * (e.g. `bg-accent/10`). They are mapped to Tailwind names in tailwind.config.js:
- *   bg, surface, surface-2, line, ink, ink-muted, ink-faint, accent, accent-ink,
+ *   bg, surface, surface-2, line, ink, ink-muted, ink-faint, accent, accent-ink, accent-strong, accent-2,
  *   good, ok, warn, bad, bp-mobile, bp-tablet, bp-desktop
+ *
+ * Every text/background pair is checked against WCAG in src/lib/contrast.test.ts (≥ 4.5:1 text, ≥ 3:1 UI / large).
+ * The orange `accent` is for fills, focus rings, marks and large text only (3.6:1 on paper) — small orange text
+ * uses `accent-strong`.
  *
  * Light is the default theme. Dark applies with <html data-theme="dark">.
  */
 
 :root {
   /* --- surfaces & text --- */
-  --c-bg: 246 246 243;          /* page background */
-  --c-surface: 255 255 255;     /* cards, panels */
-  --c-surface-2: 240 240 236;   /* insets, table headers, code */
-  --c-line: 226 226 220;        /* borders, dividers, chart grid */
-  --c-ink: 17 19 24;            /* primary text */
-  --c-ink-muted: 88 94 106;     /* secondary text */
-  --c-ink-faint: 140 145 155;   /* tertiary text, disabled */
+  --c-bg: 244 242 238;          /* #F4F2EE warm paper */
+  --c-surface: 255 255 255;     /* #FFFFFF cards, panels */
+  --c-surface-2: 239 236 230;   /* #EFECE6 insets, table headers, code */
+  --c-line: 226 222 214;        /* #E2DED6 borders, dividers, chart grid */
+  --c-ink: 22 21 15;            /* #16150F primary text */
+  --c-ink-muted: 107 103 94;    /* #6B675E secondary text */
+  --c-ink-faint: 113 108 99;    /* #716C63 meta text (still ≥ 4.5:1) */
 
-  /* --- brand accent (buttons, focus, selection, best path) --- */
-  --c-accent: 47 84 235;
-  --c-accent-ink: 255 255 255;  /* text on accent */
+  /* --- brand --- */
+  --c-accent: 229 72 15;        /* #E5480F signal orange: buttons, focus, marks, large text */
+  --c-accent-ink: 22 21 15;     /* text on accent (4.6:1) */
+  --c-accent-strong: 178 58 12; /* #B23A0C orange for small text and links */
+  --c-accent-2: 47 91 255;      /* #2F5BFF cobalt: selection, info */
 
   /* --- score bands (see src/lib/score.ts for thresholds) --- */
-  --c-good: 22 150 92;          /* ≥ 90  visually the same */
-  --c-ok: 70 140 190;           /* 75–90 same page, small slips */
-  --c-warn: 205 132 20;         /* 46–75 recognisable but off */
-  --c-bad: 212 56 56;           /* < 46 not the design; disqualified */
+  --c-good: 31 122 77;          /* #1F7A4D ≥ 90  visually the same */
+  --c-ok: 42 80 230;            /* #2A50E6 75–90 same page, small slips (cobalt, deepened for chips) */
+  --c-warn: 152 81 0;           /* #985100 46–75 recognisable but off (plan #A85A00, deepened for chips) */
+  --c-bad: 200 38 27;           /* #C8261B < 46 not the design; disqualified */
 
   /* --- breakpoint series (Okabe–Ito, colour-blind safe; validated CVD ΔE ≥ 18 on light) --- */
   --c-bp-mobile: 213 94 0;
@@ -42,18 +48,21 @@
 
   /* --- spacing scale extras (Tailwind's default scale still applies) --- */
   --space-gutter: 16px;         /* page side gutter on phones */
-  --space-section: 56px;        /* vertical gap between page sections */
+  --space-section: 64px;        /* vertical gap between page sections */
   --content-max: 1240px;        /* max content width */
 
   /* --- frames (design / render images in the run view) --- */
   --frame-max-h: 26rem;         /* tallest a breakpoint frame may get */
 
-  /* --- type --- */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* --- type (self-hosted, src/styles/fonts.css). Code previews keep Inter + IBM Plex Mono (lib/previewDoc.ts). --- */
+  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-pixel: 'Geist Pixel', 'Geist Mono', ui-monospace, monospace; /* wordmark + large score numerals only */
+  --tracking-display: -0.03em;
 
   /* --- elevation --- */
-  --shadow-card: 0 1px 2px rgb(17 19 24 / 0.04), 0 4px 16px rgb(17 19 24 / 0.04);
+  --shadow-card: 0 1px 2px rgb(22 21 15 / 0.04), 0 6px 20px -8px rgb(22 21 15 / 0.08);
+  --shadow-lift: 0 1px 2px rgb(22 21 15 / 0.06), 0 24px 48px -24px rgb(22 21 15 / 0.25);
 
   /* --- motion --- */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -63,28 +72,31 @@
 }
 
 :root[data-theme='dark'] {
-  --c-bg: 12 13 16;
-  --c-surface: 21 23 28;
-  --c-surface-2: 29 32 39;
-  --c-line: 44 48 57;
-  --c-ink: 236 238 242;
-  --c-ink-muted: 160 166 178;
-  --c-ink-faint: 110 116 128;
+  --c-bg: 14 13 11;             /* #0E0D0B */
+  --c-surface: 24 23 21;        /* #181715 */
+  --c-surface-2: 33 31 28;      /* #211F1C */
+  --c-line: 42 40 36;           /* #2A2824 */
+  --c-ink: 242 240 234;         /* #F2F0EA */
+  --c-ink-muted: 156 151 140;   /* #9C978C */
+  --c-ink-faint: 140 135 124;   /* #8C877C */
 
-  --c-accent: 120 150 255;
-  --c-accent-ink: 10 12 20;
+  --c-accent: 255 106 43;       /* #FF6A2B */
+  --c-accent-ink: 14 13 11;
+  --c-accent-strong: 255 106 43;
+  --c-accent-2: 138 164 255;    /* #8AA4FF */
 
-  --c-good: 64 200 130;
-  --c-ok: 110 175 225;
-  --c-warn: 236 170 60;
-  --c-bad: 245 100 100;
+  --c-good: 74 222 128;         /* #4ADE80 */
+  --c-ok: 138 164 255;          /* #8AA4FF */
+  --c-warn: 245 165 36;         /* #F5A524 */
+  --c-bad: 255 107 94;          /* #FF6B5E */
 
   /* validated for dark surfaces (OKLCH L 0.48–0.67, CVD ΔE ≥ 15) */
   --c-bp-mobile: 212 116 42;
   --c-bp-tablet: 63 143 210;
   --c-bp-desktop: 31 166 118;
 
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-lift: 0 1px 2px rgb(0 0 0 / 0.5), 0 24px 48px -24px rgb(0 0 0 / 0.7);
 
   color-scheme: dark;
 }

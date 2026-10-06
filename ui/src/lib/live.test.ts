@@ -11,6 +11,11 @@ import {
   resolveAsset,
   stageProgress,
   validateFrame,
+  validatePageUrl,
+  urlReady,
+  failureNotice,
+  runDuration,
+  sourceHost,
   type LiveStatus,
 } from './live';
 
@@ -191,5 +196,104 @@ describe('asset URLs', () => {
     expect(resolveAsset(base, 'https://evil.example/x.png')).toBeNull();
     expect(resolveAsset(base, '/etc/passwd')).toBeNull();
     expect(resolveAsset(base, '')).toBeNull();
+  });
+});
+
+describe('validatePageUrl', () => {
+  it('accepts full http(s) URLs', () => {
+    expect(validatePageUrl('https://example.com/pricing')).toBeNull();
+    expect(validatePageUrl('  http://example.com  ')).toBeNull();
+  });
+  it('asks for a URL when empty', () => {
+    expect(validatePageUrl('   ')).toBe('Enter the address of a public web page.');
+  });
+  it('explains a missing scheme with the likely fix', () => {
+    expect(validatePageUrl('example.com/pricing')).toBe('Start the address with https:// — e.g. https://example.com/pricing.');
+  });
+  it('rejects other schemes and URLs without a host', () => {
+    expect(validatePageUrl('ftp://example.com')).toBe('Only http:// and https:// pages can be captured.');
+    expect(validatePageUrl('javascript:alert(1)')).toBe('Only http:// and https:// pages can be captured.');
+    expect(validatePageUrl('https://')).toBe('Enter a full address with a host name, e.g. https://example.com/pricing.');
+  });
+  it('mirrors the server on credentials, ports and length', () => {
+    expect(validatePageUrl('https://user:pw@example.com')).toBe('Remove the user name or password from the address.');
+    expect(validatePageUrl('https://example.com:8080/')).toBe('Only standard ports (80 / 443) are supported.');
+    expect(validatePageUrl('https://example.com:443/')).toBeNull();
+    expect(validatePageUrl('https://example.com/' + 'a'.repeat(2000))).toBe('The address is too long.');
+  });
+  it('flags obvious local addresses early (the server checks DNS too)', () => {
+    expect(validatePageUrl('http://localhost:80/')).toBe('Only public web pages can be captured — not local or private addresses.');
+    expect(validatePageUrl('http://192.168.1.10/')).toBe('Only public web pages can be captured — not local or private addresses.');
+    expect(validatePageUrl('http://127.0.0.1/')).toBe('Only public web pages can be captured — not local or private addresses.');
+  });
+});
+
+describe('urlReady', () => {
+  it('needs a valid URL, the ownership box and a passcode', () => {
+    expect(urlReady('https://example.com', true, 'pc')).toBe(true);
+    expect(urlReady('https://example.com', false, 'pc')).toBe(false);
+    expect(urlReady('example.com', true, 'pc')).toBe(false);
+    expect(urlReady('https://example.com', true, ' ')).toBe(false);
+  });
+});
+
+describe('apiErrorMessage — URL runs', () => {
+  it('passes URL problems and the ownership requirement through, capitalised', () => {
+    expect(apiErrorMessage(422, { detail: 'confirm that you own this page or have permission to rebuild it' })).toBe(
+      'Confirm that you own this page or have permission to rebuild it',
+    );
+    expect(apiErrorMessage(422, { detail: 'only public web pages can be captured' })).toBe('Only public web pages can be captured');
+    expect(apiErrorMessage(422, { detail: 'cannot find the host nope.invalid' })).toBe('Cannot find the host nope.invalid');
+  });
+});
+
+describe('failureNotice', () => {
+  it('presents the login / checkout refusal as a decision, not a crash', () => {
+    const r = failureNotice('this page has password or payment fields — PixelCheck does not rebuild login or checkout pages from a URL; upload your own design frames instead');
+    expect(r.kind).toBe('refused');
+    expect(r.title).toBe('This page was not rebuilt');
+    expect(r.message.startsWith('This page has password or payment fields')).toBe(true);
+  });
+  it('treats anything else as a failure', () => {
+    expect(failureNotice('RuntimeError: the page could not be captured (FAILED)')).toMatchObject({ kind: 'error', title: 'The run failed' });
+    expect(failureNotice(undefined)).toMatchObject({ kind: 'error', message: 'The run failed.' });
+  });
+});
+
+describe('stageProgress — URL runs', () => {
+  const ids = (s: ReturnType<typeof stageProgress>) => s.map((x) => `${x.id}:${x.state}`);
+  it('adds "Capturing the page" first when the run has a source URL', () => {
+    const st = { state: 'running' as const, stages: [{ stage: 'capture', t: 1 }], source: { url: 'https://example.com' } };
+    expect(stageProgress(st).map((s) => s.label)[0]).toBe('Capturing the page');
+    expect(ids(stageProgress(st))).toEqual(['capture:active', 'perceive:pending', 'compile:pending', 'bundle:pending']);
+  });
+  it('moves on after capture', () => {
+    const st = { state: 'running' as const, stages: [{ stage: 'capture', t: 1 }, { stage: 'perceive', t: 90 }], source: { url: 'https://example.com' } };
+    expect(ids(stageProgress(st))).toEqual(['capture:done', 'perceive:active', 'compile:pending', 'bundle:pending']);
+  });
+  it('a refusal during capture marks capture failed', () => {
+    const st = { state: 'failed' as const, stages: [{ stage: 'capture', t: 1 }], source: { url: 'https://example.com' } };
+    expect(ids(stageProgress(st))[0]).toBe('capture:failed');
+  });
+  it('has no capture step for uploaded frames', () => {
+    expect(stageProgress({ state: 'queued', stages: [] }).map((s) => s.id)).toEqual(['perceive', 'compile', 'bundle']);
+  });
+});
+
+describe('runDuration / sourceHost', () => {
+  it('gives the honest duration hint per source', () => {
+    expect(runDuration({ state: 'queued', stages: [] })).toBe('45–90 seconds');
+    expect(runDuration({ state: 'queued', stages: [], source: { url: 'https://example.com' } })).toBe('2–7 minutes');
+  });
+  it('extracts the host for the header', () => {
+    expect(sourceHost({ url: 'https://www.example.com/pricing?x=1' })).toBe('www.example.com');
+    expect(sourceHost(undefined)).toBeNull();
+    expect(sourceHost({ url: 'not a url' })).toBeNull();
+  });
+});
+
+describe('brand name in live messages', () => {
+  it('says PixelCheck (no hyphen) when the server is unreachable', () => {
+    expect(apiErrorMessage(0, null)).toBe('Could not reach the PixelCheck server. Check your connection and try again.');
   });
 });

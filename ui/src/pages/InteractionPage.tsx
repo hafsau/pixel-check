@@ -54,7 +54,7 @@ function InteractionView({ ix }: { ix: Interaction }) {
           <IconArrowLeft /> All runs
         </Link>
         <p className="eyebrow mt-1">Interaction</p>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{splitTitle(ix.title).title}</h1>
+        <h1 className="display text-2xl sm:text-3xl">{splitTitle(ix.title).title}</h1>
         <div className="flex flex-wrap items-center gap-1.5">
           {splitTitle(ix.title).note && <span className="chip border-dashed">{splitTitle(ix.title).note}</span>}
           {ix.kind && <span className="chip">{KIND[ix.kind] ?? cap(ix.kind)}</span>}

@@ -67,7 +67,7 @@ export function AttemptTimeline({ v, selected, onSelect }: { v: Variant; selecte
           if (s.kind === 'revise') {
             return (
               <li key={k} className="flex items-center gap-2 pl-4 text-xs text-ink-muted md:w-36 md:shrink-0 md:flex-col md:justify-center md:px-2 md:pl-2 md:text-center">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-pill border border-line bg-surface-2 text-accent">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-pill border border-line bg-surface-2 text-accent-strong">
                   <IconRevise />
                 </span>
                 <span>

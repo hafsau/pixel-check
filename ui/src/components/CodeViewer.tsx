@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { IconCheck, IconCopy, IconDownload } from './Icons';
+import { downloadBlob } from '../lib/download';
 
 /** Read-only code view with line numbers, copy and download. */
 export function CodeViewer({ code, filename = 'App.jsx' }: { code: string; filename?: string }) {
@@ -15,20 +16,14 @@ export function CodeViewer({ code, filename = 'App.jsx' }: { code: string; filen
       setCopied(false);
     }
   };
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
+  const download = () => downloadBlob(code, filename, 'text/javascript');
 
   return (
     <div className="overflow-hidden rounded-md border border-line">
       <div className="flex items-center justify-between gap-2 border-b border-line bg-surface-2 px-3 py-1.5">
-        <span className="font-mono text-xs text-ink-muted">
-          {filename} · {lines.length} lines
+        <span className="whitespace-nowrap font-mono text-xs text-ink-muted">
+          {filename}
+          <span className="hidden sm:inline"> · {lines.length} lines</span>
         </span>
         <div className="flex items-center gap-1">
           <button type="button" className="btn-ghost min-h-[30px] px-2 text-xs" onClick={copy}>
@@ -36,7 +31,11 @@ export function CodeViewer({ code, filename = 'App.jsx' }: { code: string; filen
             <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
           </button>
           <button type="button" className="btn-ghost min-h-[30px] px-2 text-xs" onClick={download}>
-            <IconDownload /> Download
+            <IconDownload />
+            <span className="whitespace-nowrap">
+              <span className="sr-only sm:not-sr-only">Download </span>
+              {filename}
+            </span>
           </button>
         </div>
       </div>

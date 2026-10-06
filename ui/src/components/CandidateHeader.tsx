@@ -14,7 +14,7 @@ export function CandidateHeader({ c, isBest }: { c: Candidate; isBest: boolean }
       <span className="chip">{strategyLabel(c.strategy)}</span>
       <span className="text-ink-muted">Match</span>
       <ScoreBadge score={c.match} dq={status === 'disqualified'} empty={status === 'no-render'} />
-      {isBest && <span className="chip border-accent/30 bg-accent/10 text-accent">Current best</span>}
+      {isBest && <span className="chip border-accent/30 bg-accent/10 text-accent-strong">Current best</span>}
       {status !== 'scored' && c.reason && <span className="text-xs text-bad">{c.reason}</span>}
     </div>
   );
