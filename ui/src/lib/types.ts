@@ -105,6 +105,17 @@ export interface Run {
   critiques: Critique[];
   edits: EditBatch[];
   calls: ModelCall[];
+  /** Owned sites only (lib/owned.ts sanitises both; absent in older bundles = null). */
+  display?: Display | null;
+  real?: Partial<Record<BpName, string>> | null;
+}
+
+/** The delivered App.jsx of an owned site: the scored code with the page's own images back in the grey boxes. */
+export interface Display {
+  code: string;
+  assets: string[];
+  images: number;
+  candidate: string | null;
 }
 
 /** How a candidate ended up: scored, disqualified by the gates, or never rendered. */

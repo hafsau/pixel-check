@@ -210,7 +210,7 @@ def _collect(spec: dict, anchored: bool = False) -> list[Item]:
                 key = f"b:{cls}#{ranks[cls]}"
             it = items.setdefault(key, Item(key, "block"))
             it.at[bp] = {"box": list(b["box"]), "fill": b.get("fill"), "border": b.get("border"), "radius": b.get("radius"),
-                         "shadow": bool(b.get("shadow"))}
+                         "shadow": bool(b.get("shadow")), "shadow_fit": b.get("shadow_fit")}
     return list(items.values())
 
 

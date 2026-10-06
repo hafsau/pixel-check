@@ -29,6 +29,8 @@ VH = {bp: SIZES[bp][1] for bp in BPS}
 WEIGHT = {400: "font-normal", 500: "font-medium", 600: "font-semibold", 700: "font-bold"}
 STACK = {"disp": "flex", "dir": "flex-col", "wrap": "flex-nowrap", "justify": "justify-start", "pl": "pl-0", "pr": "pr-0"}
 STATE: dict = {}   # per compile: {"all": [items], "intents": {...}}
+BGS: dict = {}     # per compile: page background per breakpoint (the layer pass compares fills with it)
+LAYER_MIN_AREA = 0.015   # a layer covers ≥ 1.5 % of the frame in every frame it is in
 
 
 def _box(c: Item, bp: str):
@@ -329,6 +331,14 @@ def _one_line(c: Item) -> bool:
     return True
 
 
+def _shadow(a: dict) -> str:
+    """The measured soft shadow (orchestrator/shadow.py), else a small one when only its presence was seen."""
+    from .shadow import shadow_class
+    if a.get("shadow_fit"):
+        return shadow_class(a["shadow_fit"])
+    return "shadow-sm" if a.get("shadow") else "shadow-none"
+
+
 def _block(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]:
     lines = _block_inner(c, indent, cont_w, vis, pos)
     name = getattr(c, "trigger", None)
@@ -344,7 +354,7 @@ def _block_inner(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> lis
     style = [_resp({bp: f"bg-[{at[bp]['fill']}]" if at[bp].get("fill") else "bg-transparent" for bp in BPS}),
              _borders(at),
              _resp({bp: f"rounded-[{at[bp]['radius']}px]" if at[bp].get("radius") else "rounded-none" for bp in BPS}),
-             _resp({bp: "shadow-sm" if at[bp].get("shadow") else "shadow-none" for bp in BPS})]
+             _resp({bp: _shadow(at[bp]) for bp in BPS})]
     texts = [ch for ch in c.children if ch.kind == "text"]
     if getattr(c, "glyph", None) == "plus":
         t = _resp({bp: f"h-[{at[bp].get('thick', 2)}px]" for bp in BPS})
@@ -765,6 +775,7 @@ def _decorations(items: list[Item]) -> list[Item]:
         return False
 
     deco = {id(c) for c in leaves if sum(partial(c, bp) for bp in c.at) * 2 > len(c.at)}
+    partial_ids = set(deco)
     import math
     groups: dict = {}
     for c in leaves:   # style + size class: grey image placeholders, icons and tiles share a colour
@@ -795,8 +806,83 @@ def _decorations(items: list[Item]) -> list[Item]:
                     behind = True
             if behind:
                 deco |= {id(c) for c in lone}
+    # layers: a single large solid block partly overlapping text (a portrait over the name) is not a pattern — it is
+    # kept, positioned in its band (_layer_lines); pattern groups (≥ 8 of a style) stay decoration
+    def near_bg(c, bp, tol=16):
+        f, b = c.at[bp].get("fill"), BGS.get(bp)
+        if not f or not b or len(f) != 7 or len(b) != 7:
+            return False
+        return max(abs(int(f[i:i + 2], 16) - int(b[i:i + 2], 16)) for i in (1, 3, 5)) <= tol
+
+    grouped = {id(c) for g in groups.values() if len(g) >= 8 for c in g}
+    big = lambda c: all(c.at[bp]["box"][2] * c.at[bp]["box"][3] >= LAYER_MIN_AREA * W[bp] * VH[bp] for bp in c.at)
+    layers = [c for c in leaves if id(c) in partial_ids and id(c) not in grouped and big(c)
+              and all(c.at[bp].get("fill") and not near_bg(c, bp) for bp in c.at)]   # stands out from the page
+    deco -= {id(c) for c in layers}
+    merged = []     # one picture split across frames by the matcher (text-free boxes pair loosely): one layer
+    for L in sorted(layers, key=lambda c: -len(c.at)):
+        same = lambda M: (not (set(M.at) & set(L.at)) and
+                          {M.at[b].get("fill") for b in M.at} == {L.at[b].get("fill") for b in L.at} and
+                          abs(_rel_cx(M) - _rel_cx(L)) <= 0.1)
+        host = next((M for M in merged if same(M)), None)
+        if host:
+            host.at.update(L.at)
+        else:
+            merged.append(L)
+    gone = {id(c) for c in layers} - {id(c) for c in merged}
+    layers = merged
+
+    def hugs(c, L, bp, m=60):     # within m px of the layer's box
+        a, b = c.at[bp]["box"], L.at[bp]["box"]
+        return (a[0] < b[0] + b[2] + m and b[0] - m < a[0] + a[2] and a[1] < b[1] + b[3] + m and b[1] - m < a[1] + a[3]
+                and a[2] * a[3] < b[2] * b[3])
+    lids = {id(L) for L in layers}
+    for c in items:     # a layer's soft shadow, measured as faint slivers beside it
+        if c.kind == "block" and not c.children and id(c) not in lids and any(
+                bp in L.at and near_bg(c, bp, 28) and hugs(c, L, bp) for L in layers for bp in c.at):
+            deco.add(id(c))
+    STATE["layers"] = layers
     STATE["decorations_dropped"] = len(deco)
-    return [c for c in items if id(c) not in deco]
+    return [c for c in items if id(c) not in deco and id(c) not in lids and id(c) not in gone]
+
+
+def _rel_cx(c: Item) -> float:
+    return sum((c.at[bp]["box"][0] + c.at[bp]["box"][2] / 2) / W[bp] for bp in c.at) / len(c.at)
+
+
+def _layer_bands(L: Item, bands: list) -> dict:
+    """{band index: frames} — in each frame the band whose content holds the layer's top edge there (else the last
+    band starting above it in that frame)."""
+    out: dict = {}
+    for bp in L.at:
+        y = L.at[bp]["box"][1]
+        hold = [k for k, b in enumerate(bands) if (u := _union(b, bp)) and u[1] - 2 <= y <= u[1] + u[3]]
+        above = [k for k, b in enumerate(bands) if (u := _union(b, bp)) and u[1] <= y]
+        k = hold[0] if hold else above[-1] if above else next((k for k, b in enumerate(bands) if _union(b, bp)), None)
+        if k is not None:
+            out.setdefault(k, set()).add(bp)
+    return out
+
+
+def _layer_lines(L: Item, band_top: dict, indent: int, only: set | None = None) -> list[str]:
+    """A layer: absolutely positioned in its (relative) band, text-free; centred when centred in every frame.
+    only: the frames this band shows it in (another band holds it in the others)."""
+    pad = "  " * indent
+    vis = {bp: bp in L.at and band_top.get(bp) is not None and (only is None or bp in only) for bp in BPS}
+    at = {bp: dict(L.at.get(bp) or L.at[next(iter(L.at))]) for bp in BPS}
+    radii = [a["radius"] for a in L.at.values() if a.get("radius")]
+    for bp in BPS:      # a shadow can spoil one frame's corner measurement: the others' radius
+        if not at[bp].get("radius") and radii:
+            at[bp]["radius"] = round(sum(radii) / len(radii))
+    box = {bp: at[bp]["box"] for bp in BPS}
+    centred = all(abs(box[bp][0] + box[bp][2] / 2 - W[bp] / 2) <= 4 for bp in L.at)
+    horiz = "left-1/2 -translate-x-1/2" if centred else _resp({bp: f"left-[{box[bp][0]}px]" for bp in BPS})
+    top = _resp({bp: f"top-[{box[bp][1] - (band_top.get(bp) or 0)}px]" for bp in BPS})
+    style = [_resp({bp: f"bg-[{at[bp]['fill']}]" for bp in BPS}), _borders(at),
+             _resp({bp: f"rounded-[{at[bp]['radius']}px]" if at[bp].get("radius") else "rounded-none" for bp in BPS}),
+             _resp({bp: _shadow(at[bp]) for bp in BPS})]
+    size = [_resp({bp: f"w-[{box[bp][2]}px]" for bp in BPS}), _resp({bp: f"h-[{box[bp][3]}px]" for bp in BPS})]
+    return [f'{pad}<div aria-hidden="true" className="{_j([_disp(vis, "block"), "absolute", horiz, top, *size, *style])}" />']
 
 
 def _glyphs(items: list[Item]) -> list[Item]:
@@ -1216,6 +1302,8 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
     deterministic hamburger toggle (off when the interaction writer provides the behaviour); fragment: return only
     the body's JSX lines (no root, no fold handling) — the content of an interaction panel (stage 3)."""
     SEGMENTS.clear()
+    BGS.clear()
+    BGS.update({bp: (spec["breakpoints"].get(bp) or {}).get("background") for bp in BPS})
     items = prepare(spec)
     intents = intents or {}
     if intents.get("cards"):
@@ -1232,7 +1320,7 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
             flat.append(it)
             walk(it.children)
     walk(roots)
-    keep = {k: STATE[k] for k in ("plan_fixes", "decorations_dropped") if k in STATE}
+    keep = {k: STATE[k] for k in ("plan_fixes", "decorations_dropped", "layers") if k in STATE}
     STATE.clear()
     STATE.update({"all": flat, "intents": intents, "bands": [], "triggers": resolved, **keep})
 
@@ -1275,6 +1363,11 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
             break
     body, tail = bands[:tail_start], bands[tail_start:]
     prev_bottom = {bp: 0 for bp in BPS}
+    layers = [] if fragment else STATE.get("layers") or []
+    layer_at: dict = {}
+    for L in layers:
+        for k, bps in _layer_bands(L, bands).items():
+            layer_at.setdefault(id(bands[k]), []).append((L, bps))
 
     def emit_band(k, band, indent):
         pad = "  " * indent
@@ -1301,11 +1394,16 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
         sid = _seg("band", band, 0)
         STATE["bands"].append({"band": k, "sig": sig, "texts": [t for t in SEGMENTS[-1]["texts"][:4]],
                                "boxes": {bp: ub[bp] for bp in BPS if ub[bp]}, "container": {bp: cont[bp]["maxw"] for bp in BPS}})
-        lines = [f'{pad}<div data-seg="{sid}" className="flow-root w-full {bg_fill} {min_h} {_resp({bp: _px("mt", mt[bp]) for bp in BPS})} '
+        mine = layer_at.get(id(band), [])
+        rel = " relative" if mine else ""
+        lines = [f'{pad}<div data-seg="{sid}" className="flow-root w-full{rel} {bg_fill} {min_h} {_resp({bp: _px("mt", mt[bp]) for bp in BPS})} '
                  f'{_resp({bp: _px("pt", pt[bp]) for bp in BPS})}">',
                  f'{pad}  <div className="w-full {_rc(cont)}">']
         lines += _layout(content, frames, indent + 2)
-        lines += [f"{pad}  </div>", f"{pad}</div>"]
+        lines += [f"{pad}  </div>"]
+        for L, bps in mine:      # after the content: painted above it, as in the design
+            lines += _layer_lines(L, {bp: (bb[bp][1] if bb[bp] else None) for bp in BPS}, indent + 1, bps)
+        lines += [f"{pad}</div>"]
         for bp in BPS:
             if bb[bp]:
                 prev_bottom[bp] = bb[bp][1] + bb[bp][3]

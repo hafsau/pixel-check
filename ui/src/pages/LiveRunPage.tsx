@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Run } from '../lib/types';
 import { Link } from '../lib/router';
 import { useLoad } from '../lib/data';
+import { normalizeRun } from '../lib/owned';
 import { apiBase, failureNotice, liveFilesBase, resolveAsset, runDuration, sourceHost, stageProgress, type LiveStatus, type PollState, type StageState } from '../lib/live';
 import { useLivePoll } from '../lib/liveApi';
 import { fmtSecs, fmtUsd } from '../lib/format';
@@ -24,7 +25,7 @@ function LiveResult({ id, result, usd, source }: { id: string; result: boolean; 
   const run = useLoad<Run>(async () => {
     const res = await fetch(`${base}run.json`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`The result bundle could not be loaded (${res.status}).`);
-    return (await res.json()) as Run;
+    return normalizeRun((await res.json()) as Run);
   }, [base]);
   if (run.status === 'loading') return <Loading label="Loading the result…" />;
   if (run.status === 'error') return <ErrorView title="Could not load this live run" detail={run.error} />;

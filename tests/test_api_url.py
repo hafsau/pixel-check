@@ -146,6 +146,12 @@ def capture_with(meta_extra):
     ({"navigation": {"server_ip": "10.0.0.7"}}, "public"),
     ({"page": {"title": "Sign in to your Chase account", "site_name": ""}}, "banking"),
     ({"navigation": {"final_url": "https://example.com/x?session=1"}}, "private"),
+    # Phase 2: sizes are captured in parallel and each records where it ended up (a redirect at one width only)
+    ({"navigation": {"final_urls": ["https://example.com/pricing", "https://www.chase.com/"]}}, "banking"),
+    ({"navigation": {"final_urls": ["https://example.com/pricing", "http://10.0.0.8/admin"]}}, "public"),
+    ({"navigation": {"server_ips": ["93.184.216.34", "192.168.1.4"]}}, "public"),
+    ({"navigation": {"server_ips": ["not-an-ip"]}}, "public"),
+    ({"pages": [{"title": "Studio", "site_name": ""}, {"title": "PayPal: log in", "site_name": ""}]}, "payment"),
 ])
 def test_refusals_after_the_capture(tmp_path, extra, word):
     PUBLIC.setdefault("www.chase.com", ["93.184.216.34"])
@@ -213,3 +219,84 @@ def test_optional_url_allow_list(tmp_path):
     assert post(c, url="https://hafsausmani.com/").status_code == 202
     r = post(c, url="https://example.com/")
     assert r.status_code == 422 and "only" in r.text.lower()
+
+
+# Phase 2: owned sites (settings "owned_hosts") get a real screenshot and their own images; other pages do not
+def recording_capture(calls):
+    def cap(url, run_dir, emit, **kw):
+        calls.append((url, kw))
+        return fake_capture(url, run_dir, emit)
+    return cap
+
+
+@pytest.mark.parametrize("url,owned", [("https://example.com/", True), ("https://www.example.com/x", True),
+                                       ("https://www.example.org/", False)])
+def test_owned_hosts_capture_with_real_screenshots_and_images(tmp_path, url, owned):
+    PUBLIC.setdefault("www.example.com", ["93.184.216.34"])
+    calls = []
+    c = client(tmp_path, capture=recording_capture(calls), owned_hosts=["example.com"])
+    wait_done(c, post(c, url=url).json()["id"])
+    assert calls and calls[0][1] == ({"owned": True} if owned else {})
+
+
+def test_no_owned_hosts_means_plain_capture(tmp_path):
+    calls = []
+    c = client(tmp_path, capture=recording_capture(calls))
+    wait_done(c, post(c).json()["id"])
+    assert calls[0][1] == {}
+
+
+def test_save_owned_keeps_only_verified_files(tmp_path):
+    import hashlib
+    import io
+    import json
+    from PIL import Image
+    from orchestrator.api import _save_owned
+    b = io.BytesIO()
+    Image.new("RGB", (390, 844), "white").save(b, "PNG")
+    real = b.getvalue()
+    img = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(img, "PNG")
+    img = img.getvalue()
+    h = hashlib.sha256(img).hexdigest()
+    man = {"assets": [{"hash": h, "ext": "png", "kind": "img", "bytes": len(img), "alt": "", "boxes": {"mobile": [[0, 0, 8, 8]]}}]}
+    got = {"mobile.real.png": real, "tablet.real.png": b"not a png", "assets.json": json.dumps(man).encode(),
+           f"assets/{h}.png": img, "../escape.png": real, "assets/../../x.png": img}
+    _save_owned(got, tmp_path)
+    assert (tmp_path / "real" / "mobile.png").read_bytes() == real
+    assert not (tmp_path / "real" / "tablet.png").exists()
+    assert (tmp_path / "assets" / f"{h}.png").read_bytes() == img
+    assert json.loads((tmp_path / "assets.json").read_text())["assets"][0]["hash"] == h
+    assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == sorted(["mobile.png", f"{h}.png", "assets.json"])
+
+
+def test_files_endpoint_serves_assets_with_safe_headers(tmp_path):
+    c = client(tmp_path)
+    rid = post(c).json()["id"]
+    wait_done(c, rid)
+    d = tmp_path / rid / "bundle" / "assets"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / ("a" * 64 + ".svg")).write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    r = c.get(f"/api/runs/{rid}/files/assets/{'a' * 64}.svg")
+    assert r.status_code == 200
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert "default-src 'none'" in r.headers["content-security-policy"]
+
+
+def test_owned_site_header_says_so_and_covers_the_delivered_code(tmp_path):
+    def pipe(run_id, frames, run_dir, emit):
+        for sub in ("c/c1", "display"):
+            d = run_dir / "bundle" / sub
+            d.mkdir(parents=True)
+            (d / "App.jsx").write_text("export default function App() { return null; }\n")
+        (run_dir / "bundle" / "run.json").write_text("{}")
+        return {"match": 80.0}
+    from orchestrator.api import create_app
+    c = TestClient(create_app(pipeline=pipe, capture=recording_capture([]), resolver=resolver, live_dir=tmp_path,
+                              settings={"enabled": True, "passcode": "letmein", "daily": 10, "total": 40, "origins": [],
+                                        "owned_hosts": ["example.com"]}))
+    rid = post(c).json()["id"]
+    wait_done(c, rid)
+    for path in ("c/c1/App.jsx", "display/App.jsx"):
+        code = c.get(f"/api/runs/{rid}/files/{path}").text
+        assert code.startswith("// Generated by PixelCheck from example.com (an owned site)") and "third-party" not in code

@@ -57,6 +57,15 @@ describe('zipStore (STORE, no compression)', () => {
     expect(list).toMatch(/10-05-2026 14:30/);
   });
 
+  it('is binary-safe: every byte value (e.g. a PNG asset) round-trips', () => {
+    const bin = new Uint8Array(4096);
+    for (let i = 0; i < bin.length; i++) bin[i] = (i * 37 + (i >> 8)) & 0xff;
+    bin.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0); // PNG signature incl. CR LF / SUB
+    const f = writeTmp(zipStore([{ path: `public/assets/${'c'.repeat(64)}.png`, data: bin }, { path: 'a.txt', data: 'x' }]));
+    expect(execFileSync('unzip', ['-p', f, `public/assets/${'c'.repeat(64)}.png`]).equals(Buffer.from(bin))).toBe(true);
+    expect(execFileSync('unzip', ['-t', f]).toString()).toMatch(/No errors detected/);
+  });
+
   it('handles an empty archive', () => {
     const z = zipStore([]);
     expect(z.length).toBe(22);

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import time
@@ -62,7 +63,9 @@ def _page_of(design_dir: Path) -> str:
 
 
 def export(run_dir: Path, design_dir: Path, title: str | None = None, label: str | None = None,
-           index: bool = True, out_root: Path | None = None) -> Path:
+           index: bool = True, out_root: Path | None = None, owned: Path | None = None) -> Path:
+    """owned: an owned site's run folder holding real/<bp>.png and assets/ (with run_dir/display.jsx = the delivered
+    code, grey blocks swapped for the page's own images — orchestrator/assets.py)."""
     events = [json.loads(l) for l in (run_dir / "trace.jsonl").read_text().splitlines() if l.strip()]
     result = json.loads((run_dir / "result.json").read_text())
     start = next((e for e in events if e["kind"] == "run_start"), {})
@@ -136,6 +139,24 @@ def export(run_dir: Path, design_dir: Path, title: str | None = None, label: str
                    "round": _round_at(events, e.get("t"))}
                   for e in events if e["kind"] == "llm"],
     }
+    run["display"], run["real"] = None, None
+    if owned:
+        owned = Path(owned)
+        disp = run_dir / "display.jsx"
+        if disp.exists():
+            code = disp.read_text()
+            used = sorted(set(re.findall(r'src="/assets/([0-9a-f]{64}\.(?:png|jpg|gif|webp|avif|svg))"', code)))
+            (out / "display").mkdir(parents=True, exist_ok=True)
+            (out / "display" / "App.jsx").write_text(code)
+            (out / "assets").mkdir(exist_ok=True)
+            for name in used:
+                if (owned / "assets" / name).is_file():
+                    shutil.copy(owned / "assets" / name, out / "assets" / name)
+            run["display"] = {"code": "display/App.jsx", "assets": [f"assets/{n}" for n in used],
+                              "images": len(re.findall(r'<img data-pc="\d+" src="/assets/', code)),
+                              "candidate": result.get("best")}
+        real = {bp: image(owned / "real" / f"{bp}.png", out, f"real/{bp}") for bp, _, _ in BPS}
+        run["real"] = {bp: rel for bp, rel in real.items() if rel} or None
     (out / "run.json").write_text(json.dumps(run, indent=1))
     if index:
         best = next((c for c in cands if c["id"] == run["result"]["best"]), None)

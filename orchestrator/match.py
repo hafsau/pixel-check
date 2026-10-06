@@ -42,7 +42,19 @@ def _compatible(a: dict, b: dict) -> bool:
     fa, fb = a.get("fill") or "#000000", b.get("fill") or "#000000"
     if len(fa) != 7 or len(fb) != 7:
         return fa == fb
+    if _media(fa) != _media(fb):      # the capture's image placeholder is its own kind of box
+        return False
+    ba, bb = a["box"], b["box"]
+    if sa[2] == "-" and min(ba[2], ba[3], bb[2], bb[3]) > 0:     # not rules: a similar shape (aspect within 5×)
+        ra, rb = ba[2] / ba[3], bb[2] / bb[3]
+        if max(ra, rb) / min(ra, rb) > 5:
+            return False
     return sum(abs(int(fa[i:i + 2], 16) - int(fb[i:i + 2], 16)) for i in (1, 3, 5)) <= 72
+
+
+def _media(f: str) -> bool:
+    """The capture's media placeholder grey #d4d4d8 (within measurement noise)."""
+    return max(abs(int(f[i:i + 2], 16) - v) for i, v in ((1, 0xD4), (3, 0xD4), (5, 0xD8))) <= 4
 
 
 def _gap(a, b) -> float:
@@ -116,7 +128,8 @@ def rematch_textfree(items: list[Item]) -> list[Item]:
                 # same-style group of equal size in both frames (6 tiles here, 6 there): reading-order rank agrees
                 rr = _ranks([x[ref] for x in clusters if ref in x])
                 ri, rj = rank_here[id(o)], rr.get(id(cl[ref]))
-                if rj and ri[0] == rj[0] and ri[1] == rj[1] and ri[2] == rj[2]:
+                # (never for boxes that are not alike: a picture and a thin line share a coarse colour bin)
+                if rj and ri[0] == rj[0] and ri[1] == rj[1] and ri[2] == rj[2] and _compatible(cl[ref], o):
                     c = min(c, 0.8)
                 C[i, j] = c
         rows, cols = linear_sum_assignment(C)

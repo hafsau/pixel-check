@@ -41,3 +41,35 @@ def test_export_into_a_given_folder_leaves_the_replay_index_alone(tmp_path, monk
     assert r["result"]["match"] == 80.0 and r["candidates"][0]["renders"]["mobile"].startswith("c/c1/mobile")
     assert (out / r["candidates"][0]["renders"]["mobile"]).exists() and (out / "c" / "c1" / "App.jsx").exists()
     assert not (tmp_path / "replays").exists()                                 # nothing written to the replay set
+
+
+def test_export_adds_the_delivered_code_its_images_and_the_real_screenshots(tmp_path, monkeypatch):
+    """Owned sites: display.jsx (grey blocks → the page's own images) + the assets it uses + real screenshots."""
+    import export_common
+    import export_run
+    monkeypatch.setattr(export_common, "RUNS", tmp_path / "replays")
+    run = fake_run(tmp_path)
+    h = "a" * 64
+    (run / "display.jsx").write_text(f'export default function App(){{return <img data-pc="1" src="/assets/{h}.png" alt="" />}}')
+    owned = tmp_path / "owned"
+    (owned / "assets").mkdir(parents=True)
+    (owned / "assets" / f"{h}.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 20)
+    (owned / "assets" / ("b" * 64 + ".png")).write_bytes(b"\x89PNG\r\n\x1a\n" + b"1" * 20)   # not used → not copied
+    (owned / "real").mkdir()
+    Image.new("RGB", (390, 844), "red").save(owned / "real" / "mobile.png")
+    out = export_run.export(run, tmp_path / "frames", index=False, out_root=tmp_path / "bundle", owned=owned)
+    r = json.loads((out / "run.json").read_text())
+    assert r["display"] == {"code": "display/App.jsx", "assets": [f"assets/{h}.png"], "images": 1, "candidate": "c1"}
+    assert (out / "display" / "App.jsx").read_text().startswith("export default")
+    assert (out / "assets" / f"{h}.png").exists() and not (out / "assets" / ("b" * 64 + ".png")).exists()
+    assert r["real"] == {"mobile": "real/mobile.webp"} and (out / "real" / "mobile.webp").exists()
+
+
+def test_export_without_owned_material_has_no_display_or_real(tmp_path, monkeypatch):
+    import export_common
+    import export_run
+    monkeypatch.setattr(export_common, "RUNS", tmp_path / "replays")
+    run = fake_run(tmp_path)
+    out = export_run.export(run, tmp_path / "frames", index=False, out_root=tmp_path / "bundle")
+    r = json.loads((out / "run.json").read_text())
+    assert r.get("display") is None and r.get("real") is None

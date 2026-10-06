@@ -3,6 +3,8 @@
 // content scope, fontFamily sans = Inter, mono = IBM Plex Mono, nothing else; fonts as in the in-app preview.
 import { PREVIEW_CDN } from './previewDoc';
 import { fmtScore } from './score';
+import { ASSET_RE } from './owned';
+import type { ZipEntry } from './zip';
 
 export interface ProjectMeta {
   id: string;
@@ -40,7 +42,17 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const isoDate = (unix: number) => new Date(unix * 1000).toISOString().slice(0, 10);
 
-export function projectFiles(code: string, meta: ProjectMeta): ProjectFile[] {
+/** What the zip does with images: grey placeholders (every run without owned images), the site's own images under
+ * public/assets/, or placeholders because those images could not be downloaded. */
+export type ImagesMode = 'placeholder' | 'own' | 'fallback';
+
+const IMAGES_NOTE: Record<ImagesMode, string> = {
+  placeholder: '- Images are placeholders (plain blocks) — PixelCheck rebuilds layout, colours and text, not image content.',
+  own: "- Images are your site's own, in `public/assets/` — PixelCheck scored the layout with grey blocks in their place.",
+  fallback: '- Images are placeholders (plain blocks): your site\'s images could not be downloaded, so this is the code as scored.',
+};
+
+export function projectFiles(code: string, meta: ProjectMeta, images: ImagesMode = 'placeholder'): ProjectFile[] {
   const name = `pixelcheck-${sanitizeId(meta.id)}`;
   const pkg = {
     name,
@@ -82,7 +94,7 @@ export function projectFiles(code: string, meta: ProjectMeta): ProjectFile[] {
     '',
     '## Notes',
     '',
-    '- Images are placeholders (plain blocks) — PixelCheck rebuilds layout, colours and text, not image content.',
+    IMAGES_NOTE[images],
     '- Fonts are Inter and IBM Plex Mono from Google Fonts: the fonts the code was verified with.',
     '- `tailwind.config.js` matches the PixelCheck sandbox renderer (same content scope and font families), so the',
     '  page builds the same way it was scored. Small differences in font rasterisation between browsers are normal.',
@@ -129,6 +141,45 @@ export function projectFiles(code: string, meta: ProjectMeta): ProjectFile[] {
     { path: 'README.md', content: readme },
     { path: '.gitignore', content: 'node_modules\ndist\n' },
   ];
+}
+
+/** Fetch one bundle asset as bytes. Rejects HTTP errors, empty bodies and HTML (a dev server's SPA fallback). */
+export async function fetchAssetBytes(url: string, fetchImpl: (u: string) => Promise<Response> = (u) => fetch(u)): Promise<Uint8Array> {
+  const res = await fetchImpl(url);
+  if (!res.ok) throw new Error(`${res.status} — ${url}`);
+  if (/text\/html/i.test(res.headers.get('content-type') ?? '')) throw new Error(`not an image — ${url}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!bytes.length) throw new Error(`empty — ${url}`);
+  return bytes;
+}
+
+/** Zip entries for the project. With delivered code (owned site) every asset is fetched into public/assets/ — Vite serves
+ * public/ at the root, so `/assets/x.png` works unchanged. If any asset fails, the whole zip falls back to the scored code. */
+export async function projectEntries(input: {
+  scored: string;
+  delivered: string | null;
+  assets: string[];
+  meta: ProjectMeta;
+  fetchAsset: (rel: string) => Promise<Uint8Array>;
+}): Promise<{ entries: ZipEntry[]; images: ImagesMode }> {
+  const plain = (code: string, images: ImagesMode, extra: ZipEntry[] = []) => ({
+    entries: [...projectFiles(code, input.meta, images).map((f) => ({ path: f.path, data: f.content })), ...extra],
+    images,
+  });
+  if (!input.delivered) return plain(input.scored, 'placeholder');
+  const rels = [...new Set(input.assets.filter((a) => ASSET_RE.test(a)))];
+  try {
+    const files = await Promise.all(
+      rels.map(async (rel) => {
+        const data = await input.fetchAsset(rel);
+        if (!data?.length) throw new Error(`empty — ${rel}`);
+        return { path: `public/${rel}`, data };
+      }),
+    );
+    return plain(input.delivered, 'own', files);
+  } catch {
+    return plain(input.scored, 'fallback');
+  }
 }
 
 /** Fallback widths when a bundle does not list its breakpoints. */

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Group, IndexEntry, Interaction, Run } from './types';
 import { normalizeIndex } from './bundle';
+import { codeSources, combineCode, normalizeRun, type BestCode } from './owned';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 
@@ -53,9 +54,22 @@ export function useGroup(id: string): Load<Group> {
 }
 
 export function useRun(id: string): Load<Run> {
-  return useLoad(() => getJson<Run>(runAsset(id, 'run.json')), [id]);
+  return useLoad(async () => normalizeRun(await getJson<Run>(runAsset(id, 'run.json'))), [id]);
 }
 
 export function useText(url: string | null): Load<string> {
   return useLoad(() => (url ? getText(url) : Promise.resolve('')), [url]);
+}
+
+/** The best candidate's scored App.jsx and, for owned sites, the delivered one (images back in place). */
+export function useBestCode(run: Run, asset: (rel: string) => string): BestCode {
+  const src = codeSources(run);
+  const scored = useText(src.scored ? asset(src.scored) : null);
+  const delivered = useText(src.delivered ? asset(src.delivered) : null);
+  return combineCode(scored, delivered);
+}
+
+/** Bundle path → absolute URL, for images inside the preview iframe (srcdoc document) and for zip downloads. */
+export function useAbsAsset(asset: (rel: string) => string): (rel: string) => string {
+  return useCallback((rel: string) => new URL(asset(rel), window.location.href).href, [asset]);
 }

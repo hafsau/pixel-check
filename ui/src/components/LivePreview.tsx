@@ -16,13 +16,13 @@ const VIEW_H = 800;
  * When the chosen width is wider than the page, the iframe is scaled down visually —
  * its layout width (and so Tailwind's breakpoints) stays the chosen width.
  */
-export function LivePreview({ code }: { code: string }) {
+export function LivePreview({ code, assetUrl }: { code: string; assetUrl?: (rel: string) => string }) {
   const [width, setWidth] = useState(390);
   const [avail, setAvail] = useState(1200);
   const [dragging, setDragging] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; w: number; scale: number } | null>(null);
-  const doc = useMemo(() => buildPreviewDoc(code), [code]);
+  const doc = useMemo(() => buildPreviewDoc(code, { assetUrl }), [code, assetUrl]);
 
   useEffect(() => {
     const el = stage.current;

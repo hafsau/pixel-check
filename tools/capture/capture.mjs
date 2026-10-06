@@ -8,12 +8,17 @@
 //            runtime image has them in /opt/pc/fonts)
 //   --oracle also dump <bp>.oracle.json (exact text lines + computed styles + painted boxes from the live DOM) and
 //            <bp>.notext.png (text made transparent) — the oracle spec for error attribution (tools/oracle_spec.py)
+//   --wait   the most to wait for the layout to settle (no DOM change / new resource for 500 ms); sizes run in parallel
+//   --assets also save the page's own images (assets/<sha256>.<ext>, checked by signature; inline SVG icons sanitised)
+//            and assets.json with every occurrence's box per size — for owned sites only (the live API decides)
+//   --real   also save <bp>.real.png: the page as it looks (own fonts and media), loaders / cookie bars hidden
 import { chromium } from "playwright";
 import dns from "node:dns/promises";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
@@ -63,6 +68,10 @@ function replaceMedia() {
   const decorative = (n) => {
     const cs = getComputedStyle(n);
     if (Number(cs.opacity) < 0.5 || n.getAttribute("aria-hidden") === "true" && n.tagName !== "svg") return true;
+    // large graphics inside an aria-hidden wrapper (waves, section dividers, backdrops); icons stay blocks
+    const r = n.getBoundingClientRect();
+    if (n.parentElement?.closest('[aria-hidden="true"]') &&
+        (r.width >= innerWidth * 0.5 || r.width * r.height >= innerWidth * innerHeight * 0.05)) return true;
     for (let a = n; a && a !== document.body; a = a.parentElement) {
       const p = getComputedStyle(a).position;
       if ((p === "absolute" || p === "fixed") && !a.innerText?.trim()) return true;
@@ -85,6 +94,73 @@ function replaceMedia() {
     n.replaceWith(d);
   }
   return nodes.length;
+}
+
+// Owned-site images (--assets): every visible <img> (its current source) and inline <svg> icon, with its box in page
+// coordinates. SVGs are serialised with currentColor resolved; the bytes of <img>s come from the page's own responses.
+function collectAssets() {
+  const out = [];
+  for (const n of document.querySelectorAll("img, svg")) {
+    if (n.tagName.toLowerCase() === "svg" && n.parentElement?.closest("svg")) continue;
+    const r = n.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) continue;
+    const box = [r.x + scrollX, r.y + scrollY, r.width, r.height].map(Math.round);
+    if (n.tagName.toLowerCase() === "img") { out.push({ kind: "img", src: n.currentSrc || n.src, box, alt: (n.alt || "").trim().slice(0, 200) }); continue; }
+    const c = n.cloneNode(true);
+    const color = getComputedStyle(n).color;
+    c.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    c.setAttribute("width", String(Math.round(r.width)));
+    c.setAttribute("height", String(Math.round(r.height)));
+    c.removeAttribute("class"); c.removeAttribute("style");
+    for (const e of [c, ...c.querySelectorAll("*")])
+      for (const a of [...e.attributes]) if (/currentcolor/i.test(a.value)) e.setAttribute(a.name, a.value.replace(/currentcolor/gi, color));
+    if (!c.getAttribute("fill") && !/fill=/.test(c.innerHTML)) c.setAttribute("fill", color);
+    out.push({ kind: "svg", markup: c.outerHTML, box });
+  }
+  return out;
+}
+
+const SIG = [["png", (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))],
+             ["jpg", (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
+             ["gif", (b) => b.subarray(0, 4).toString("latin1") === "GIF8"],
+             ["webp", (b) => b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP"],
+             ["avif", (b) => b.subarray(4, 12).toString("latin1") === "ftypavif"]];
+const sniff = (b) => (SIG.find(([, ok]) => b.length > 12 && ok(b)) || [null])[0];
+const UNSAFE_SVG = /<script|<foreignobject|<iframe|<use[^>]+href\s*=\s*["'](?!#)|\son\w+\s*=|(?:xlink:)?href\s*=\s*["']\s*(?:javascript|data|https?):/i;
+const ASSET_MAX = 5e6, ASSET_COUNT = 60;
+const assets = new Map();                 // hash → {hash, ext, kind, boxes: {bp: [[x, y, w, h], …]}}
+function addAsset(bp, ext, kind, bytes, box, alt = "") {
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  if (!assets.has(hash)) {
+    if (assets.size >= ASSET_COUNT) return;
+    fs.mkdirSync(path.join(outDir, "assets"), { recursive: true });
+    fs.writeFileSync(path.join(outDir, "assets", `${hash}.${ext}`), bytes);
+    assets.set(hash, { hash, ext, kind, bytes: bytes.length, alt: "", boxes: {} });
+  }
+  if (alt && !assets.get(hash).alt) assets.get(hash).alt = alt;
+  (assets.get(hash).boxes[bp] ||= []).push(box);
+}
+
+// Full-screen loaders (fixed, topmost over most of the viewport, ≤ 3 words) and cookie / consent bars are hidden:
+// they are not the page. A fixed background layer stays (content paints above it, so it is not topmost).
+function hideOverlays() {
+  const vw = innerWidth, vh = innerHeight;
+  const pts = [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]].map(([x, y]) => [x * vw, y * vh]);
+  let hidden = 0;
+  for (const el of [...document.body.querySelectorAll("*")]) {
+    const cs = getComputedStyle(el);
+    if (cs.position !== "fixed" || cs.display === "none") continue;
+    const r = el.getBoundingClientRect();
+    const area = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+    const text = (el.innerText || "").trim();
+    const words = text ? text.split(/\s+/).length : 0;
+    const top = pts.filter(([x, y]) => { const h = document.elementFromPoint(x, y); return h && el.contains(h); }).length;
+    const loader = area >= 0.6 * vw * vh && top >= 4 && words <= 3;
+    const consent = area < 0.6 * vw * vh &&
+      /\b(we use cookies|this (site|website) uses cookies|accept (all )?cookies|cookie (settings|preferences)|consent)\b/i.test(text);
+    if (loader || consent) { el.style.setProperty("display", "none", "important"); hidden++; }
+  }
+  return hidden;
 }
 
 // Oracle: what the frame shows, from the DOM (runs in the page). Text: one item per text node (or input placeholder),
@@ -239,6 +315,8 @@ function oracleDom([vw, vh]) {
 // live mode (--block-private): never reach localhost / private / link-local / reserved addresses — checked for the
 // redirect chain before the browser goes (preflight) and for every request the page makes (route + DNS lookup)
 const BLOCK_PRIVATE = process.argv.includes("--block-private");
+const ASSETS = process.argv.includes("--assets");  // also save the page's own images → assets/ + assets.json
+const REAL = process.argv.includes("--real");     // also save {bp}.real.png: the page as it looks (own fonts, media)
 const blocked = new Set();
 
 function privateIp(ip) {
@@ -316,12 +394,31 @@ if (BLOCK_PRIVATE) {
   try { preHops = await preflight(url); }
   catch (e) { console.error(String(e.message || e)); process.exit(3); }
 }
+// "layout settled": no DOM change and no new resource for QUIET_MS, at most maxMs (the old fixed wait, now a cap)
+const QUIET_MS = 500;
+async function settle(page, maxMs) {
+  await page.evaluate(async ([quiet, max]) => {
+    let last = performance.now();
+    const bump = () => { last = performance.now(); };
+    const mo = new MutationObserver(bump);
+    mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+    let po = null;
+    try { po = new PerformanceObserver(bump); po.observe({ type: "resource" }); } catch (e) { /* not supported */ }
+    const t0 = performance.now();
+    while (performance.now() - t0 < max && performance.now() - last < quiet)
+      await new Promise((r) => setTimeout(r, 50));
+    mo.disconnect();
+    if (po) po.disconnect();
+  }, [Math.min(QUIET_MS, maxMs), maxMs]);
+}
+
 const browser = await chromium.launch();
 const meta = { slug, url, captured_at: new Date().toISOString(), dev_only: true, breakpoints: {},
                sensitive: { password: 0, payment: 0, signin: 0, crypto: 0 } };
+const navs = {};                         // per size: where it went (a page may redirect at one width only)
 try {
-  for (const [bp, [w, h]] of Object.entries(BPS)) {
-    if (ONLY.length && !ONLY.includes(bp)) continue;
+  // the three sizes in parallel, one browser context each
+  await Promise.all(Object.entries(BPS).filter(([bp]) => !ONLY.length || ONLY.includes(bp)).map(async ([bp, [w, h]]) => {
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
     const page = await ctx.newPage();
     if (BLOCK_PRIVATE) {
@@ -332,25 +429,46 @@ try {
         return route.abort("blockedbyclient");
       });
     }
+    const bodies = new Map(), pending = [];
+    if (ASSETS) page.on("response", (resp) => {
+      if (resp.request().resourceType() !== "image") return;
+      pending.push(resp.body().then((b) => { if (b.length <= ASSET_MAX) bodies.set(resp.url(), b); }).catch(() => {}));
+    });
     // "networkidle" never comes on some pages (lambda.ai: background requests) — load, then idle if it comes
     const resp = await page.goto(url, { waitUntil: "load", timeout: 60000 });
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    if (!meta.navigation) {              // where the capture really went (checked again by the live API)
+    {                                    // where the capture really went (checked again by the live API)
       const chain = [];
       for (let r = resp && resp.request(); r; r = r.redirectedFrom()) chain.unshift(r.url());
       const addr = resp ? await resp.serverAddr().catch(() => null) : null;
-      meta.navigation = { final_url: page.url(), hops: preHops || (chain.length ? chain : [url]),
-                          server_ip: addr ? addr.ipAddress : null, blocked: [] };
-      meta.page = await page.evaluate(() => ({ title: document.title || "",
-        site_name: (document.querySelector('meta[property="og:site_name"]') || {}).content || "" }));
+      navs[bp] = { finals: [page.url()], hops: preHops || (chain.length ? chain : [url]),
+                   server_ip: addr ? addr.ipAddress : null,
+                   page: await page.evaluate(() => ({ title: document.title || "",
+                     site_name: (document.querySelector('meta[property="og:site_name"]') || {}).content || "" })) };
     }
     for (const f of page.frames()) {     // before media are replaced (an iframe becomes a grey block)
       const s2 = await f.evaluate(sensitiveScan).catch(() => null);
       if (s2) for (const k of Object.keys(s2)) meta.sensitive[k] = Math.max(meta.sensitive[k], s2[k]);
     }
+    await settle(page, extraWait);
+    const overlays = await page.evaluate(hideOverlays);
+    if (REAL) await page.screenshot({ path: path.join(outDir, `${bp}${STATE ? `.${STATE}` : ""}.real.png`), fullPage: false });
     await page.addStyleTag({ content: NORMALISE_CSS + (hideCss ? `${hideCss}{display:none!important}` : "") });
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForTimeout(extraWait);
+    await settle(page, Math.min(extraWait, 1000));     // the normalised fonts re-flow the page
+    if (ASSETS) {
+      const found = await page.evaluate(collectAssets);
+      await Promise.all(pending);
+      for (const a of found) {
+        if (a.kind === "img") {
+          const b = bodies.get(a.src);
+          const ext = b && sniff(b);
+          if (ext) addAsset(bp, ext, "img", b, a.box, a.alt);
+        } else if (a.markup.length <= 100000 && !UNSAFE_SVG.test(a.markup)) {
+          addAsset(bp, "svg", "svg", Buffer.from(a.markup, "utf8"), a.box);
+        }
+      }
+    }
     const replaced = await page.evaluate(replaceMedia);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(300);
@@ -369,11 +487,43 @@ try {
     // Ground-truth visible text inside the viewport (for scorer tests and VLM accuracy in G3).
     const texts = await page.evaluate(([vw, vh]) => {
       const out = [];
+      // split-text animations wrap each letter in its own element: ≥ 3 children of ≤ 2 characters and no text of
+      // the parent's own = ONE word on screen (the target string is the word, its box the letters' union)
+      const split = new Set();
+      for (const e of document.body.querySelectorAll("*")) {
+        const kids = [...e.children];
+        if (kids.length < 3 || [...e.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())) continue;
+        const lens = kids.map((k) => k.textContent.trim().length);
+        if (lens.every((l) => l <= 2) && lens.filter((l) => l > 0).length >= 3 && kids.every((k) => !k.children.length))
+          split.add(e);
+      }
+      const inSplit = (el) => el && split.has(el.parentElement);
+      for (const e of split) {
+        const cs = getComputedStyle(e);
+        if (cs.visibility === "hidden" || cs.display === "none" || Number(cs.opacity) === 0) continue;
+        const boxes = [...e.children].map((k) => k.getBoundingClientRect()).filter((r) => r.width >= 1 && r.height >= 1 &&
+          r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw);
+        if (!boxes.length) continue;
+        // letters joined as seen: a space only where the gap between letters looks like one (> 0.15 em)
+        const fs = parseFloat(cs.fontSize) || 16;
+        let raw = "", prev = null;
+        for (const k of e.children) {
+          const r = k.getBoundingClientRect(), ch = k.textContent.trim();
+          if (!ch) { continue; }
+          if (prev && r.left - prev.right > 0.15 * fs) raw += " ";
+          raw += ch;
+          prev = r;
+        }
+        const t = cs.textTransform === "uppercase" ? raw.toUpperCase() : cs.textTransform === "lowercase" ? raw.toLowerCase() : raw;
+        const x0 = Math.min(...boxes.map((r) => r.left)), y0 = Math.min(...boxes.map((r) => r.top));
+        const x1 = Math.max(...boxes.map((r) => r.right)), y1 = Math.max(...boxes.map((r) => r.bottom));
+        out.push({ text: t, box: [Math.round(x0), Math.round(y0), Math.round(x1 - x0), Math.round(y1 - y0)] });
+      }
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const raw = n.textContent.replace(/\s+/g, " ").trim();
         const el = n.parentElement;
-        if (!raw || !el) continue;
+        if (!raw || !el || inSplit(el)) continue;
         const cs = getComputedStyle(el);
         // ground truth = what is on screen: CSS text-transform applied (as in the oracle dump)
         const t = cs.textTransform === "uppercase" ? raw.toUpperCase() : cs.textTransform === "lowercase" ? raw.toLowerCase()
@@ -389,6 +539,7 @@ try {
     fs.writeFileSync(path.join(outDir, `${bp}${suffix}.text.json`), JSON.stringify(texts, null, 1));
     const file = path.join(outDir, `${bp}${suffix}.png`);
     await page.screenshot({ path: file, fullPage: false });
+    navs[bp].finals.push(page.url());    // a late script may have navigated after the first record
     if (ORACLE) {
       const dom = await page.evaluate(oracleDom, [w, h]);
       fs.writeFileSync(path.join(outDir, `${bp}${suffix}.oracle.json`), JSON.stringify(dom));
@@ -414,13 +565,25 @@ try {
       await page.waitForTimeout(100);
       await page.screenshot({ path: path.join(outDir, `${bp}${suffix}.bcoded.png`), fullPage: false });
     }
-    meta.breakpoints[bp] = { width: w, height: h, media_replaced: replaced };
+    meta.breakpoints[bp] = { width: w, height: h, media_replaced: replaced, overlays_hidden: overlays };
 
     console.log(`${slug} ${bp} ${w}x${h} media_replaced=${replaced}`);
     await ctx.close();
-  }
+  }));
 } finally {
   await browser.close();
 }
-if (meta.navigation) meta.navigation.blocked = [...blocked];
+const order = Object.keys(BPS).filter((bp) => navs[bp]);
+if (order.length) {
+  const uniq = (xs) => [...new Set(xs.filter((x) => x))];
+  const first = navs[order[0]];
+  meta.navigation = { final_url: first.finals[first.finals.length - 1],
+                      final_urls: uniq(order.flatMap((bp) => navs[bp].finals)),
+                      hops: uniq(order.flatMap((bp) => navs[bp].hops)),
+                      server_ip: first.server_ip, server_ips: uniq(order.map((bp) => navs[bp].server_ip)),
+                      blocked: [...blocked] };
+  meta.page = first.page;
+  meta.pages = order.map((bp) => navs[bp].page);
+}
 fs.writeFileSync(path.join(outDir, STATE ? `meta-${STATE}.json` : "meta.json"), JSON.stringify(meta, null, 2));
+if (ASSETS) fs.writeFileSync(path.join(outDir, "assets.json"), JSON.stringify({ assets: [...assets.values()] }, null, 1));

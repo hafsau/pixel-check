@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Breakpoint, Candidate } from '../lib/types';
 import type { Run } from '../lib/types';
-import { useRun, runAsset, useText } from '../lib/data';
+import { useRun, runAsset, useBestCode, useAbsAsset } from '../lib/data';
+import type { CodeVersion } from '../lib/owned';
 import { usePlayback } from '../lib/playback';
 import { Link, setHash, useHash } from '../lib/router';
 import { RUN_TABS, hashForTab, tabFromHash, type RunTab } from '../lib/viewTabs';
@@ -23,6 +24,8 @@ import { ViewTabs } from '../components/ViewTabs';
 import { LivePreview } from '../components/LivePreview';
 import { CodeViewer } from '../components/CodeViewer';
 import { DownloadProject, runProjectMeta } from '../components/DownloadProject';
+import { CodeVersionToggle } from '../components/CodeVersionToggle';
+import { SiteCompare } from '../components/SiteCompare';
 
 export function RunPage({ id }: { id: string }) {
   const r = useRun(id);
@@ -38,6 +41,7 @@ export function RunView({ run, asset, basePath, banner, sourceHost }: { run: Run
   const tab = tabFromHash(useHash());
   const pickTab = (t: RunTab) => setHash(hashForTab(t));
   const bps = run.breakpoints?.length ? run.breakpoints : [...DEFAULT_BPS];
+  const [version, setVersion] = useState<CodeVersion>('delivered'); // shared by Preview and Code
 
   return (
     <div className="page pt-6">
@@ -52,6 +56,7 @@ export function RunView({ run, asset, basePath, banner, sourceHost }: { run: Run
       />
 
       {banner}
+      <SiteCompare run={run} asset={asset} bps={bps} className="mt-5" />
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         <ViewTabs id="runview" label="Run view" tabs={RUN_TABS} value={tab} onChange={pickTab} />
         <p className="text-xs text-ink-muted">
@@ -62,7 +67,7 @@ export function RunView({ run, asset, basePath, banner, sourceHost }: { run: Run
         {tab === 'replay' ? (
           <ReplayPanel run={run} asset={asset} bps={bps} />
         ) : (
-          <BestCode run={run} asset={asset} bps={bps} tab={tab} sourceHost={sourceHost} />
+          <BestCode run={run} asset={asset} bps={bps} tab={tab} sourceHost={sourceHost} version={version} onVersion={setVersion} />
         )}
       </div>
     </div>
@@ -160,14 +165,27 @@ function ReplayPanel({ run, asset, bps }: { run: Run; asset: (rel: string) => st
   );
 }
 
-/** Preview / Code tabs: the best candidate's App.jsx, live in an iframe or as source with the project download. */
-function BestCode({ run, asset, bps, tab, sourceHost }: { run: Run; asset: (rel: string) => string; bps: Breakpoint[]; tab: 'preview' | 'code'; sourceHost?: string | null }) {
-  const best = run.candidates.find((c) => c.id === run.result.best) ?? null;
-  const code = useText(best?.code ? asset(best.code) : null);
+/** Preview / Code tabs: the best candidate's App.jsx, live in an iframe or as source with the project download.
+ * Owned sites default to the delivered code (their own images) with a toggle back to the code as scored. */
+function BestCode({ run, asset, bps, tab, sourceHost, version, onVersion }: { run: Run; asset: (rel: string) => string; bps: Breakpoint[]; tab: 'preview' | 'code'; sourceHost?: string | null; version: CodeVersion; onVersion: (v: CodeVersion) => void }) {
+  const code = useBestCode(run, asset);
+  const absAsset = useAbsAsset(asset);
   if (code.status === 'loading') return <p className="mt-6 text-sm text-ink-muted" role="status">Loading the code…</p>;
   if (code.status === 'error') return <ErrorView title="Could not load App.jsx" detail={code.error} />;
-  if (!code.data) return <p className="mt-6 text-sm text-ink-muted">The best candidate has no code in this bundle.</p>;
-  if (tab === 'preview') return <div className="mt-4"><LivePreview code={code.data} /></div>;
+  if (!code.scored) return <p className="mt-6 text-sm text-ink-muted">The best candidate has no code in this bundle.</p>;
+  const owned = code.delivered && run.display ? { code: code.delivered, assets: run.display.assets, asset } : null;
+  const showDelivered = !!owned && version === 'delivered';
+  const shown = showDelivered ? owned!.code : code.scored;
+  const toggle = owned ? <CodeVersionToggle value={version} onChange={onVersion} className="mt-4" /> : null;
+  if (tab === 'preview')
+    return (
+      <>
+        {toggle}
+        <div className="mt-4">
+          <LivePreview code={shown} assetUrl={showDelivered ? absAsset : undefined} />
+        </div>
+      </>
+    );
   return (
     <section aria-labelledby="code-title" className="card card-pad mt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -176,14 +194,15 @@ function BestCode({ run, asset, bps, tab, sourceHost }: { run: Run; asset: (rel:
             App.jsx
           </h2>
           <p className="mt-1 text-xs text-ink-muted">
-            Best candidate <code className="font-mono">{run.result.best}</code> · one responsive React + Tailwind file, exactly as it was scored. The project download
+            Best candidate <code className="font-mono">{run.result.best}</code> · one responsive React + Tailwind file{showDelivered ? '' : ', exactly as it was scored'}. The project download
             adds Vite, Tailwind (same config as the renderer) and a README.
           </p>
         </div>
-        <DownloadProject code={code.data} meta={runProjectMeta(run, sourceHost, bps)} />
+        <DownloadProject code={code.scored} owned={owned} meta={runProjectMeta(run, sourceHost, bps)} />
       </div>
+      {toggle}
       <div className="mt-4">
-        <CodeViewer code={code.data} />
+        <CodeViewer code={shown} />
       </div>
     </section>
   );

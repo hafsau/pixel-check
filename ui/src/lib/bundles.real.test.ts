@@ -2,7 +2,8 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { Interaction } from './types';
+import type { Interaction, Run } from './types';
+import { codeSources, normalizeRun } from './owned';
 import { buildChecklist, buildTimeline } from './interactions';
 import { normalizeIndex } from './bundle';
 
@@ -29,5 +30,18 @@ describe.skipIf(ix.length === 0)('exported interaction bundles', () => {
         for (const bp of bps) for (const slot of ['base', 'open'] as const) expect(existsSync(resolve(RUNS, d, a.captures[bp]?.[slot] ?? 'missing'))).toBe(true);
       }
     }
+  });
+});
+
+const statics = existsSync(RUNS) ? readdirSync(RUNS).filter((d) => !d.startsWith('_') && existsSync(resolve(RUNS, d, 'run.json'))) : [];
+
+describe.skipIf(statics.length === 0)('exported static bundles without owned-site fields', () => {
+  it.each(statics)('%s: display / real are null and the scored code is the best candidate\'s', (d) => {
+    const raw = JSON.parse(readFileSync(resolve(RUNS, d, 'run.json'), 'utf8')) as Run;
+    const run = normalizeRun(raw);
+    expect(run.display).toBeNull();
+    expect(run.real).toBeNull();
+    expect(codeSources(run).delivered).toBeNull();
+    expect(codeSources(run).scored).toBe(raw.candidates.find((c) => c.id === raw.result.best)?.code ?? null);
   });
 });

@@ -1,28 +1,46 @@
 import { useState } from 'react';
-import { projectFiles, projectZipName, type ProjectMeta } from '../lib/project';
+import { fetchAssetBytes, projectEntries, projectZipName, type ImagesMode, type ProjectMeta } from '../lib/project';
 import { zipStore } from '../lib/zip';
 import { downloadBlob } from '../lib/download';
 import { IconDownload } from './Icons';
 
-/** Primary action: zip App.jsx into a runnable Vite + React + Tailwind project, in the browser (no upload). */
-export function DownloadProject({ code, meta, className = '' }: { code: string; meta: ProjectMeta; className?: string }) {
-  const [done, setDone] = useState(false);
-  const go = () => {
-    const zip = zipStore(projectFiles(code, meta).map((f) => ({ path: f.path, data: f.content })));
-    downloadBlob(zip as BlobPart, projectZipName(meta.id), 'application/zip');
-    setDone(true);
-    window.setTimeout(() => setDone(false), 2000);
+/** Owned sites: the delivered code, its asset list and how to resolve a bundle path to a URL. */
+export interface OwnedCode {
+  code: string;
+  assets: string[];
+  asset: (rel: string) => string;
+}
+
+/** Primary action: zip App.jsx into a runnable Vite + React + Tailwind project, in the browser (no upload).
+ * With `owned`, the zip carries the delivered code and the site's images (public/assets/), or the scored code if they fail. */
+export function DownloadProject({ code, meta, owned, className = '' }: { code: string; meta: ProjectMeta; owned?: OwnedCode | null; className?: string }) {
+  const [state, setState] = useState<'idle' | 'busy' | ImagesMode>('idle');
+  const go = async () => {
+    if (state === 'busy') return;
+    setState('busy');
+    const { entries, images } = await projectEntries({
+      scored: code,
+      delivered: owned?.code ?? null,
+      assets: owned?.assets ?? [],
+      meta,
+      fetchAsset: (rel) => fetchAssetBytes(new URL(owned!.asset(rel), window.location.href).href),
+    });
+    downloadBlob(zipStore(entries) as BlobPart, projectZipName(meta.id), 'application/zip');
+    setState(images);
+    window.setTimeout(() => setState('idle'), images === 'fallback' ? 6000 : 2000);
   };
   return (
-    <button type="button" className={`btn-primary ${className}`} onClick={go} aria-describedby="dl-project-note">
-      <IconDownload /> Download project (.zip)
-      <span id="dl-project-note" className="sr-only">
-        A Vite + React + Tailwind project with this App.jsx, built in your browser. Run npm install, then npm run dev.
+    <span className={`inline-flex flex-col items-end gap-1 ${className}`}>
+      <button type="button" className="btn-primary" onClick={go} aria-busy={state === 'busy'} aria-describedby="dl-project-note">
+        <IconDownload /> Download project (.zip)
+        <span id="dl-project-note" className="sr-only">
+          A Vite + React + Tailwind project with this App.jsx, built in your browser. Run npm install, then npm run dev.
+        </span>
+      </button>
+      <span className={state === 'fallback' ? 'text-[11px] text-ink-muted' : 'sr-only'} aria-live="polite">
+        {state === 'fallback' ? 'Images could not be downloaded: zipped the code as scored.' : state === 'own' || state === 'placeholder' ? 'Download started.' : ''}
       </span>
-      <span className="sr-only" aria-live="polite">
-        {done ? 'Download started.' : ''}
-      </span>
-    </button>
+    </span>
   );
 }
 

@@ -1,5 +1,9 @@
+import { useState } from 'react';
 import type { Run } from '../lib/types';
-import { useRun, useText, runAsset } from '../lib/data';
+import { useRun, useBestCode, useAbsAsset, runAsset } from '../lib/data';
+import type { CodeVersion } from '../lib/owned';
+import { CodeVersionToggle } from '../components/CodeVersionToggle';
+import { SiteCompare } from '../components/SiteCompare';
 import { Link } from '../lib/router';
 import { BAND_TEXT, bandLabel, bandOf, fmtScore } from '../lib/score';
 import { DEFAULT_BPS, cap, fmtSecs, fmtUsd } from '../lib/format';
@@ -20,8 +24,13 @@ export function ResultPage({ id }: { id: string }) {
 
 export function ResultView({ run, asset, basePath, sourceHost }: { run: Run; asset: (rel: string) => string; basePath: string; sourceHost?: string | null }) {
   const res = run.result;
-  const best = run.candidates.find((c) => c.id === res.best);
-  const code = useText(best?.code ? asset(best.code) : null);
+  const code = useBestCode(run, asset);
+  const absAsset = useAbsAsset(asset);
+  const [version, setVersion] = useState<CodeVersion>('delivered');
+  const scored = code.status === 'ready' ? code.scored : null;
+  const owned = code.status === 'ready' && code.delivered && run.display ? { code: code.delivered, assets: run.display.assets, asset } : null;
+  const showDelivered = !!owned && version === 'delivered';
+  const shown = showDelivered ? owned!.code : scored;
   const bps = run.breakpoints?.length ? run.breakpoints : [...DEFAULT_BPS];
   const sandboxUsd = run.candidates.reduce((a, c) => a + (c.sandbox_cost || 0), 0);
   const worstBp = bps.reduce<string | null>((w, b) => (w == null || (res.per_bp[b.name] ?? 101) < (res.per_bp[w] ?? 101) ? b.name : w), null);
@@ -37,7 +46,7 @@ export function ResultView({ run, asset, basePath, sourceHost }: { run: Run; ass
             <Link to={basePath} className="btn">
               <IconArrowLeft /> Replay
             </Link>
-            {code.status === 'ready' && code.data && <DownloadProject code={code.data} meta={runProjectMeta(run, sourceHost, bps)} />}
+            {scored && <DownloadProject code={scored} owned={owned} meta={runProjectMeta(run, sourceHost, bps)} />}
           </div>
         }
       />
@@ -57,10 +66,13 @@ export function ResultView({ run, asset, basePath, sourceHost }: { run: Run; ass
         </dl>
       </section>
 
+      <SiteCompare run={run} asset={asset} bps={bps} className="mt-6" />
+
       <div className="section flex flex-col gap-4">
-        {code.status === 'ready' && code.data ? (
+        {scored && shown ? (
           <>
-            <LivePreview code={code.data} />
+            {owned && <CodeVersionToggle value={version} onChange={setVersion} />}
+            <LivePreview code={shown} assetUrl={showDelivered ? absAsset : undefined} />
             <section aria-labelledby="code-title" className="card card-pad">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -71,9 +83,9 @@ export function ResultView({ run, asset, basePath, sourceHost }: { run: Run; ass
                     Best candidate <code className="font-mono">{res.best}</code> — one responsive file, no per-breakpoint copies.
                   </p>
                 </div>
-                <DownloadProject code={code.data} meta={runProjectMeta(run, sourceHost, bps)} />
+                <DownloadProject code={scored} owned={owned} meta={runProjectMeta(run, sourceHost, bps)} />
               </div>
-              <CodeViewer code={code.data} />
+              <CodeViewer code={shown} />
             </section>
           </>
         ) : code.status === 'error' ? (

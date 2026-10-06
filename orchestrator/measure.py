@@ -413,8 +413,13 @@ def measure(png: bytes) -> dict:
             o["contains_text"] = [t["text"] for t in lines if _inside(t["box"], o["box"])][:4]
             blocks.append(o)
     bg_c = background(img)
+    from .shadow import fit_shadow
     for b in blocks:                  # borders and corner radius, measured on every block
         _border_and_radius(img, b, bg_c)
+        if min(b["box"][2], b["box"][3]) >= 40:      # a soft shadow → its CSS (offset, blur, opacity)
+            fit = fit_shadow(img, b["box"], bg_c)
+            if fit:
+                b["shadow_fit"] = {k: fit[k] for k in ("y", "blur", "alpha")}
     for r in rules(img, text_boxes=text_boxes):   # thin horizontal dividers (a header's border-b)
         if all(_iou(r["box"], b["box"]) < 0.5 for b in blocks):
             blocks.append({"box": r["box"], "fill": r["fill"], "rule": True, "contains_text": []})

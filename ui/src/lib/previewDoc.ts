@@ -48,8 +48,19 @@ function scriptSafeJson(v: unknown): string {
     .replace(new RegExp(String.fromCharCode(0x2029), 'g'), '\\u2029');
 }
 
-export function buildPreviewDoc(source: string): string {
-  const { code, component } = toRunnable(source);
+/** `src="/assets/<64 hex>.<ext>"` exactly (either quote) — the owned-site images in a delivered App.jsx. */
+const ASSET_SRC = /(?<![\w-])src=(["'])\/(assets\/[0-9a-f]{64}\.(?:png|jpg|gif|webp|avif|svg))\1/g;
+
+/** Point the delivered code's `/assets/…` images at the bundle's files (replay folder or live API). Nothing else changes. */
+export function rewriteAssetSrcs(code: string, assetUrl: (rel: string) => string): string {
+  return code.replace(ASSET_SRC, (m, q: string, rel: string) => {
+    const url = assetUrl(rel);
+    return url && !/["'<>\s\\]/.test(url) ? `src=${q}${url}${q}` : m;
+  });
+}
+
+export function buildPreviewDoc(source: string, opts: { assetUrl?: (rel: string) => string } = {}): string {
+  const { code, component } = toRunnable(opts.assetUrl ? rewriteAssetSrcs(source, opts.assetUrl) : source);
   return `<!doctype html>
 <html lang="en">
 <head>
