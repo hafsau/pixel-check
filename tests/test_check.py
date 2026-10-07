@@ -96,3 +96,16 @@ def test_stages_are_emitted_in_order():
     C.check_url("https://build.example/", FRAMES, sb=FakeSB(), read_design=lambda f: SPEC, verify=lambda m: None,
                 emit=lambda s, **k: stages.append(s))
     assert stages == ["capture", "read design", "score"]
+
+
+def test_check_code_returns_the_build_dom_and_reuses_a_given_design_reading():
+    class SB(FakeSB):
+        def download_dir(self, image, path):
+            d = super().download_dir(image, path)
+            d["mobile.dom.json"] = json.dumps([{"pc": "3", "text": "Hi", "box": [1, 2, 3, 4]}]).encode()
+            return d
+    reads = []
+    out = C.check_code("export default function App(){return <main>Hi</main>}", FRAMES, sb=SB(),
+                       read_design=lambda f: reads.append(1) or SPEC, emit=lambda *a, **k: None, spec=SPEC)
+    assert out["dom"]["mobile"][0]["pc"] == "3" and out["dom"]["tablet"] == []
+    assert reads == []                                   # the given reading is used, the frames are not read again

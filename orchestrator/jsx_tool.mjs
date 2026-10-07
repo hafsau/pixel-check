@@ -1,6 +1,6 @@
 // Deterministic JSX class editing (the "edit" branch's tool).
 //
-//   node jsx_tool.mjs tag    < {"code": "..."}                 -> {"code": tagged, "elements": [{id, tag, class, text}]}
+//   node jsx_tool.mjs tag    < {"code": "..."}                 -> {"code": tagged, "elements": [{id, tag, class, text, parent}]}
 //   node jsx_tool.mjs apply  < {"code": tagged, "edits": [...]} -> {"code": new, "applied": n, "skipped": [...]}
 //
 // tag: adds data-pc="N" to every intrinsic JSX element (document order), so a model can name elements.
@@ -69,7 +69,10 @@ function tag(code) {
     const op = el.openingElement;
     const existing = attr(op, "data-pc");
     const cls = classLiteral(op);
-    list.push({ id: i, tag: op.name.name, class: cls?.value ?? (cls?.dynamic ? "(dynamic)" : ""), text: textOf(el) });
+    // parent: the innermost earlier element whose source range holds this one (null at the top)
+    let parent = null;
+    for (let j = i - 1; j >= 0; j--) if (els[j].start <= el.start && el.end <= els[j].end) { parent = j; break; }
+    list.push({ id: i, tag: op.name.name, class: cls?.value ?? (cls?.dynamic ? "(dynamic)" : ""), text: textOf(el), parent });
     if (existing) return;
     const at = op.name.end + shift;
     const ins = ` data-pc="${i}"`;

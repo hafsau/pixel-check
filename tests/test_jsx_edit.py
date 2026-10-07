@@ -130,3 +130,11 @@ def test_explicit_pins_override_class_guesses():
     new, n, _ = jsx_edit.apply(code, [{"id": 2, "bp": "mobile", "add": "!mt-[30px]", "pins": {"tablet": ["!mt-[16px]"], "desktop": ["!mt-[16px]"]}}])
     c = classes(new, 2)
     assert "!mt-[30px]" in c and "md:!mt-[16px]" in c, c
+
+
+def test_tag_reports_each_elements_parent_id():
+    code = ('export default function App(){return <main className="p-4"><div className="flex">'
+            '<a onClick={() => go()}>FAQ</a><a>Help</a></div><p>x</p></main>}')
+    _, els = jsx_edit.tag(code)
+    parent = {e["id"]: e["parent"] for e in els}
+    assert parent == {0: None, 1: 0, 2: 1, 3: 1, 4: 0}

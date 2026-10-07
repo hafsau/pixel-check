@@ -61,18 +61,30 @@ def check_url(url: str, frames: dict[str, bytes], *, sb, read_design, verify, em
     spec = read_design(frames)
     report = _score(sb, r.result_image, frames, spec, emit)
     return {"report": report, "build": {bp: got[f"{bp}.png"] for bp in BPS if f"{bp}.png" in got}, "meta": meta,
-            "design_texts": design_texts(spec)}
+            "design_texts": design_texts(spec), "dom": _doms(got)}
 
 
-def check_code(code: str, frames: dict[str, bytes], *, sb, read_design, emit) -> dict:
-    """An App.jsx (React + Tailwind, one file) rendered with network off, then scored in check mode."""
+def _doms(got: dict) -> dict[str, list]:
+    out = {}
+    for bp in BPS:
+        try:
+            out[bp] = json.loads(got.get(f"{bp}.dom.json") or b"[]")
+        except (json.JSONDecodeError, TypeError):
+            out[bp] = []
+    return out
+
+
+def check_code(code: str, frames: dict[str, bytes], *, sb, read_design, emit, spec: dict | None = None) -> dict:
+    """An App.jsx (React + Tailwind, one file) rendered with network off, then scored in check mode. spec: a design
+    reading already made (the repair loop checks several versions against the same frames)."""
     emit("render")
     r = sb.run(RENDER_CMD, files={"/work/App.jsx": code.encode()}, step="check render")
     if not r.ok or not r.result_image:
         raise CheckError("the code could not be rendered")
     got = sb.download_dir(r.result_image, "/work/out")
-    emit("read design")
-    spec = read_design(frames)
+    if spec is None:
+        emit("read design")
+        spec = read_design(frames)
     report = _score(sb, r.result_image, frames, spec, emit)
     return {"report": report, "build": {bp: got[f"{bp}.png"] for bp in BPS if f"{bp}.png" in got}, "meta": {},
-            "design_texts": design_texts(spec)}
+            "design_texts": design_texts(spec), "dom": _doms(got)}

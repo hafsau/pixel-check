@@ -118,12 +118,12 @@ Reply with JSON only."""
 
 
 def class_edits(client: TFClient, tagged_code: str, feedback: str, strategy: str, *, model: str | None = None,
-                temperature: float = 0.4) -> tuple[list[dict], str]:
+                temperature: float = 0.4, system: str = EDIT_SYSTEM) -> tuple[list[dict], str]:
     user = ("Page (elements tagged with data-pc ids):\n```jsx\n" + tagged_code + "\n```\n\n"
             "Measured errors (render → design):\n" + feedback + "\n\nFocus: " + strategy +
             "\n\nReturn JSON {\"edits\": [{\"id\": N, \"bp\": \"tablet\", \"add\": \"classes\", \"remove\": \"\", \"why\": \"...\"}]}"
             " that fixes as many measured errors as possible without breaking breakpoints that are already right.")
-    r = client.chat(model or config.MODEL_EDITOR, [{"role": "system", "content": EDIT_SYSTEM}, {"role": "user", "content": user}],
+    r = client.chat(model or config.MODEL_EDITOR, [{"role": "system", "content": system}, {"role": "user", "content": user}],
                     step="class edits", schema=EDIT_SCHEMA, thinking="off", max_tokens=4000, temperature=temperature)
     d = r.data if isinstance(r.data, dict) else None
     return (d or {}).get("edits") or [], r.content
