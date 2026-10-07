@@ -200,7 +200,7 @@ def _refuse_sensitive(meta: dict):
 
 
 def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | None = None, capture=None,
-               resolver=None, checker=None) -> FastAPI:
+               resolver=None, checker=None, repairer=None) -> FastAPI:
     from . import config
     s = {"enabled": config.LIVE_ENABLED, "passcode": config.LIVE_PASSCODE, "daily": config.LIVE_DAILY_RUNS,
          "total": config.LIVE_TOTAL_RUNS, "origins": config.LIVE_ORIGINS, "per_ip": config.LIVE_PER_IP_DAILY,
@@ -228,6 +228,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     run_pipeline = pipeline or default_pipeline
     run_capture = capture or default_capture
     run_check = checker or default_checker
+    run_repair = repairer or default_repairer
     resolve = resolver or _resolve
     app = FastAPI(title="PixelCheck live", docs_url=None, redoc_url=None)
     app.add_middleware(CORSMiddleware, allow_origins=list(s["origins"] or []), allow_methods=["GET", "POST"],
@@ -334,7 +335,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         threading.Thread(target=worker, args=(rid, None, url), daemon=True).start()
         return {"id": rid}
 
-    def check_worker(rid: str, kind: str, build: str, frames: dict[str, bytes]):
+    def check_worker(rid: str, kind: str, build: str, frames: dict[str, bytes], repair: bool = False):
         """Check mode: the build (URL or App.jsx) measured against the design frames → bundle/check.json + frames."""
         from .check import CheckError, CheckRefused
         run_dir = root / rid
@@ -361,13 +362,26 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                     paths[side][bp] = f"{side}/{bp}.webp"
             per_bp = rep.get("per_bp") or {bp: v.get("score") for bp, v in (rep.get("breakpoints") or {}).items()
                                            if isinstance(v, dict)}
+            repaired, summary = None, None
+            if repair and kind == "code":   # Nemotron repair loop on the same frames (orchestrator/repair.py)
+                fix = run_repair(build, frames, run_dir, emit)
+                (bundle / "repair").mkdir(parents=True, exist_ok=True)
+                (bundle / "original").mkdir(parents=True, exist_ok=True)
+                (bundle / "repair" / "App.jsx").write_text(fix["code"])
+                (bundle / "original" / "App.jsx").write_text(build)
+                repaired = {"code": "repair/App.jsx", "original": "original/App.jsx", "start": fix.get("start"),
+                            "best": fix.get("best"), "history": fix.get("history"), "lines_kept": fix.get("lines_kept"),
+                            "usd": fix.get("usd")}
+                summary = {"before": (fix.get("start") or {}).get("worst"), "after": (fix.get("best") or {}).get("worst"),
+                           "lines_kept": fix.get("lines_kept")}
             (bundle / "check.json").write_text(json.dumps({
                 "type": "check", "id": rid, "source": json.loads(status_path(rid).read_text()).get("source"),
                 "report": rep, "design": paths["design"], "build": paths["build"],
-                "design_texts": out.get("design_texts") or {}, "usd": out.get("usd")}))
+                "design_texts": out.get("design_texts") or {}, "usd": out.get("usd"), "repair": repaired}))
             write_status(rid, state="done", stages=stages,
                          result={"match": rep.get("match"), "per_bp": per_bp,
-                                 "fluid_pass": (rep.get("fluidity") or {}).get("pass"), "usd": out.get("usd")},
+                                 "fluid_pass": (rep.get("fluidity") or {}).get("pass"), "usd": out.get("usd"),
+                                 **({"repair": summary} if summary else {})},
                          bundle=f"/api/runs/{rid}/files/check.json")
         except (_Refused, CheckRefused) as e:
             write_status(rid, state="failed", stages=stages, error=str(e))
@@ -379,7 +393,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     @app.post("/api/checks", status_code=202)
     async def start_check(request: Request, mobile: UploadFile = File(...), tablet: UploadFile = File(...),
                           desktop: UploadFile = File(...), url: str = Form(""), code: str = Form(""),
-                          owns: str = Form(""), passcode: str = Form("")):
+                          owns: str = Form(""), passcode: str = Form(""), repair: str = Form("")):
         if not s["enabled"]:
             raise HTTPException(503, "live mode is switched off; replays still work")
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
@@ -391,6 +405,9 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             raise HTTPException(422, "give either the build's address or its App.jsx, not both")
         if len(code) > MAX_CODE:
             raise HTTPException(413, f"the App.jsx is larger than {MAX_CODE // 1000} k characters")
+        want_repair = repair.strip().lower() in ("true", "1", "yes", "on")
+        if want_repair and not has_code:
+            raise HTTPException(422, "repair works on code: give the build's App.jsx")
         frames = {}
         for bp, up in (("mobile", mobile), ("tablet", tablet), ("desktop", desktop)):
             data = await up.read(MAX_BYTES + 1)
@@ -414,8 +431,9 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         for bp, data in frames.items():
             (root / rid / "frames" / f"{bp}.png").write_bytes(data)
         write_status(rid, id=rid, kind="check", state="queued", stages=[], created=time.time(),
-                     source={"url": _bare(url)} if url else {"code": True})
-        threading.Thread(target=check_worker, args=(rid, "url" if url else "code", url or code, frames), daemon=True).start()
+                     source={"url": _bare(url)} if url else {"code": True}, repair=want_repair)
+        threading.Thread(target=check_worker, args=(rid, "url" if url else "code", url or code, frames, want_repair),
+                         daemon=True).start()
         return {"id": rid}
 
     @app.get("/api/runs/{rid}")
@@ -516,6 +534,26 @@ def default_checker(kind: str, build: str, frames: dict[str, bytes], run_dir: Pa
     read = lambda fr: perceive(client, fr)          # noqa: E731
     out = (check_url(build, frames, sb=sb, read_design=read, verify=verify, emit=emit) if kind == "url"
            else check_code(build, frames, sb=sb, read_design=read, emit=emit))
+    out["usd"] = round(client.run_spend, 4)
+    return out
+
+
+def default_repairer(code: str, frames: dict[str, bytes], run_dir: Path, emit) -> dict:
+    """The Nemotron repair loop (orchestrator/repair.py) with real sandboxes: ≤ 3 rounds, 3 candidates each."""
+    from concurrent.futures import ThreadPoolExecutor
+    from . import config
+    from .check import check_code
+    from .perceive import perceive
+    from .repair import _propose_default, repair
+    from .sandbox import Sandbox
+    from .tf_client import TFClient
+    client = TFClient(run_id=run_dir.name + "-repair", run_budget_usd=config.LIVE_RUN_BUDGET_USD)
+    sb = Sandbox()
+    spec = perceive(client, frames)               # cached vision reads: the check already read these frames
+    emit("repair")
+    check = lambda c: check_code(c, frames, sb=sb, read_design=None, emit=lambda *a, **k: None, spec=spec)  # noqa: E731
+    with ThreadPoolExecutor(3) as ex:
+        out = repair(code, spec=spec, check=check, propose=_propose_default(client), rounds=3, pmap=ex.map)
     out["usd"] = round(client.run_spend, 4)
     return out
 

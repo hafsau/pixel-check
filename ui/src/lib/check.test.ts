@@ -7,6 +7,7 @@ import {
   checkCells,
   checkFields,
   checkFormData,
+  checkPath,
   checkMissing,
   checkReady,
   checkStages,
@@ -15,6 +16,8 @@ import {
   hurtList,
   missingBoxes,
   parseCheck,
+  repairRequested,
+  wantsRepair,
   widthReasons,
   validateCode,
   type CheckDraft,
@@ -409,5 +412,94 @@ describe('checkBundleUrl', () => {
     expect(checkBundleUrl('', 'id 1', 'https://evil.example/x.json')).toBe('/api/runs/id%201/files/check.json');
     expect(checkBundleUrl('', 'id1', null)).toBe('/api/runs/id1/files/check.json');
     expect(checkBundleUrl('', 'id1', '/api/runs/../../x')).toBe('/api/runs/id1/files/check.json');
+  });
+});
+
+// ------------------------------------------------------------------------------------------------ repair ("Also repair it")
+
+describe('repair request', () => {
+  const blob = () => new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+  const frames = () => ({ mobile: blob(), tablet: blob(), desktop: blob() });
+  it('sends repair=true with code when asked', () => {
+    const fd = checkFormData(frames(), draft({ source: 'code', code: 'abc', repair: true }));
+    expect(fd.get('repair')).toBe('true');
+    expect(fd.get('code')).toBe('abc');
+  });
+  it('never sends repair with a URL (the API answers 422)', () => {
+    const fd = checkFormData(frames(), draft({ source: 'url', repair: true }));
+    expect(fd.has('repair')).toBe(false);
+    expect(fd.get('url')).toBe('https://example.com/');
+  });
+  it('sends no repair field when not asked — checks without repair are unchanged', () => {
+    const fd = checkFormData(frames(), draft({ source: 'code', code: 'abc', repair: false }));
+    expect([...fd.keys()].sort()).toEqual(['code', 'desktop', 'mobile', 'owns', 'passcode', 'tablet']);
+    expect(checkFormData(frames(), draft({ source: 'code', code: 'abc' })).has('repair')).toBe(false);
+  });
+  it('repair does not change what is still missing', () => {
+    expect(checkMissing(draft({ source: 'code', code: '', repair: true }))).toEqual(['your App.jsx']);
+  });
+  it('wantsRepair: only on the App.jsx tab', () => {
+    expect(wantsRepair('code', true)).toBe(true);
+    expect(wantsRepair('url', true)).toBe(false);
+    expect(wantsRepair('code', false)).toBe(false);
+  });
+});
+
+describe('checkStages with repair', () => {
+  it('adds the repair stage after score when repair was asked for', () => {
+    const s = checkStages({ state: 'running', source: { code: true }, stages: [{ stage: 'render', t: 1 }, { stage: 'read design', t: 2 }, { stage: 'score', t: 3 }] }, { repair: true });
+    expect(s.map((x) => [x.id, x.state])).toEqual([
+      ['render', 'done'],
+      ['read design', 'done'],
+      ['score', 'active'],
+      ['repair', 'pending'],
+    ]);
+    expect(s[3].label).toMatch(/Repairing/);
+  });
+  it('shows the repair stage once the server reports it, even without the flag', () => {
+    const s = checkStages({ state: 'running', source: { code: true }, stages: [{ stage: 'render', t: 1 }, { stage: 'score', t: 3 }, { stage: 'repair', t: 4 }] });
+    expect(s.map((x) => [x.id, x.state])).toEqual([
+      ['render', 'done'],
+      ['read design', 'done'],
+      ['score', 'done'],
+      ['repair', 'active'],
+    ]);
+  });
+  it('never for URL checks', () => {
+    const s = checkStages({ state: 'running', source: { url: 'https://a.com' }, stages: [] }, { repair: true });
+    expect(s.map((x) => x.id)).toEqual(['capture', 'read design', 'score']);
+  });
+  it('no repair stage when not asked', () => {
+    expect(checkStages({ state: 'done', source: { code: true }, stages: [] }).map((x) => x.id)).toEqual(['render', 'read design', 'score']);
+  });
+});
+
+describe('repairRequested', () => {
+  it('reads ?repair=1 from the check page address', () => {
+    expect(repairRequested('?repair=1')).toBe(true);
+    expect(repairRequested('?x=2&repair=1')).toBe(true);
+    expect(repairRequested('')).toBe(false);
+    expect(repairRequested('?repair=0')).toBe(false);
+  });
+  it('checkPath carries the flag only when repairing', () => {
+    expect(checkPath('a b', true)).toBe('/check/a%20b?repair=1');
+    expect(checkPath('id1', false)).toBe('/check/id1');
+  });
+});
+
+describe('parseCheck repair', () => {
+  it('is null for checks without repair', () => {
+    expect(parseCheck(fullBundle).repair).toBeNull();
+    expect(parseCheck({ ...fullBundle, repair: null }).repair).toBeNull();
+  });
+  it('parses the repair block', () => {
+    const c = parseCheck({
+      ...fullBundle,
+      source: { code: true },
+      repair: { code: 'repair/App.jsx', original: 'original/App.jsx', start: { worst: 21.3, fluid_fails: 4 }, best: { worst: 30.3, fluid_fails: 0 }, history: [], lines_kept: 0.9, usd: 0.03 },
+    });
+    expect(c.repair?.code).toBe('repair/App.jsx');
+    expect(c.repair?.best.worst).toBe(30.3);
+    expect(c.repair?.linesKept).toBe(0.9);
   });
 });

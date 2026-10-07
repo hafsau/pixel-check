@@ -172,3 +172,17 @@ def test_a_split_word_is_painted_in_its_code_colour_so_it_reads_as_visible(tmp_p
     x, y, w, h = name["box"]
     im = np.asarray(Image.open(tmp_path / "mobile.coded.png").convert("RGB")).astype(int)[y:y + h, x:x + w]
     assert int((np.abs(im - code).sum(axis=2) < 30).sum()) > 50
+
+
+# repair feedback needs (Oct 7): each element's background colour in nodes.json (block feedback) and, per width,
+# the elements that stick out past the screen (sideways-scroll culprits)
+def test_nodes_carry_background_colours_and_overflow_names_its_culprits(tmp_path, server):
+    r = run(f"{server}/wide", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    nodes = json.loads((tmp_path / "mobile.nodes.json").read_text())
+    tiles = [n for n in nodes if n.get("bg") == "rgb(221, 221, 221)"]
+    assert len(tiles) == 3
+    checks = json.loads((tmp_path / "checks.json").read_text())
+    culprits = checks["between"]["360"]["overflowers"]
+    assert culprits and culprits[0]["right"] > 600 and culprits[0]["w"] >= 600   # the 620 px row, not its children
+    assert len(culprits) <= 5 and not checks["between"]["1024"]["overflowers"]

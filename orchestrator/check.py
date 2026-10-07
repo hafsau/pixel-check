@@ -61,14 +61,14 @@ def check_url(url: str, frames: dict[str, bytes], *, sb, read_design, verify, em
     spec = read_design(frames)
     report = _score(sb, r.result_image, frames, spec, emit)
     return {"report": report, "build": {bp: got[f"{bp}.png"] for bp in BPS if f"{bp}.png" in got}, "meta": meta,
-            "design_texts": design_texts(spec), "dom": _doms(got)}
+            "design_texts": design_texts(spec), "dom": _doms(got), "nodes": _doms(got, "nodes")}
 
 
-def _doms(got: dict) -> dict[str, list]:
+def _doms(got: dict, kind: str = "dom") -> dict[str, list]:
     out = {}
     for bp in BPS:
         try:
-            out[bp] = json.loads(got.get(f"{bp}.dom.json") or b"[]")
+            out[bp] = json.loads(got.get(f"{bp}.{kind}.json") or b"[]")
         except (json.JSONDecodeError, TypeError):
             out[bp] = []
     return out
@@ -87,4 +87,4 @@ def check_code(code: str, frames: dict[str, bytes], *, sb, read_design, emit, sp
         spec = read_design(frames)
     report = _score(sb, r.result_image, frames, spec, emit)
     return {"report": report, "build": {bp: got[f"{bp}.png"] for bp in BPS if f"{bp}.png" in got}, "meta": {},
-            "design_texts": design_texts(spec), "dom": _doms(got)}
+            "design_texts": design_texts(spec), "dom": _doms(got), "nodes": _doms(got, "nodes")}

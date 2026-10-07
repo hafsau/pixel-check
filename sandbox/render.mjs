@@ -186,7 +186,22 @@ export function layoutHealth() {
       if (examples.length < 5) examples.push([a.el.textContent.trim().slice(0, 40), b.el.textContent.trim().slice(0, 40)]);
     }
   }
-  return { overflow_px, text_overlaps: overlaps, examples };
+  // what sticks out past the screen: the outermost visible elements whose right edge passes it (repair feedback)
+  const over = [];
+  if (overflow_px > 0) {
+    for (const el of document.querySelectorAll((window.__pcRoot || "#root") + " *")) {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0 || r.right <= innerWidth + 1) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === "hidden" || cs.display === "none") continue;
+      if (over.some((o) => o.el.contains(el))) continue;
+      over.push({ el, r });
+    }
+  }
+  const overflowers = over.sort((a, b) => b.r.right - a.r.right).slice(0, 5).map(({ el, r }) => ({
+    pc: el.closest("[data-pc]")?.getAttribute("data-pc") ?? null, tag: el.tagName.toLowerCase(),
+    w: Math.round(r.width), right: Math.round(r.right), text: (el.textContent || "").trim().slice(0, 30) }));
+  return { overflow_px, text_overlaps: overlaps, examples, overflowers };
 }
 
 // Runs in the page: every element in document order with its visibility, own text and position.
@@ -206,6 +221,7 @@ function integrityDump() {
       par: index.has(el.parentElement) ? index.get(el.parentElement) : -1,
       ga: cs.gridRowStart !== "auto" && cs.gridColumnStart !== "auto" ? `${cs.gridRowStart}/${cs.gridColumnStart}` : "",
       inl: cs.display === "inline", pc: el.getAttribute("data-pc"),
+      bg: cs.backgroundColor !== "rgba(0, 0, 0, 0)" && cs.backgroundColor !== "transparent" ? cs.backgroundColor : "",
       mt: Math.round(parseFloat(cs.marginTop) || 0), fs: Math.round(parseFloat(cs.fontSize) || 0),
       pl: Math.round(parseFloat(cs.paddingLeft) || 0), pr: Math.round(parseFloat(cs.paddingRight) || 0) };
   });

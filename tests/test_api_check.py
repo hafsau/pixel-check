@@ -97,3 +97,43 @@ def test_checks_share_the_run_caps(tmp_path):
 
 def test_code_too_large_is_refused(tmp_path):
     assert post(client(tmp_path), url=None, code="x" * 300_001).status_code == 413
+
+
+# "Repair it" (Oct 7): an App.jsx check can ask for the Nemotron repair loop; the bundle gets the repaired code,
+# before / after scores, the rounds and the share of the author's lines kept
+def fake_repairer(code, frames, run_dir, emit):
+    emit("repair")
+    return {"code": code.replace("w-[1280px]", "w-full max-w-[1280px]"), "lines_kept": 0.9,
+            "start": {"worst": 21.3, "per_bp": {"mobile": 21.3}, "fluid_fails": 4},
+            "best": {"worst": 30.3, "per_bp": {"mobile": 30.3}, "fluid_fails": 0},
+            "history": [{"round": 0, "worst": 21.3}, {"round": 1, "worst": 30.3}], "usd": 0.02}
+
+
+def repair_client(tmp_path):
+    from orchestrator.api import create_app
+    s = {"enabled": True, "passcode": "letmein", "daily": 10, "total": 40, "origins": []}
+    return TestClient(create_app(checker=fake_checker, repairer=fake_repairer, resolver=resolver, live_dir=tmp_path, settings=s))
+
+
+def test_a_code_check_can_be_repaired_and_the_bundle_has_both_versions(tmp_path):
+    c = repair_client(tmp_path)
+    code = 'export default function App(){return <main className="w-[1280px]">Hi</main>}'
+    files = {bp: ("f.png", png(*wh), "image/png") for bp, wh in SIZES.items()}
+    r = c.post("/api/checks", files=files, data={"code": code, "owns": "true", "passcode": "letmein", "repair": "true"})
+    assert r.status_code == 202, r.text
+    st = wait_done(c, r.json()["id"])
+    assert st["state"] == "done" and [s["stage"] for s in st["stages"]][-1] == "repair" and st["repair"] is True
+    assert st["result"]["repair"] == {"before": 21.3, "after": 30.3, "lines_kept": 0.9}
+    rep = c.get(st["bundle"]).json()["repair"]
+    assert rep["code"] == "repair/App.jsx" and rep["original"] == "original/App.jsx" and rep["history"][1]["worst"] == 30.3
+    rid = r.json()["id"]
+    assert "max-w-[1280px]" in c.get(f"/api/runs/{rid}/files/repair/App.jsx").text
+    assert c.get(f"/api/runs/{rid}/files/original/App.jsx").text == code
+
+
+def test_repair_needs_code_not_a_url(tmp_path):
+    c = repair_client(tmp_path)
+    files = {bp: ("f.png", png(*wh), "image/png") for bp, wh in SIZES.items()}
+    r = c.post("/api/checks", files=files, data={"url": "https://example.com/app", "owns": "true", "passcode": "letmein",
+                                                 "repair": "true"})
+    assert r.status_code == 422 and "App.jsx" in r.json()["detail"]

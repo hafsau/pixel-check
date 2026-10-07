@@ -3,7 +3,8 @@ import { Link } from '../lib/router';
 import { useLoad } from '../lib/data';
 import { apiBase, failureNotice, FRAME_SIZES, LIVE_BPS, liveFilesBase, resolveAsset, sourceHost, type LiveBp, type LiveStatus, type PollState } from '../lib/live';
 import { useLivePoll, getCheck } from '../lib/liveApi';
-import { boxPct, checkCells, checkStages, checkSummary, hurtList, missingBoxes, type Box, type CheckBundle, type Hurt } from '../lib/check';
+import { boxPct, checkCells, checkStages, checkSummary, hurtList, missingBoxes, repairRequested, type Box, type CheckBundle, type Hurt } from '../lib/check';
+import { REPAIR_ROUNDS, repairOutcome } from '../lib/repair';
 import { bandLabel, fmtScore } from '../lib/score';
 import { cap, fmtSecs, fmtUsd } from '../lib/format';
 import { ErrorView, Loading } from '../components/StatusView';
@@ -14,6 +15,7 @@ import { WidthStrip } from '../components/viz/WidthStrip';
 import { CompareSlider } from '../components/CompareSlider';
 import { FittedFrame, FrameEmpty, FrameImage } from '../components/FittedFrame';
 import { StageIcon, useElapsed } from './LiveRunPage';
+import { RepairCard } from '../components/RepairCard';
 
 /** /check/<id>: progress while the check runs, then the measured result. */
 export function CheckRunPage({ id }: { id: string }) {
@@ -32,7 +34,8 @@ function title(source: LiveStatus['source'] | CheckBundle['source'] | undefined)
 
 function CheckProgress({ id, poll, retry }: { id: string; poll: PollState; retry: () => void }) {
   const st = poll.status ?? { state: 'queued' as const, stages: [] };
-  const stages = checkStages(st);
+  const stages = checkStages(st, { repair: repairRequested(window.location.search) });
+  const repairing = stages.some((s) => s.id === 'repair');
   const elapsed = useElapsed(poll.status?.created, poll.phase === 'polling');
   const active = stages.find((s) => s.state === 'active');
   const failed = poll.phase === 'failed';
@@ -94,7 +97,8 @@ function CheckProgress({ id, poll, retry }: { id: string; poll: PollState; retry
         {poll.phase === 'polling' && poll.networkErrors > 0 && <p className="mt-4 text-xs text-warn">Connection hiccup — retrying…</p>}
 
         <p className="mt-5 border-t border-line pt-4 text-xs text-ink-muted">
-          Measured in a <strong className="font-semibold text-ink">Token Factory Sandbox</strong>. Usually 1–3 minutes — keep this page open.
+          Measured in a <strong className="font-semibold text-ink">Token Factory Sandbox</strong>. Usually 1–3 minutes
+          {repairing ? `, plus a few minutes for the repair (≤ ${REPAIR_ROUNDS} Nemotron rounds)` : ''} — keep this page open.
         </p>
       </section>
     </div>
@@ -135,11 +139,13 @@ export function CheckResult({ id, check }: { id: string; check: CheckBundle }) {
       <h1 className="display mt-1 break-words text-2xl sm:text-3xl">{title(check.source)}</h1>
       {check.source && 'url' in check.source && <p className="mt-1 break-all font-mono text-[12px] text-ink-muted">{check.source.url}</p>}
 
+      {check.repair && <RepairCard id={id} repair={check.repair} />}
+
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)] lg:items-start">
         <div className="flex min-w-0 flex-col gap-4">
           <section aria-labelledby="score-title" className="card card-pad flex flex-col gap-4">
             <h2 id="score-title" className="eyebrow">
-              Match · worst size
+              Match · worst size{check.repair ? ' · before repair' : ''}
             </h2>
             <div className="flex items-center gap-4">
               <ScoreRing score={report.match} size={96} />
@@ -201,7 +207,7 @@ export function CheckResult({ id, check }: { id: string; check: CheckBundle }) {
       </div>
 
       <p className="mt-6 text-xs text-ink-muted">
-        Measured in a Token Factory Sandbox{check.usd != null ? ` · ${fmtUsd(check.usd, 4)}` : ''}. Your build was not changed.
+        Measured in a Token Factory Sandbox{check.usd != null ? ` · ${fmtUsd(check.usd, 4)}` : ''}. Your build was not changed{check.repair && repairOutcome(check.repair).improved ? ' — the repair is a separate copy' : ''}.
       </p>
     </div>
   );

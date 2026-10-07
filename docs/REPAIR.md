@@ -33,3 +33,9 @@ build towards its design at every size — while keeping the author's code — b
 Every arm, every build, every size, cost and wall time, in a table — including failures. If the bar is not met:
 "Nemotron reads the failure report and names regions; it does not reliably repair" (or what the data shows), and
 check mode ships without the repair claim. A council review reads the results before any claim is made.
+
+## Amendments (dated; made before any benchmark run)
+- **Oct 7, 2026 — repeat runs.** Development runs on two dev builds showed large run-to-run variance (one build:
+  +9.0 in one run, +4.5 in the next, same code and settings). Every LLM arm (one-shot, repair) is therefore run
+  **3 times per build**; the bar is judged on the **mean** of the 3 runs, and the range is reported next to it.
+  No-repair and compiler arms are deterministic and run once. The bar's thresholds are unchanged.

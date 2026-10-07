@@ -1,7 +1,8 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { navigate } from '../lib/router';
 import { FRAME_SIZES, LIVE_BPS, validatePageUrl, type LiveBp } from '../lib/live';
-import { checkMissing, checkReady, codeCounter, validateCode, type CheckSource } from '../lib/check';
+import { checkMissing, checkPath, checkReady, codeCounter, validateCode, wantsRepair, type CheckSource } from '../lib/check';
+import { REPAIR_ROUNDS } from '../lib/repair';
 import { getHealth, startCheck } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
@@ -17,6 +18,7 @@ export function CheckPanel() {
   const [urlTouched, setUrlTouched] = useState(false);
   const [code, setCode] = useState('');
   const [codeTouched, setCodeTouched] = useState(false);
+  const [repair, setRepair] = useState(false);
   const [owns, setOwns] = useState(false);
   const [passcode, setPasscode] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -32,7 +34,7 @@ export function CheckPanel() {
   }, []);
 
   const statuses = Object.fromEntries(LIVE_BPS.map((bp) => [bp, frames[bp]?.status === 'ok' ? 'ok' : frames[bp]?.status === 'error' ? 'error' : 'empty'])) as Record<LiveBp, 'ok' | 'error' | 'empty'>;
-  const draft = { frames: statuses, source, url, code, owns, passcode };
+  const draft = { frames: statuses, source, url, code, owns, passcode, repair };
   const ready = checkReady(draft);
   const missing = checkMissing(draft);
   const h = health.status === 'ok' ? health.health : null;
@@ -51,7 +53,7 @@ export function CheckPanel() {
     setSubmitting(false);
     if (r.ok) {
       setPasscode('');
-      navigate(`/check/${encodeURIComponent(r.id)}`);
+      navigate(checkPath(r.id, wantsRepair(source, repair)));
     } else {
       setError(r.message);
       if (r.status === 503 || r.status === 429) getHealth().then((x) => x.ok && setHealth({ status: 'ok', health: x.health }));
@@ -160,6 +162,22 @@ export function CheckPanel() {
                     </span>
                     <span className={`font-mono num ${counter.over ? 'font-semibold text-bad' : counter.near ? 'font-medium text-warn' : 'text-ink-faint'}`}>{counter.label}</span>
                   </div>
+                  <label className="inset mt-2 flex cursor-pointer items-start gap-2.5 px-3 py-2.5 text-sm">
+                    <input
+                      type="checkbox"
+                      name="repair"
+                      checked={repair}
+                      onChange={(e) => setRepair(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-[rgb(var(--c-accent))]"
+                      aria-describedby={`${ids}-repair-hint`}
+                    />
+                    <span className="min-w-0">
+                      <span className="font-medium text-ink">Also repair it</span>
+                      <span id={`${ids}-repair-hint`} className="block text-xs text-ink-muted">
+                        Nemotron edits classes, ≤ {REPAIR_ROUNDS} rounds; your structure stays.
+                      </span>
+                    </span>
+                  </label>
                 </div>
               </>
             </Tabs>
@@ -188,7 +206,7 @@ export function CheckPanel() {
               />
             </div>
             <button type="submit" className="btn-primary btn-lg justify-self-start" disabled={!ready || !open || submitting}>
-              {submitting ? 'Starting…' : 'Run check'}
+              {submitting ? 'Starting…' : wantsRepair(source, repair) ? 'Check + repair' : 'Run check'}
             </button>
           </div>
         </fieldset>
@@ -199,7 +217,7 @@ export function CheckPanel() {
           </p>
         )}
         <p id={`${ids}-note`} className="-mt-3 text-xs text-ink-muted">
-          {!open ? 'Checks are not available right now.' : ready ? 'Ready. Nothing is sent until you press Run check.' : `Still needed: ${missing.join(', ')}.`}
+          {!open ? 'Checks are not available right now.' : ready ? `Ready. Nothing is sent until you press ${wantsRepair(source, repair) ? 'Check + repair' : 'Run check'}.` : `Still needed: ${missing.join(', ')}.`}
         </p>
       </form>
     </section>

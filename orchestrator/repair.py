@@ -14,7 +14,8 @@ import re
 from . import jsx_edit
 
 BPS = ("mobile", "tablet", "desktop")
-MAX_ROWS = 40
+MAX_ROWS = 30
+MAX_BOX_ROWS = 12
 FAR = 64          # px: a bigger offset is a consequence of the layout around it, not a margin to add
 
 REPAIR_SYSTEM = """You repair SOMEONE ELSE's responsive React + Tailwind page by editing Tailwind classes ONLY — you
@@ -29,6 +30,8 @@ Rules:
 - A Δ is relative to the CURRENT value at that size (read the classes): change the margin/padding by Δ, not to Δ.
 - Never add a margin or padding larger than 64 px. "far off" items move by themselves once the layout around them
   is right — leave them unless a STRUCTURE note names their parent.
+- "absolute — top Δ, left Δ": the element is absolutely positioned; change its top-/left- value by Δ at that size
+  (or, better, make it static/relative in the flow if the design stacks it with its neighbours).
 - Centre with mx-auto, justify-center, items-center or text-center — never with ml-/mr- offsets.
 - "font a→b px": set text-[b px]. "sideways scroll": replace fixed widths with w-full / max-w-[..px] / flex-wrap.
 - MISSING text that exists in the code is hidden at that size: fix its display class (block / flex / inline) there.
@@ -123,9 +126,68 @@ def _structure(placed: list[tuple], elements: list[dict] | None) -> tuple[list[s
     return out, covered
 
 
-def feedback(report: dict, doms: dict, spec: dict, elements: list[dict] | None = None) -> str:
+def _hex(c: str) -> str | None:
+    if isinstance(c, str) and c.startswith("#") and len(c) == 7:
+        return c.lower()
+    m = re.match(r"rgba?\((\d+),\s*(\d+),\s*(\d+)", c or "")
+    return "#%02x%02x%02x" % tuple(int(v) for v in m.groups()) if m else None
+
+
+def _cdist(a: str, b: str) -> int:
+    return sum(abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) for i in (1, 3, 5))
+
+
+def _blocks(spec: dict, nodes: dict) -> list[tuple]:
+    """Design boxes (cards, buttons, inputs, panels) against the build's elements of that colour → rows."""
+    rows = []
+    for bp in BPS:
+        frame = (spec.get("breakpoints") or {}).get(bp) or {}
+        W, H = frame.get("size") or (1, 1)
+        built = [(n, _hex(n.get("bg"))) for n in (nodes or {}).get(bp) or [] if n.get("v", True) and n.get("bg")]
+        built = [(n, c) for n, c in built if c]
+        used: set = set()
+        for b in sorted(frame.get("blocks") or [], key=lambda b: -(b.get("box") or [0, 0, 0, 0])[2] * (b.get("box") or [0, 0, 0, 0])[3]):
+            f = _hex(b.get("fill"))
+            x, y, w, h = b.get("box") or (0, 0, 0, 0)
+            if b.get("rule") or not f or min(w, h) < 8 or w * h < 1200:
+                continue
+            same = [(n, c) for n, c in built if _cdist(c, f) <= 60 and id(n) not in used]
+            if not same:
+                if w * h >= 0.01 * W * H:
+                    rows.append((w * h / 400, f"MISSING BOX {f} {bp}: the design has a {f} box at {x},{y} ({w}×{h}); "
+                                              f"no element has that background there", None))
+                continue
+            n, _ = min(same, key=lambda nc: abs(nc[0]["b"][0] - x) + abs(nc[0]["b"][1] - y) +
+                       abs(nc[0]["b"][2] - w) + abs(nc[0]["b"][3] - h))
+            used.add(id(n))
+            bx, by, bw, bh = n["b"]
+            bits, mag = [], 0
+            if abs(bw - w) > max(8, 0.15 * w):
+                bits.append(f"width {bw}→{w}")
+                mag += abs(bw - w)
+            if abs(bh - h) > max(8, 0.15 * h):
+                bits.append(f"height {bh}→{h}")
+                mag += abs(bh - h)
+            off = max(abs(bx - x), abs(by - y))
+            if n.get("p") and off > 8:      # absolutely positioned: its own top / left move it
+                bits.append(f"absolute — top Δ {y - by:+d}px, left Δ {x - bx:+d}px")
+                mag += off
+            elif off > FAR:
+                bits.append(f"far off (Δ y {y - by:+d}, x {x - bx:+d} px) — fix the layout around it, not with margins")
+                mag += off
+            elif off > 16:
+                bits.append(f"x {bx}→{x}, y {by}→{y}")
+                mag += off
+            if bits:
+                rows.append((mag, f"BOX [{n.get('pc')}] {f} {bp}: " + ", ".join(bits), (bp, str(n.get("pc")))))
+    return sorted(rows, key=lambda r: -r[0])[:MAX_BOX_ROWS]
+
+
+def feedback(report: dict, doms: dict, spec: dict, elements: list[dict] | None = None, nodes: dict | None = None) -> str:
     """Measured errors, render → design, by element id (structure first). Text only."""
-    rows, placed = [], []
+    rows, placed = _blocks(spec, nodes), []
+    # an element (or its positioned ancestor) placed with absolute / fixed: top / left move it, not the flow
+    absolute = {(bp, str(n.get("pc"))): True for bp in BPS for n in (nodes or {}).get(bp) or [] if n.get("p")}
     for bp in BPS:
         frame = (spec.get("breakpoints") or {}).get(bp) or {}
         built = [d for d in (doms or {}).get(bp) or [] if d.get("inked", True)]
@@ -148,7 +210,10 @@ def feedback(report: dict, doms: dict, spec: dict, elements: list[dict] | None =
             fs, dfs = _px(d.get("font_size")), t.get("size_px")
             bits, mag = [], 0
             far = max(abs(y - ty), abs(x - tx)) > FAR
-            if far:
+            if absolute.get((bp, str(d.get("pc")))) and max(abs(y - ty), abs(x - tx)) > 8:
+                bits.append(f"absolute — top Δ {ty - y:+d}px, left Δ {tx - x:+d}px")
+                mag += max(abs(y - ty), abs(x - tx))
+            elif far:
                 bits.append(f"far off (Δ y {ty - y:+d}, x {tx - x:+d} px) — likely caused by the layout above or around "
                             f"it; fix that, not with margins")
                 mag += max(abs(y - ty), abs(x - tx))
@@ -169,6 +234,7 @@ def feedback(report: dict, doms: dict, spec: dict, elements: list[dict] | None =
                 rows.append((mag, f"[{d.get('pc')}] '{t['text'][:40]}' {bp}: " + ", ".join(bits), (bp, str(d.get("pc")))))
     rows.sort(key=lambda r: -r[0])
     hints, covered = _structure(placed, elements)
+    rows.sort(key=lambda r: -r[0])
     out = hints + [r[1] for r in rows if r[2] not in covered][:MAX_ROWS]
     fl = report.get("fluidity") or {}
     for w, v in (fl.get("widths") or {}).items():
@@ -176,7 +242,10 @@ def feedback(report: dict, doms: dict, spec: dict, elements: list[dict] | None =
             continue
         why = []
         if v.get("overflow"):
-            why.append(f"{v['overflow']} px sideways scroll (something is wider than the screen)")
+            culprits = ((report.get("between") or {}).get(str(w)) or {}).get("overflowers") or []
+            named = "; ".join(f"[{c.get('pc')}] <{c.get('tag')}> is {c.get('w')} px wide (ends at {c.get('right')} px)"
+                              for c in culprits[:3])
+            why.append(f"{v['overflow']} px sideways scroll" + (f" — {named}" if named else " (something is wider than the screen)"))
         if v.get("overlaps"):
             why.append(f"{v['overlaps']} overlapping texts")
         if v.get("centre_drift") and v["centre_drift"] > 0.05:
@@ -224,7 +293,7 @@ def repair(code: str, *, spec: dict, check, propose, rounds: int = 3, candidates
     best_code, best, best_res = tagged, start, cur
     history, notes = [dict(start, round=0)], []
     for r in range(1, rounds + 1):
-        fb = feedback_fn(best_res["report"], best_res.get("dom") or {}, spec, elements)
+        fb = feedback_fn(best_res["report"], best_res.get("dom") or {}, spec, elements, best_res.get("nodes") or {})
         if not fb:
             break
         if notes:

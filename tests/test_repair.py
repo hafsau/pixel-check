@@ -308,3 +308,42 @@ def test_the_repair_prompt_carries_the_design_spec_and_the_measurements():
         return []
     R.repair(CODE, spec=SPEC, check=FakeCheck(), propose=propose, rounds=1, candidates=1)
     assert "MEASURED" in calls[0] and "DESIGN" in calls[0] and "| Plan your week |" in calls[0]
+
+
+# blocks and width culprits (Oct 7): the feedback named texts only, so missing / wrong-size panels, inputs and
+# buttons were invisible to the model, and "sideways scroll" did not say what was too wide
+def test_block_feedback_reports_size_and_missing_panels():
+    spec = {"breakpoints": {"tablet": {"size": [768, 1024], "texts": [], "blocks": [
+        {"box": [96, 80, 576, 700], "fill": "#141414"},                 # the sign-in card
+        {"box": [140, 300, 488, 48], "fill": "#e50914"},                # the red button
+        {"box": [0, 1000, 768, 1], "fill": "#333333", "rule": True}]}}}  # a divider: ignored
+    nodes = {"tablet": [{"pc": "6", "v": True, "b": [140, 300, 300, 48], "bg": "rgb(229, 9, 20)"},
+                        {"pc": "9", "v": True, "b": [0, 0, 768, 40], "bg": "rgb(255, 255, 255)"}]}
+    fb = R.feedback({"fluidity": {}}, {}, spec, None, nodes)
+    assert re.search(r"BOX \[6\] #e50914 tablet: width 300→488", fb)
+    assert re.search(r"MISSING BOX #141414 tablet: .*96,80 \(576×700\)", fb)
+    assert "#333333" not in fb
+
+
+def test_width_rows_name_what_is_too_wide():
+    rep = {"fluidity": {"widths": {"360": {"overflow": 260, "overlaps": 0, "ok": False}}},
+           "between": {"360": {"overflowers": [{"pc": "12", "tag": "div", "w": 620, "right": 620, "text": "Basic Pro"}]}}}
+    fb = R.feedback(rep, {}, {"breakpoints": {}}, None)
+    assert "WIDTH 360px" in fb and "[12] <div> is 620 px wide" in fb
+
+
+def test_absolutely_positioned_elements_get_top_left_changes_not_far_off():
+    spec = {"breakpoints": {"mobile": {"size": [390, 844], "texts": [
+        {"text": "Continue", "box": [32, 300, 80, 18], "size_px": 16, "measured": True}], "blocks": []}}}
+    dom = {"mobile": [{"pc": "5", "text": "Continue", "box": [120, 600, 80, 18], "font_size": "16px"}]}
+    nodes = {"mobile": [{"pc": "5", "v": True, "p": True, "b": [120, 600, 80, 18], "bg": ""}]}
+    fb = R.feedback({"fluidity": {}}, dom, spec, None, nodes)
+    assert "far off" not in fb and re.search(r"\[5\] 'Continue' mobile: absolute — top Δ -300px, left Δ -88px", fb)
+
+
+def test_design_boxes_match_build_elements_one_to_one():
+    spec = {"breakpoints": {"mobile": {"size": [390, 844], "texts": [], "blocks": [
+        {"box": [16, 300, 358, 36], "fill": "#ffffff"}, {"box": [16, 350, 358, 36], "fill": "#ffffff"}]}}}
+    nodes = {"mobile": [{"pc": "5", "v": True, "b": [16, 300, 200, 36], "bg": "rgb(255, 255, 255)"}]}
+    fb = R.feedback({"fluidity": {}}, {}, spec, None, nodes)
+    assert fb.count("BOX [5]") == 1

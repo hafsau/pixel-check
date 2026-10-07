@@ -3,6 +3,7 @@
 import { LIVE_BPS, joinUrl, liveFilesBase, progressOf, validatePageUrl, type LiveBp, type LiveStatus } from './live';
 import { fmtScore } from './score';
 import type { CellState, StripCell } from './viz';
+import { parseRepair, REPAIR_ROUNDS, type Repair } from './repair';
 
 export const MAX_CODE_CHARS = 300_000; // api.MAX_CODE
 /** Every width the check reports on: the three design sizes plus the sandbox's in-between sweep. */
@@ -38,6 +39,8 @@ export interface CheckDraft {
   code: string;
   owns: boolean;
   passcode: string;
+  /** "Also repair it" (App.jsx only). */
+  repair?: boolean;
 }
 
 /** What still stops the form from being sent, in words ("Still needed: …"). Only the active source counts. */
@@ -61,13 +64,28 @@ export function checkFields(source: CheckSource, url: string, code: string): { u
   return source === 'url' ? { url: url.trim() } : { code };
 }
 
-export function checkFormData(frames: Record<LiveBp, Blob>, d: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode'>): FormData {
+/** Repair works on code only: the checkbox counts on the App.jsx tab and is never sent with a URL (the API answers 422). */
+export function wantsRepair(source: CheckSource, repair: boolean | undefined): boolean {
+  return source === 'code' && !!repair;
+}
+
+export function checkFormData(frames: Record<LiveBp, Blob>, d: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode' | 'repair'>): FormData {
   const fd = new FormData();
   LIVE_BPS.forEach((bp) => fd.append(bp, frames[bp], `${bp}.png`));
   Object.entries(checkFields(d.source, d.url, d.code)).forEach(([k, v]) => fd.append(k, v));
   fd.append('owns', d.owns ? 'true' : 'false');
   fd.append('passcode', d.passcode);
+  if (wantsRepair(d.source, d.repair)) fd.append('repair', 'true');
   return fd;
+}
+
+/** Where the form goes after starting a check. `?repair=1` lets the progress page list the repair stage up front. */
+export function checkPath(id: string, repair: boolean): string {
+  return `/check/${encodeURIComponent(id)}${repair ? '?repair=1' : ''}`;
+}
+
+export function repairRequested(search: string): boolean {
+  return new URLSearchParams(search).get('repair') === '1';
 }
 
 // ------------------------------------------------------------------------------------------------ check.json
@@ -126,6 +144,8 @@ export interface CheckBundle {
   designTexts: Partial<Record<LiveBp, DesignText[]>>;
   usd: number | null;
   report: CheckReport;
+  /** Nemotron's repair of the App.jsx; null when not requested. */
+  repair: Repair | null;
 }
 
 type Obj = Record<string, unknown>;
@@ -226,6 +246,7 @@ export function parseCheck(raw: unknown, fallbackPerBp?: Partial<Record<LiveBp, 
     }),
     usd: num(raw.usd),
     report: parseReport(raw.report, fallbackPerBp),
+    repair: parseRepair(raw.repair),
   };
 }
 
@@ -363,6 +384,11 @@ const CHECK_REST = [
   { id: 'score', label: 'Measuring every size' },
 ];
 
-export function checkStages(st: Pick<LiveStatus, 'state' | 'stages' | 'source'>) {
-  return progressOf([st.source?.url ? CHECK_CAPTURE : CHECK_RENDER, ...CHECK_REST], st);
+const CHECK_REPAIR = { id: 'repair', label: `Repairing (≤ ${REPAIR_ROUNDS} rounds)` };
+
+/** The check's stages; App.jsx checks add "repair" when it was asked for or the server already reports it. */
+export function checkStages(st: Pick<LiveStatus, 'state' | 'stages' | 'source'>, opts: { repair?: boolean } = {}) {
+  const isUrl = !!st.source?.url;
+  const repair = !isUrl && (!!opts.repair || st.stages.some((s) => s.stage === 'repair'));
+  return progressOf([isUrl ? CHECK_CAPTURE : CHECK_RENDER, ...CHECK_REST, ...(repair ? [CHECK_REPAIR] : [])], st);
 }

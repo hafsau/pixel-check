@@ -2,6 +2,7 @@
 import { useEffect, useReducer, useRef } from 'react';
 import { apiBase, apiErrorMessage, initialPoll, joinUrl, pollReducer, POLL_MS, type LiveBp, type LiveStatus, type PollState } from './live';
 import { checkBundleUrl, checkFormData, parseCheck, type CheckBundle, type CheckDraft } from './check';
+import { repairFileUrls, type Repair } from './repair';
 
 export interface Health {
   live: boolean;
@@ -92,7 +93,7 @@ export async function startUrlRun(url: string, owns: boolean, passcode: string):
 }
 
 /** Check mode: POST /api/checks (three frames + exactly one of url / code + owns + passcode). Same errors as live runs. */
-export async function startCheck(frames: Record<LiveBp, File>, draft: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode'>): Promise<{ ok: true; id: string } | { ok: false; status: number; message: string }> {
+export async function startCheck(frames: Record<LiveBp, File>, draft: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode' | 'repair'>): Promise<{ ok: true; id: string } | { ok: false; status: number; message: string }> {
   try {
     const res = await fetch(joinUrl(apiBase(), '/api/checks'), { method: 'POST', body: checkFormData(frames, draft) });
     const b = await body(res);
@@ -110,4 +111,17 @@ export async function getCheck(id: string, status: LiveStatus | null | undefined
   const res = await fetch(checkBundleUrl(apiBase(), id, status?.bundle), { cache: 'no-store' });
   if (!res.ok) throw new Error(`The check result could not be loaded (${res.status}).`);
   return parseCheck(await res.json(), status?.result?.per_bp ?? null);
+}
+
+/** The original and the repaired App.jsx of a repaired check, as text. */
+export async function getRepairCode(id: string, repair: Repair): Promise<{ original: string; repaired: string }> {
+  const urls = repairFileUrls(apiBase(), id, repair);
+  if (!urls) throw new Error('The repaired code is not available.');
+  const text = async (u: string) => {
+    const res = await fetch(u, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`The code could not be loaded (${res.status}).`);
+    return res.text();
+  };
+  const [original, repaired] = await Promise.all([text(urls.original), text(urls.repaired)]);
+  return { original, repaired };
 }
