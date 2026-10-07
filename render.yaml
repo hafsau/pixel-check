@@ -1,0 +1,37 @@
+# Render blueprint for the PixelCheck live API (Docker). Secrets are set in the Render dashboard (sync: false) —
+# never in this file. One instance only: run state, caps and the spend ledger live on the attached disk.
+services:
+  - type: web
+    name: pixelcheck-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /api/health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NEBIUS_API_KEY
+        sync: false
+      - key: NEBIUS_AI_PROJECT
+        sync: false
+      - key: LIVE_PASSCODE
+        sync: false
+      - key: LIVE_ORIGINS
+        sync: false            # the web app's origin, e.g. https://pixelcheck.vercel.app
+      - key: LIVE_ENABLED
+        value: "1"
+      - key: LIVE_DAILY_RUNS
+        value: "10"
+      - key: LIVE_TOTAL_RUNS
+        value: "40"
+      - key: LIVE_PER_IP_DAILY
+        value: "3"
+      - key: LIVE_TRUST_PROXY
+        value: "1"             # Render terminates TLS in front of the app: client IP from X-Forwarded-For
+      - key: OWNED_HOSTS
+        value: hafsausmani.com
+      - key: SPEND_CAP_USD
+        sync: false            # what is left of the credit, minus headroom

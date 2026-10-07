@@ -1,0 +1,20 @@
+[
+ {
+  "id": "hafsausmani-home",
+  "type": "static",
+  "title": "hafsausmani.com \u2014 home",
+  "label": "owned site \u00b7 live run",
+  "page": "frames",
+  "match": 86.97,
+  "per_bp": {
+   "mobile": 94.16,
+   "tablet": 92.9,
+   "desktop": 86.97
+  },
+  "created": 1791405053.598,
+  "usd": 0.0774,
+  "fluid_pass": true,
+  "thumb": "c/65c5cbdd/mobile.webp",
+  "source": "owned:hafsausmani.com"
+ }
+]

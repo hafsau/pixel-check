@@ -1,20 +1,19 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { rmSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { shipRuns } from './scripts/publishedRuns';
 
 /**
- * public/runs/ currently holds dev bundles with third-party screenshots — they must never ship.
- * Production builds drop dist/runs unless PC_INCLUDE_RUNS=1 (set it once the bundles are
- * replaced with original benchmark designs).
+ * public/runs/ holds dev bundles with third-party screenshots — they must never ship. Production builds replace
+ * dist/runs with ui/published/ (bundles published with tools/publish_run.py: owned sites / original designs).
+ * PC_INCLUDE_RUNS=1 keeps the dev bundles for local previews only.
  */
 function dropRunsFromBuild(): Plugin {
   return {
-    name: 'pc-drop-runs',
+    name: 'pc-ship-runs',
     apply: 'build',
     closeBundle() {
-      if (process.env.PC_INCLUDE_RUNS === '1') return;
-      rmSync(resolve(__dirname, 'dist/runs'), { recursive: true, force: true });
+      shipRuns(resolve(__dirname, 'dist'), resolve(__dirname, 'published'), process.env.PC_INCLUDE_RUNS === '1');
     },
   };
 }

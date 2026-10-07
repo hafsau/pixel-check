@@ -1,0 +1,15 @@
+.env
+.env.*
+.git
+.venv
+**/node_modules
+**/__pycache__
+out
+var
+benchmarks-dev
+ui
+tests
+docs
+gates
+*.png
+!sandbox/fonts/**

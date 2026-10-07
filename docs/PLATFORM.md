@@ -55,3 +55,11 @@ Decision: **Gemma 3 27B** reads the designs (perceive) and does the visual criti
   that would be testing Nebius's infrastructure without authorisation. Open question for Nebius (FEEDBACK):
   are sandbox egress rules restricting internal addresses?
 - Real guarded capture: hafsausmani.com in 19 s, navigation recorded, nothing blocked, verification passed.
+
+## API image (Oct 7)
+| Check | Result |
+|---|---|
+| `contree build` of the root `Dockerfile` (`python:3.12-slim` + tesseract-ocr + nodejs) from a clean staging copy | builds; `python -m orchestrator.preflight --static` passes in the image |
+| Tesseract in the image | **5.5.0** (Debian package; the Mac has 5.5.x) |
+| OCR parity on a stored frame (hafsausmani.com mobile) | 8 of 9 lines identical within 2 px; the image reads "SEE MY WORK" in full where the Mac read "SEE MY" |
+| `contree build` and `.dockerignore` | not documented → never build from the repo folder (it holds `.env`); stage only the needed files |

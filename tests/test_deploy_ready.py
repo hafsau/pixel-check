@@ -71,3 +71,63 @@ def test_sandbox_run_refused_past_the_global_cap(tmp_path, monkeypatch):
     sb, _ = _sandbox(tmp_path, monkeypatch, cap=1.0, spent=1.5)
     with pytest.raises(SpendCapExceeded):
         sb.run("echo hi")
+
+
+# Phase 4 deploy files (Oct 7): the Render blueprint, the API Dockerfile, the web app's Vercel config
+def _render_env() -> dict:
+    """key → {"value"|"sync"} from render.yaml (tiny parser: no yaml dependency)."""
+    env, cur = {}, None
+    for line in (ROOT / "render.yaml").read_text().splitlines():
+        m = re.match(r"\s*- key: (\w+)", line)
+        if m:
+            cur = m.group(1)
+            env[cur] = {}
+            continue
+        m = re.match(r"\s*(value|sync): (.+?)\s*(#.*)?$", line)
+        if m and cur:
+            env[cur][m.group(1)] = m.group(2).strip('"')
+    return env
+
+
+def test_render_env_vars_are_ones_the_server_reads():
+    code = (ROOT / "orchestrator" / "config.py").read_text()
+    for key in _render_env():
+        assert f'"{key}"' in code, f"{key} is not read by orchestrator/config.py"
+
+
+def test_render_secrets_have_no_values():
+    env = _render_env()
+    for key in ("NEBIUS_API_KEY", "NEBIUS_AI_PROJECT", "LIVE_PASSCODE"):
+        assert env[key] == {"sync": "false"}, key
+    assert env["LIVE_ENABLED"]["value"] == "1" and env["OWNED_HOSTS"]["value"] == "hafsausmani.com"
+
+
+def test_render_keeps_one_instance_and_a_disk_for_state():
+    y = (ROOT / "render.yaml").read_text()
+    assert "numInstances: 1" in y and "mountPath: /data" in y and "healthCheckPath: /api/health" in y
+
+
+def test_dockerignore_keeps_secrets_and_third_party_captures_out():
+    ign = (ROOT / ".dockerignore").read_text().split()
+    for p in (".env", ".env.*", "benchmarks-dev", "var", "out", "**/node_modules", ".venv"):
+        assert p in ign, p
+
+
+def test_dockerfile_ships_what_the_server_loads_and_stores_state_on_the_disk():
+    d = (ROOT / "Dockerfile").read_text()
+    for need in ("tesseract-ocr", "nodejs", "@babel/parser", "COPY sandbox/fonts", "COPY orchestrator", "COPY tools",
+                 "LIVE_DIR=/data/live", "LEDGER_PATH=/data/spend.jsonl", "VISION_CACHE_DIR=/data/cache/vision",
+                 "orchestrator.preflight --static", "uvicorn orchestrator.api:app"):
+        assert need in d, need
+    pin = re.search(r'"@babel/parser": "([\d.]+)"', (ROOT / "sandbox" / "package.json").read_text()).group(1)
+    assert f"@babel/parser@{pin}" in d
+
+
+def test_vercel_rewrites_client_routes_but_not_assets_or_replays():
+    v = json.loads((ROOT / "ui" / "vercel.json").read_text())
+    src = re.compile("^" + v["rewrites"][0]["source"].replace("(?!", "(?!") + "$")
+    for path in ("/run/abc", "/live/20261006-101740-bcabfc", "/check/x", "/brand"):
+        assert src.match(path), path
+    for path in ("/assets/index-abc.js", "/runs/index.json", "/favicon.svg"):
+        assert not src.match(path), path
+    assert v["outputDirectory"] == "dist"
