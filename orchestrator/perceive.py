@@ -288,7 +288,8 @@ def merge(vlm: dict, meas: dict) -> dict:
                     item.update(weight=ty["weight"], tracking_em=ty["tracking_em"], top_em=ty["top_em"],
                                 underline=ty.get("underline", False))
             else:
-                item.update(box=None, color=t.get("color"), measured=False)
+                item.update(box=None, color=t.get("color"), measured=False,
+                            vlm_box=t.get("box") if isinstance(t.get("box"), list) and len(t["box"]) == 4 else None)
         texts.append(item)
     # interpolate unmatched positions from neighbours, then snap into empty blocks
     empty_blocks = [b for b in meas["blocks"] if not b.get("contains_text")]
@@ -362,7 +363,9 @@ def fold_headings(frame: dict, loose: list | None = None) -> dict:
     one dark colour along the bottom edge spanning ≥ 30 % of the width. When a text could not be placed (approx box),
     the strokes are that text: their union is its box, its size comes from width per character, the blocks go."""
     W, H = frame["size"]
-    pending = [t for t in frame["texts"] if t.get("approx") and not t.get("inside_block")]
+    # a text the vision model itself placed in the upper part of the frame is not the one the bottom edge cut
+    pending = [t for t in frame["texts"] if t.get("approx") and not t.get("inside_block")
+               and not (t.get("vlm_box") and t["vlm_box"][1] < 0.4 * H)]
     if not pending:
         return frame
     groups: dict = {}
@@ -383,7 +386,7 @@ def fold_headings(frame: dict, loose: list | None = None) -> dict:
         y0 = min(b[1] for b in boxes)
         if x1 - x0 < 0.3 * W:
             continue
-        t = min(pending, key=lambda t: abs((t["box"][1] if t.get("box") else 0) - y0))
+        t = pending[-1]          # cut by the bottom edge: the last text still unplaced in reading order
         t.update(box=[x0, y0, x1 - x0, H - y0], measured=True, clipped=True, lines=1, line_boxes=[[x0, y0, x1 - x0, H - y0]],
                  line_texts=[t["text"]], color="#%02x%02x%02x" % tuple(_rgb(g[0]["fill"])))   # measured, not guessed
         t.pop("approx", None)

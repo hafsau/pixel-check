@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from oracle_spec import visible_gt  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = (ROOT / "tools/capture/capture.mjs").read_bytes()
+from orchestrator.api import capture_files  # noqa: E402  (capture.mjs + the modules it imports)
 
 
 def capture(sb: Sandbox, slug: str, state: str | None = None, click: str | None = None, bps: str | None = None) -> Path:
@@ -28,7 +28,7 @@ def capture(sb: Sandbox, slug: str, state: str | None = None, click: str | None 
     cmd = (f'cd /opt/pc && node /opt/pc/capture.mjs {slug}-lx "{meta["url"]}" --out /work/cap --fonts /opt/pc/fonts '
            f'--oracle --wait 2000{hide}{st}')
     for attempt in range(2):     # live pages time out now and then (lambda.ai ~1 in 4): one retry
-        r = sb.run(cmd, files={"/opt/pc/capture.mjs": SCRIPT}, timeout_s=420, networking=True)
+        r = sb.run(cmd, files=capture_files(), timeout_s=420, networking=True)
         print(slug, r.status, r.exit_code, f"${r.cost}", r.stdout[-400:], r.stderr[-600:] if r.exit_code else "")
         if r.exit_code == 0 and r.result_image:
             break

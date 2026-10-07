@@ -2,6 +2,7 @@ import { HowItWorks } from '../components/HowItWorks';
 import { RunList } from '../components/RunList';
 import { LiveRunPanel } from '../components/LiveRunPanel';
 import { HeroSweep } from '../components/hero/HeroSweep';
+import { CheckTeaser } from '../components/CheckTeaser';
 
 export function HomePage() {
   return (
@@ -10,6 +11,7 @@ export function HomePage() {
       <HowItWorks />
       <RunList />
       <LiveRunPanel />
+      <CheckTeaser />
     </div>
   );
 }

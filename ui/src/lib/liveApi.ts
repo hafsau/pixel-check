@@ -1,6 +1,7 @@
 // fetch wrappers for the live API. The passcode only travels in the POST body; it is never stored or logged.
 import { useEffect, useReducer, useRef } from 'react';
 import { apiBase, apiErrorMessage, initialPoll, joinUrl, pollReducer, POLL_MS, type LiveBp, type LiveStatus, type PollState } from './live';
+import { checkBundleUrl, checkFormData, parseCheck, type CheckBundle, type CheckDraft } from './check';
 
 export interface Health {
   live: boolean;
@@ -88,4 +89,25 @@ export async function startUrlRun(url: string, owns: boolean, passcode: string):
   } catch {
     return { ok: false, status: 0, message: apiErrorMessage(0, null) };
   }
+}
+
+/** Check mode: POST /api/checks (three frames + exactly one of url / code + owns + passcode). Same errors as live runs. */
+export async function startCheck(frames: Record<LiveBp, File>, draft: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode'>): Promise<{ ok: true; id: string } | { ok: false; status: number; message: string }> {
+  try {
+    const res = await fetch(joinUrl(apiBase(), '/api/checks'), { method: 'POST', body: checkFormData(frames, draft) });
+    const b = await body(res);
+    if (!res.ok) return { ok: false, status: res.status, message: apiErrorMessage(res.status, b) };
+    const id = (b as { id?: unknown } | null)?.id;
+    if (typeof id !== 'string') return { ok: false, status: res.status, message: apiErrorMessage(500, null) };
+    return { ok: true, id };
+  } catch {
+    return { ok: false, status: 0, message: apiErrorMessage(0, null) };
+  }
+}
+
+/** GET check.json for a finished check, parsed defensively. */
+export async function getCheck(id: string, status: LiveStatus | null | undefined): Promise<CheckBundle> {
+  const res = await fetch(checkBundleUrl(apiBase(), id, status?.bundle), { cache: 'no-store' });
+  if (!res.ok) throw new Error(`The check result could not be loaded (${res.status}).`);
+  return parseCheck(await res.json(), status?.result?.per_bp ?? null);
 }

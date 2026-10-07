@@ -1,8 +1,9 @@
 import { usePath } from '../lib/router';
+import { footerNote } from '../lib/footer';
 import { Mark } from './Logo';
 
 export function SiteFooter() {
-  const live = usePath().startsWith('/live/');
+  const note = footerNote(usePath());
   return (
     <footer className="mt-section border-t border-line">
       <div className="page flex flex-col gap-3 py-8 text-xs text-ink-muted sm:flex-row sm:items-center sm:justify-between">
@@ -13,7 +14,7 @@ export function SiteFooter() {
             <strong className="font-semibold text-ink">NVIDIA Nemotron</strong> models and Token Factory Sandboxes.
           </span>
         </p>
-        <p>{live ? 'Live mode: this run called real models and sandboxes.' : 'Replay mode: recorded runs, no models called.'}</p>
+        <p>{note}</p>
       </div>
     </footer>
   );

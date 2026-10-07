@@ -189,8 +189,18 @@ def _verify_capture(meta: dict, resolver):
             raise _Refused(policy.refusal(r))
 
 
+MAX_CODE = 300_000       # an App.jsx for check mode, characters
+
+
+def _refuse_sensitive(meta: dict):
+    sens = (meta or {}).get("sensitive") or {}
+    if any(sens.get(k) for k in ("password", "payment", "signin", "crypto")):
+        raise _Refused("this page has sign-in, password, payment or wallet fields — PixelCheck does not "
+                       "rebuild login, checkout or wallet pages from a URL; upload your own design frames instead")
+
+
 def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | None = None, capture=None,
-               resolver=None) -> FastAPI:
+               resolver=None, checker=None) -> FastAPI:
     from . import config
     s = {"enabled": config.LIVE_ENABLED, "passcode": config.LIVE_PASSCODE, "daily": config.LIVE_DAILY_RUNS,
          "total": config.LIVE_TOTAL_RUNS, "origins": config.LIVE_ORIGINS, "per_ip": config.LIVE_PER_IP_DAILY,
@@ -217,6 +227,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             st_p.write_text(json.dumps(st))
     run_pipeline = pipeline or default_pipeline
     run_capture = capture or default_capture
+    run_check = checker or default_checker
     resolve = resolver or _resolve
     app = FastAPI(title="PixelCheck live", docs_url=None, redoc_url=None)
     app.add_middleware(CORSMiddleware, allow_origins=list(s["origins"] or []), allow_methods=["GET", "POST"],
@@ -247,10 +258,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 owned = any(host == h or host.endswith("." + h) for h in (s.get("owned_hosts") or []))
                 frames, meta = run_capture(url, run_dir, emit, **({"owned": True} if owned else {}))
                 _verify_capture(meta or {}, resolve)
-                sens = (meta or {}).get("sensitive") or {}
-                if any(sens.get(k) for k in ("password", "payment", "signin", "crypto")):
-                    raise _Refused("this page has sign-in, password, payment or wallet fields — PixelCheck does not "
-                                   "rebuild login, checkout or wallet pages from a URL; upload your own design frames instead")
+                _refuse_sensitive(meta)
                 (run_dir / "frames").mkdir(parents=True, exist_ok=True)
                 for bp, data in frames.items():
                     (run_dir / "frames" / f"{bp}.png").write_bytes(data)
@@ -324,6 +332,90 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         (root / rid).mkdir(parents=True)
         write_status(rid, id=rid, state="queued", stages=[], created=time.time(), source={"url": _bare(url)})
         threading.Thread(target=worker, args=(rid, None, url), daemon=True).start()
+        return {"id": rid}
+
+    def check_worker(rid: str, kind: str, build: str, frames: dict[str, bytes]):
+        """Check mode: the build (URL or App.jsx) measured against the design frames → bundle/check.json + frames."""
+        from .check import CheckError, CheckRefused
+        run_dir = root / rid
+        stages = []
+
+        def emit(stage: str, **info):
+            stages.append({"stage": stage, "t": round(time.time(), 1), **info})
+            write_status(rid, state="running", stages=stages)
+
+        def verify(meta):
+            _verify_capture(meta or {}, resolve)
+            _refuse_sensitive(meta)
+        try:
+            write_status(rid, state="running")
+            out = run_check(kind, build, frames, run_dir, emit, verify)
+            rep = out.get("report") or {}
+            bundle = run_dir / "bundle"
+            paths = {}
+            for side, imgs in (("design", frames), ("build", out.get("build") or {})):
+                paths[side] = {}
+                for bp, data in imgs.items():
+                    (bundle / side).mkdir(parents=True, exist_ok=True)
+                    _webp(data, bundle / side / f"{bp}.webp")
+                    paths[side][bp] = f"{side}/{bp}.webp"
+            per_bp = rep.get("per_bp") or {bp: v.get("score") for bp, v in (rep.get("breakpoints") or {}).items()
+                                           if isinstance(v, dict)}
+            (bundle / "check.json").write_text(json.dumps({
+                "type": "check", "id": rid, "source": json.loads(status_path(rid).read_text()).get("source"),
+                "report": rep, "design": paths["design"], "build": paths["build"],
+                "design_texts": out.get("design_texts") or {}, "usd": out.get("usd")}))
+            write_status(rid, state="done", stages=stages,
+                         result={"match": rep.get("match"), "per_bp": per_bp,
+                                 "fluid_pass": (rep.get("fluidity") or {}).get("pass"), "usd": out.get("usd")},
+                         bundle=f"/api/runs/{rid}/files/check.json")
+        except (_Refused, CheckRefused) as e:
+            write_status(rid, state="failed", stages=stages, error=str(e))
+        except CheckError as e:
+            write_status(rid, state="failed", stages=stages, error=_scrub(str(e)))
+        except Exception as e:
+            write_status(rid, state="failed", stages=stages, error=_scrub(f"{type(e).__name__}: {e}"))
+
+    @app.post("/api/checks", status_code=202)
+    async def start_check(request: Request, mobile: UploadFile = File(...), tablet: UploadFile = File(...),
+                          desktop: UploadFile = File(...), url: str = Form(""), code: str = Form(""),
+                          owns: str = Form(""), passcode: str = Form("")):
+        if not s["enabled"]:
+            raise HTTPException(503, "live mode is switched off; replays still work")
+        if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
+            raise HTTPException(403, "wrong passcode")
+        if owns.strip().lower() not in ("true", "1", "yes", "on"):
+            raise HTTPException(422, "confirm that you own this build or have permission to check it")
+        url, has_code = url.strip(), bool(code.strip())
+        if bool(url) == has_code:
+            raise HTTPException(422, "give either the build's address or its App.jsx, not both")
+        if len(code) > MAX_CODE:
+            raise HTTPException(413, f"the App.jsx is larger than {MAX_CODE // 1000} k characters")
+        frames = {}
+        for bp, up in (("mobile", mobile), ("tablet", tablet), ("desktop", desktop)):
+            data = await up.read(MAX_BYTES + 1)
+            if len(data) > MAX_BYTES:
+                raise HTTPException(413, f"{bp}: the frame is larger than {MAX_BYTES // (1024 * 1024)} MB")
+            _check_png(bp, data)
+            frames[bp] = data
+        if url:
+            url = _check_url(url, resolve)
+            _policy_or_422(url)
+            allow = [h.lower() for h in (s.get("url_allow") or [])]
+            if allow:
+                from urllib.parse import urlsplit
+                host = (urlsplit(url).hostname or "").lower()
+                if not any(host == h or host.endswith("." + h) for h in allow):
+                    raise HTTPException(422, f"this demo only checks pages from: {', '.join(allow)}")
+        if not caps.take(visitor(request)):
+            raise HTTPException(429, "the live-run limit is reached; replays still work")
+        rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+        (root / rid / "frames").mkdir(parents=True)
+        for bp, data in frames.items():
+            (root / rid / "frames" / f"{bp}.png").write_bytes(data)
+        write_status(rid, id=rid, kind="check", state="queued", stages=[], created=time.time(),
+                     source={"url": _bare(url)} if url else {"code": True})
+        threading.Thread(target=check_worker, args=(rid, "url" if url else "code", url or code, frames), daemon=True).start()
         return {"id": rid}
 
     @app.get("/api/runs/{rid}")
@@ -405,6 +497,35 @@ def _save_owned(got: dict[str, bytes], run_dir: Path) -> None:
         (run_dir / "assets.json").write_text(json.dumps(clean))
 
 
+def _webp(png: bytes, dest: Path) -> None:
+    from PIL import Image
+    with Image.open(io.BytesIO(png)) as im:
+        im.convert("RGB").save(dest, "WEBP", lossless=True, method=4)
+
+
+def default_checker(kind: str, build: str, frames: dict[str, bytes], run_dir: Path, emit, verify) -> dict:
+    """Check mode with real models and sandboxes: perception reads the design frames (vision + OCR); the build is
+    captured (URL) or rendered (App.jsx) and scored in a disposable fork (orchestrator/check.py)."""
+    from . import config
+    from .check import check_code, check_url
+    from .perceive import perceive
+    from .sandbox import Sandbox
+    from .tf_client import TFClient
+    client = TFClient(run_id=run_dir.name, run_budget_usd=config.LIVE_RUN_BUDGET_USD)
+    sb = Sandbox()
+    read = lambda fr: perceive(client, fr)          # noqa: E731
+    out = (check_url(build, frames, sb=sb, read_design=read, verify=verify, emit=emit) if kind == "url"
+           else check_code(build, frames, sb=sb, read_design=read, emit=emit))
+    out["usd"] = round(client.run_spend, 4)
+    return out
+
+
+def capture_files(*scripts: str) -> dict[str, bytes]:
+    """The capture scripts uploaded into the sandbox at /opt/pc/ (capture.mjs and the modules it imports)."""
+    here = Path(__file__).resolve().parents[1] / "tools" / "capture"
+    return {f"/opt/pc/{n}": (here / n).read_bytes() for n in ("capture.mjs", "guard.mjs", *scripts)}
+
+
 def default_capture(url: str, run_dir: Path, emit, owned: bool = False) -> tuple[dict[str, bytes], dict]:
     """Capture a public page at 390×844 / 768×1024 / 1280×800 in a Token Factory sandbox (networking on for the
     capture only, media replaced by blocks, fonts normalised — tools/capture/capture.mjs). The URL is shell-quoted
@@ -412,11 +533,10 @@ def default_capture(url: str, run_dir: Path, emit, owned: bool = False) -> tuple
     import shlex
     from .sandbox import Sandbox
     emit("capture")
-    script = (Path(__file__).resolve().parents[1] / "tools" / "capture" / "capture.mjs").read_bytes()
     cmd = (f"cd /opt/pc && node /opt/pc/capture.mjs page {shlex.quote(url)} --out /work/cap --fonts /opt/pc/fonts "
            f"--wait 2000 --block-private" + (" --real --assets" if owned else ""))
     sb = Sandbox()
-    r = sb.run(cmd, files={"/opt/pc/capture.mjs": script}, timeout_s=300, networking=True)
+    r = sb.run(cmd, files=capture_files(), timeout_s=300, networking=True)
     if r.exit_code != 0 or not r.result_image:
         raise RuntimeError(f"the page could not be captured ({r.status})")
     got = sb.download_dir(r.result_image, "/work/cap/page")

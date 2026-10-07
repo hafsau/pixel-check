@@ -4,8 +4,12 @@
 
 Reads /work/out (render outputs + lint.json) and /work/targets ({bp}.png, optional {bp}.text.json).
 Any lint violation or integrity failure sets match = 0: a cheat never outranks an honest attempt.
+
+    python3 evaluate.py --check  ->  check mode (Phase 3): any page's capture scored against design frames, with the
+                                      width sweep; no lint / integrity verdict — someone else's code is measured, not graded
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -13,7 +17,20 @@ import fluidity
 import integrity
 import score
 
-OUT, TARGETS = Path("/work/out"), Path("/work/targets")
+OUT, TARGETS = Path(os.environ.get("PC_OUT", "/work/out")), Path(os.environ.get("PC_TARGETS", "/work/targets"))
+
+
+def check():
+    checks_path = OUT / "checks.json"
+    if not checks_path.exists():
+        json.dump({"mode": "check", "match": 0.0, "mean": 0.0, "disqualified": False, "reason": "the page could not be captured"},
+                  sys.stdout)
+        return
+    checks = json.loads(checks_path.read_text())
+    res = score.score_run(TARGETS, OUT, TARGETS if any(TARGETS.glob("*.text.json")) else None)
+    res.update(mode="check", disqualified=False, between=checks.get("between", {}), fluidity=fluidity.report(checks),
+               runtime_errors=checks.get("runtime_errors", [])[:10])
+    json.dump(res, sys.stdout)
 
 
 def main():
@@ -42,4 +59,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    check() if "--check" in sys.argv else main()

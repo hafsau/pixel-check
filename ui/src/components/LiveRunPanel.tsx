@@ -6,7 +6,7 @@ import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
 import { IconAlert } from './Icons';
 
-type HealthState = { status: 'loading' } | { status: 'ok'; health: Health } | { status: 'unreachable'; message: string };
+export type HealthState = { status: 'loading' } | { status: 'ok'; health: Health } | { status: 'unreachable'; message: string };
 
 /** Live mode: three frames + passcode → POST /api/runs → /live/<id>. The passcode lives only in this component's state. */
 export function LiveRunPanel() {
@@ -190,7 +190,7 @@ export function LiveRunPanel() {
   );
 }
 
-function Availability({ health }: { health: HealthState }) {
+export function Availability({ health }: { health: HealthState }) {
   if (health.status === 'loading')
     return (
       <span className="chip" role="status">

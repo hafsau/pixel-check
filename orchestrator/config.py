@@ -7,7 +7,7 @@ load_dotenv()
 
 TF_BASE = os.environ.get("TF_BASE", "https://api.tokenfactory.nebius.com/v1/")
 SANDBOX_BASE = os.environ.get("SANDBOX_BASE", "https://api.tokenfactory.nebius.com/sandboxes/v1")
-RUNTIME_IMAGE = os.environ.get("RUNTIME_IMAGE", "tag:pixel-check-runtime:v13")
+RUNTIME_IMAGE = os.environ.get("RUNTIME_IMAGE", "tag:pixel-check-runtime:v16")
 
 SANDBOX_TIMEOUT_S = int(os.environ.get("SANDBOX_TIMEOUT_S", "180"))
 SANDBOX_POLL_S = 1.0

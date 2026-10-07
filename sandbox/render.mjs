@@ -20,10 +20,10 @@ import { chromium } from "playwright";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const BREAKPOINTS = { mobile: [390, 844], tablet: [768, 1024], desktop: [1280, 800] };
 export const BETWEEN_WIDTHS = [360, 375, 500, 1024, 1600];   // fluidity check (council, Oct 1)
-const NOTEXT_CSS = `*,*::before,*::after{color:transparent!important;-webkit-text-fill-color:transparent!important;
+export const NOTEXT_CSS = `*,*::before,*::after{color:transparent!important;-webkit-text-fill-color:transparent!important;
 text-shadow:none!important;text-decoration-color:transparent!important;-webkit-background-clip:border-box!important;
 background-clip:border-box!important}*::placeholder{color:transparent!important;-webkit-text-fill-color:transparent!important}`;
-const CHROMIUM_ARGS = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--font-render-hinting=none"];
+export const CHROMIUM_ARGS = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--font-render-hinting=none"];
 
 const arg = (name, dflt) => {
   const i = process.argv.indexOf(name);
@@ -41,7 +41,7 @@ function fontCss() {
 }
 
 // Determinism: no motion, no caret, no scrollbars, no smoothing differences.
-const DETERMINISM_CSS = `*,*::before,*::after{animation:none!important;transition:none!important;
+export const DETERMINISM_CSS = `*,*::before,*::after{animation:none!important;transition:none!important;
 caret-color:transparent!important}html{scrollbar-width:none}::-webkit-scrollbar{display:none}
 body{margin:0;font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased}`;
 
@@ -69,7 +69,7 @@ export async function build(appPath, log) {
 
 // Runs in the page: can a human see this element's own text? (red-team: 1 px / transparent /
 // opacity-0.01 / off-screen text used to earn text credit and to dilute the integrity check)
-function inkInfo(el, cs, r, vw, vh) {
+export function inkInfo(el, cs, r, vw, vh) {
   let op = 1;
   for (let a = el; a && a.nodeType === 1; a = a.parentElement) op *= Number(getComputedStyle(a).opacity);
   const m = cs.color.match(/rgba?\(([^)]+)\)/);
@@ -83,19 +83,40 @@ function inkInfo(el, cs, r, vw, vh) {
 }
 
 // Runs in the page: every visible element that owns a text node.
-function extractDom() {
+export function extractDom() {
   const out = [];
   const vis = /(^|\s)((sm|md|lg|xl|2xl):)?(hidden|block|flex|grid|inline|inline-block|inline-flex|contents)(?=\s|$)/g;
-  const all = [...document.querySelectorAll("#root *")];
+  const all = [...document.querySelectorAll((window.__pcRoot || "#root") + " *")];
+  // split-text animations (check mode: real pages) wrap each letter in an element: ≥ 3 children of ≤ 2 characters
+  // and no text of the parent's own = ONE text, letters joined as seen (a space only where the gap is > 0.15 em)
+  const split = new Set(all.filter((e) => {
+    const kids = [...e.children];
+    if (kids.length < 3 || [...e.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())) return false;
+    const lens = kids.map((k) => k.textContent.trim().length);
+    return lens.every((l) => l <= 2) && lens.filter((l) => l > 0).length >= 3 && kids.every((k) => !k.children.length);
+  }));
+  const joined = (e) => {
+    const fs = parseFloat(getComputedStyle(e).fontSize) || 16;
+    let t = "", prev = null;
+    for (const k of e.children) {
+      const ch = k.textContent.trim(), r = k.getBoundingClientRect();
+      if (!ch) continue;
+      if (prev && r.left - prev.right > 0.15 * fs) t += " ";
+      t += ch; prev = r;
+    }
+    return t;
+  };
   all.forEach((el, idx) => {
-    let own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim();
+    if (split.has(el.parentElement)) return;
+    let own = split.has(el) ? joined(el)
+      : [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim();
     // form controls show text that is not a text node (red-team r2 #4: placeholders earned no credit)
     if (!own && ["INPUT", "TEXTAREA"].includes(el.tagName)) own = (el.value || el.placeholder || "").trim();
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     if (!own || r.width === 0 || r.height === 0 || cs.visibility === "hidden" || Number(cs.opacity) === 0) return;
     const ink = window.__inkInfo(el, cs, r, innerWidth, innerHeight);
-    out.push({ idx, pc: el.closest("[data-pc]")?.getAttribute("data-pc") ?? null, inked: ink.inked, onscreen: ink.onscreen, alpha: ink.alpha,
+    out.push({ idx, ...(split.has(el) ? { split: true } : {}), pc: el.closest("[data-pc]")?.getAttribute("data-pc") ?? null, inked: ink.inked, onscreen: ink.onscreen, alpha: ink.alpha,
       tag: el.tagName.toLowerCase(), text: own.slice(0, 200),
       box: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
       font_size: cs.fontSize, font_weight: cs.fontWeight, font_family: cs.fontFamily.split(",")[0].replace(/['"]/g, ""),
@@ -107,10 +128,10 @@ function extractDom() {
 }
 
 // Runs in the page: where the content sits and whether the full page has dead gaps (fluidity check).
-function fluidity() {
+export function fluidity() {
   const vw = innerWidth, vh = innerHeight;
   const boxes = [];
-  for (const el of document.querySelectorAll("#root *")) {
+  for (const el of document.querySelectorAll((window.__pcRoot || "#root") + " *")) {
     const cs = getComputedStyle(el);
     if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
     const r = el.getBoundingClientRect();
@@ -129,8 +150,9 @@ function fluidity() {
   let maxGap = 0, end = 0;
   for (const [a, b] of iv) { if (a > end) maxGap = Math.max(maxGap, a - end); end = Math.max(end, b); }
   const pageH = document.documentElement.scrollHeight;
-  const root = document.querySelector("#root > *");
-  const rootH = root ? root.getBoundingClientRect().height : 0;
+  const sel = window.__pcRoot || "#root";     // check mode measures any page: its body is the root
+  const root = sel === "body" ? document.body : document.querySelector(sel + " > *");
+  const rootH = root ? (sel === "body" ? Math.max(root.scrollHeight, pageH) : root.getBoundingClientRect().height) : 0;
   return { content: [Math.round(fl), Math.round(fr)], centre_ratio: +(((fl + fr) / 2) / vw).toFixed(3),
            left_ratio: +(fl / vw).toFixed(3), right_gap_ratio: +((vw - fr) / vw).toFixed(3),
            page_height: pageH, max_vertical_gap: Math.round(maxGap), viewport_h: vh,
@@ -140,14 +162,17 @@ function fluidity() {
 }
 
 // Runs in the page: layout health at widths we don't have designs for.
-function layoutHealth() {
+export function layoutHealth() {
   const doc = document.documentElement;
   const overflow_px = Math.max(0, doc.scrollWidth - doc.clientWidth);
   const boxes = [];
-  for (const el of document.querySelectorAll("#root *")) {
+  for (const el of document.querySelectorAll((window.__pcRoot || "#root") + " *")) {
     const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
     const r = el.getBoundingClientRect();
-    if (own && r.width > 0 && r.height > 0) boxes.push({ r, el });
+    if (!own || r.width <= 0 || r.height <= 0) continue;
+    // text nobody can see (opacity 0, hidden, clipped — a real page's closed modal) cannot overlap anything
+    if (window.__inkInfo && !window.__inkInfo(el, getComputedStyle(el), r, innerWidth, innerHeight).inked) continue;
+    boxes.push({ r, el });
   }
   let overlaps = 0;
   const examples = [];
@@ -168,7 +193,7 @@ function layoutHealth() {
 // The DOM tree is identical at every width (JS width detection is banned by lint.mjs), so the
 // index identifies the same node across breakpoints.
 function integrityDump() {
-  const all = [...document.querySelectorAll("#root *")];
+  const all = [...document.querySelectorAll((window.__pcRoot || "#root") + " *")];
   const index = new Map(all.map((el, i) => [el, i]));
   return all.map((el) => {
     const r = el.getBoundingClientRect();
@@ -228,7 +253,7 @@ export function integrity(dumps) {
 
 // One frame: screenshot, DOM, layout health, integrity dump, text-transparent and colour-coded passes (the scorer
 // needs all of them). Used for the breakpoint renders and for every interaction scenario (--interact).
-async function captureFrame(page, outDir, name) {
+export async function captureFrame(page, outDir, name) {
   await page.screenshot({ path: path.join(outDir, `${name}.png`), fullPage: false });
   const dom = await page.evaluate(extractDom);
   fs.writeFileSync(path.join(outDir, `${name}.dom.json`), JSON.stringify(dom));
@@ -243,8 +268,8 @@ async function captureFrame(page, outDir, name) {
   await page.screenshot({ path: path.join(outDir, `${name}.notext.png`), fullPage: false });
   // Third pass: each text element painted its own colour, so every visible glyph pixel can be
   // attributed to exactly one element (text hidden under a labelled button can't borrow its pixels).
-  const codes = await page.evaluate((idxs) => {
-    const all = [...document.querySelectorAll("#root *")];
+  const codes = await page.evaluate(([idxs, splits]) => {
+    const all = [...document.querySelectorAll((window.__pcRoot || "#root") + " *")];
     const rules = [], out = {};
     idxs.forEach((i, k) => {
       // golden-angle hues, full saturation, alternating lightness → distinct, far from grey backgrounds
@@ -253,12 +278,14 @@ async function captureFrame(page, outDir, name) {
       const [r1, g1, b1] = hh < 1 ? [ch, xx, 0] : hh < 2 ? [xx, ch, 0] : hh < 3 ? [0, ch, xx] : hh < 4 ? [0, xx, ch] : hh < 5 ? [xx, 0, ch] : [ch, 0, xx];
       const c = `rgb(${Math.round((r1 + m) * 255)}, ${Math.round((g1 + m) * 255)}, ${Math.round((b1 + m) * 255)})`;
       all[i].setAttribute("data-pcc", String(i));
-      rules.push(`[data-pcc="${i}"],[data-pcc="${i}"]::placeholder{color:${c}!important;-webkit-text-fill-color:${c}!important}`);
+      // a split word's letters carry their own colour rules: they take the word's code too
+      const sel = splits.includes(i) ? `[data-pcc="${i}"],[data-pcc="${i}"] > *` : `[data-pcc="${i}"]`;
+      rules.push(`${sel},[data-pcc="${i}"]::placeholder{color:${c}!important;-webkit-text-fill-color:${c}!important}`);
       out[i] = c;
     });
     const st = document.createElement("style"); st.textContent = rules.join("\n"); document.head.appendChild(st);
     return out;
-  }, dom.map((e) => e.idx));
+  }, [dom.map((e) => e.idx), dom.filter((e) => e.split).map((e) => e.idx)]);
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   await page.screenshot({ path: path.join(outDir, `${name}.coded.png`), fullPage: false });
   for (const e of dom) e.code = codes[e.idx];

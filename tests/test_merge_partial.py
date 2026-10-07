@@ -147,3 +147,25 @@ def test_clip_size_uses_a_measured_headline_of_a_nearby_colour():
                dict(heading("USMANI", (184, 571, 200, 16), False, True), color="#000000")], strokes())
     fold_headings(f)
     assert 260 <= f["texts"][1]["size_px"] <= 280
+
+
+def test_the_clipped_headline_is_the_last_unplaced_text_in_reading_order():
+    """Both name lines unread (a display font OCR cannot read): the strokes at the fold belong to the second."""
+    f = frame([heading("HAFSA", (184, 700, 200, 16), False, True), heading("USMANI", (184, 420, 200, 16), False, True)],
+              strokes())
+    fold_headings(f)
+    assert f["texts"][1].get("clipped") and not f["texts"][0].get("clipped")
+
+
+def test_a_text_the_vision_model_places_high_up_is_not_the_clipped_headline():
+    """The model listed only HAFSA (box in the upper third) and skipped the clipped second line: the strokes at the
+    fold stay blocks rather than becoming HAFSA."""
+    f = frame([dict(heading("HAFSA", (184, 420, 200, 16), False, True), vlm_box=[100, 250, 600, 200])], strokes())
+    fold_headings(f)
+    assert not f["texts"][0].get("clipped") and len(f["blocks"]) == 5
+
+
+def test_merge_keeps_the_vision_models_box_on_unplaced_texts():
+    m = meas([line("Hello", [10, 10, 50, 14])])
+    out = merge({"texts": [{"text": "Elsewhere", "role": "body", "size_px": 14, "box": [30, 600, 120, 20]}]}, m)
+    assert out["texts"][0]["vlm_box"] == [30, 600, 120, 20]

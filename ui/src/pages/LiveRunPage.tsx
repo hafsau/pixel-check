@@ -48,7 +48,7 @@ function LiveResult({ id, result, usd, source }: { id: string; result: boolean; 
   );
 }
 
-function useElapsed(since: number | undefined, running: boolean): number {
+export function useElapsed(since: number | undefined, running: boolean): number {
   const [start] = useState(() => Date.now() / 1000);
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
@@ -142,7 +142,7 @@ function LiveProgress({ id, poll, retry }: { id: string; poll: PollState; retry:
   );
 }
 
-function StageIcon({ state, n }: { state: StageState; n: number }) {
+export function StageIcon({ state, n }: { state: StageState; n: number }) {
   const base = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-pill border text-xs font-semibold';
   if (state === 'done')
     return (

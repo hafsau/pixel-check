@@ -19,6 +19,10 @@ export function SiteHeader() {
           <Link to="/#live" className="btn-ghost hidden sm:inline-flex">
             Live run
           </Link>
+          <Link to="/check" className="btn-ghost">
+            <span className="sm:hidden">Check</span>
+            <span className="hidden sm:inline">Check a build</span>
+          </Link>
           <ThemeToggle />
         </nav>
       </div>

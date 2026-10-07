@@ -95,7 +95,8 @@ export interface LiveStatus {
   bundle?: string | null;
   error?: string;
   created?: number;
-  source?: { url?: string } | null;
+  source?: { url?: string; code?: boolean } | null;
+  kind?: string;
 }
 
 export interface PollState {
@@ -143,7 +144,11 @@ const STAGES: { id: StageId; label: string }[] = [
 export type StageState = 'pending' | 'active' | 'done' | 'failed';
 
 export function stageProgress(st: Pick<LiveStatus, 'state' | 'stages' | 'source'>): { id: StageId; label: string; state: StageState; t?: number }[] {
-  const list = st.source?.url ? [CAPTURE, ...STAGES] : STAGES;
+  return progressOf(st.source?.url ? [CAPTURE, ...STAGES] : STAGES, st);
+}
+
+/** Stage list + the server's reached stages → each stage's state. Shared by live runs and checks. */
+export function progressOf<S extends { id: string; label: string }>(list: S[], st: Pick<LiveStatus, 'state' | 'stages'>): (S & { state: StageState; t?: number })[] {
   const seen = list.map((s) => st.stages.find((x) => x.stage === s.id));
   const last = seen.reduce((acc, x, i) => (x ? i : acc), -1);
   return list.map((s, i) => {

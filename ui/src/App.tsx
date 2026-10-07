@@ -9,12 +9,17 @@ import { InteractionPage } from './pages/InteractionPage';
 import { GroupPage } from './pages/GroupPage';
 import { LiveRunPage } from './pages/LiveRunPage';
 import { BrandPage } from './pages/BrandPage';
+import { CheckPage } from './pages/CheckPage';
+import { CheckRunPage } from './pages/CheckRunPage';
 
 function Routes() {
   const path = usePath();
   if (path === '/' || path === '') return <HomePage />;
   if (path === '/brand') return <BrandPage />;
-  let m = matchPath('/run/:id/result', path);
+  if (path === '/check' || path === '/check/') return <CheckPage />;
+  let m = matchPath('/check/:id', path);
+  if (m) return <CheckRunPage key={m.id} id={m.id} />;
+  m = matchPath('/run/:id/result', path);
   if (m) return <ResultPage key={m.id} id={m.id} />;
   m = matchPath('/live/:id/result', path);
   if (m) return <LiveRunPage key={`${m.id}-r`} id={m.id} result />;

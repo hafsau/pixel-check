@@ -35,6 +35,8 @@ export interface StripCell {
   width: number;
   state: CellState;
   detail?: string;
+  /** A design size's score, shown inside the cell by the interactive strip. */
+  score?: number | null;
 }
 
 /** Overflow wins over overlap; no measurement = pending. */
