@@ -188,8 +188,16 @@ export function layoutHealth() {
   }
   // text cut off at the screen edge by a clipping wrapper (overflow hidden): no sideways scroll, still broken
   // (a text cut at the edge, plus the texts after it on the same line inside the same clipping wrapper — the rest
-  // of a too-wide row; an off-canvas menu with no text cut at the edge does not count)
+  // of a too-wide row; an off-canvas menu with no text cut at the edge does not count). Clipping on purpose does not
+  // count either: text moved by a transform or a looping animation inside the wrapper (marquee, peeking carousel),
+  // and display type whose glyph box overshoots by ≤ 5 % of its size (council follow-up, Oct 12: an honest site)
   let clipped_overflow_px = 0;
+  const moving = (el, stop) => {
+    for (let a = el; a && a !== stop; a = a.parentElement) {
+      if (a.hasAttribute("data-pc-motion") || getComputedStyle(a).transform !== "none") return true;
+    }
+    return false;
+  };
   const clipper = (el) => {
     for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
       if (/hidden|clip/.test(getComputedStyle(a).overflowX)) return a;
@@ -198,7 +206,9 @@ export function layoutHealth() {
   };
   for (const { r, el } of boxes) {
     if (!(r.left < innerWidth - 1 && r.right > innerWidth + 1)) continue;
+    if (r.right - innerWidth <= Math.max(4, 0.05 * parseFloat(getComputedStyle(el).fontSize))) continue;
     const c = clipper(el);
+    if (moving(el, c)) continue;
     let right = r.right;
     for (const o of boxes) {
       if (o.r.left >= r.left && Math.abs(o.r.top - r.top) <= 2 && c.contains(o.el)) right = Math.max(right, o.r.right);

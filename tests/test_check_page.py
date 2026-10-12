@@ -46,10 +46,26 @@ SHOT = (b'<!doctype html><html><head><title>Shot</title><style>body{margin:0}img
 EXACT = (b'<!doctype html><html><head><title>Exact</title><style>body{margin:0}@media (width: 390px){h1{color:red}}'
          b'@media (min-width: 768px) and (max-width: 768px){h1{color:blue}}</style></head><body><h1>Hi there</h1></body></html>')
 
+# honest designs that clip on purpose (found on hafsausmani.com with image v18, Oct 12): a marquee ticker, a carousel
+# whose cards peek past the edge, display type whose last glyph overshoots by a few px
+MARQUEE = (b'<!doctype html><html><head><title>Marquee</title><style>body{margin:0}.m{overflow:hidden}'
+           b'.t{display:flex;gap:40px;width:max-content;animation:scroll 20s linear infinite}'
+           b'@keyframes scroll{to{transform:translateX(-50%)}}</style></head><body><h1>Skills</h1><div class="m"><div class="t">'
+           + b"".join(b"<span>Figma</span><span>Design Systems</span><span>Prototyping</span><span>Research</span>" for _ in range(4))
+           + b'</div></div></body></html>')
+CAROUSEL = (b'<!doctype html><html><head><title>Carousel</title><style>body{margin:0}.c{overflow:hidden}'
+            b'.track{display:flex;gap:16px;transform:translateX(-40px)}.card{flex:none;width:300px}</style></head><body>'
+            b'<h1>Work</h1><div class="c"><div class="track"><div class="card">EqualTales AI</div><div class="card">'
+            b'Creative Experiments</div><div class="card">Design tooling</div></div></div></body></html>')
+BLEED = (b'<!doctype html><html><head><title>Bleed</title><style>body{margin:0}.b{overflow:hidden}'
+         b'.b span{display:block;width:calc(100vw + 4px);font-size:120px;line-height:1}</style></head><body>'
+         b'<div class="b"><span>Hi</span></div><p>Designer and engineer</p></body></html>')
+
 
 class _H(http.server.BaseHTTPRequestHandler):
     routes = {"/fluid": FLUID, "/wide": WIDE, "/login": LOGIN, "/hidden": HIDDEN, "/split": SPLIT, "/fade": FADE,
-              "/clip": CLIP, "/shot": SHOT, "/exact": EXACT}
+              "/clip": CLIP, "/shot": SHOT, "/exact": EXACT,
+              "/marquee": MARQUEE, "/carousel": CAROUSEL, "/bleed": BLEED}
 
     def do_GET(self):
         body = self.routes.get(self.path)
@@ -219,6 +235,15 @@ def test_text_cut_off_by_a_clipping_wrapper_counts_as_overflow(tmp_path, server)
     assert v["overflow_px"] == 0 and v["clipped_overflow_px"] > 100
     assert any("plan" in (c.get("text") or "").lower() for c in v["overflowers"])
     assert checks["between"]["1024"]["clipped_overflow_px"] == 0
+
+
+
+@pytest.mark.parametrize("page", ["marquee", "carousel", "bleed"])
+def test_clipping_on_purpose_is_not_overflow(tmp_path, server, page):
+    r = run(f"{server}/{page}", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    between = json.loads((tmp_path / "checks.json").read_text())["between"]
+    assert {w: v["clipped_overflow_px"] for w, v in between.items()} == {w: 0 for w in between}
 
 
 def test_a_screenshot_build_is_flagged(tmp_path, server):

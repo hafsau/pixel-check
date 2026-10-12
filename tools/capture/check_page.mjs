@@ -84,6 +84,11 @@ async function open(w, h) {
   await page.addInitScript(() => { window.__pcRoot = "body"; });
   const resp = await page.goto(url, { waitUntil: "load", timeout: 60000 });
   await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+  // looping motion (marquees) is marked before it is stopped: its clipping is design, not overflow (render.mjs)
+  await page.evaluate(() => { for (const a of document.getAnimations()) {
+    const t = a.effect && a.effect.target;
+    if (t && t.setAttribute && a.effect.getTiming().iterations === Infinity) t.setAttribute("data-pc-motion", "");
+  } });
   await page.addStyleTag({ content: STILL_CSS });
   await page.evaluate(() => document.fonts.ready);
   await settle(page, maxWait);
