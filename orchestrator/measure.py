@@ -576,10 +576,23 @@ def drop_caret(img: np.ndarray, line: dict) -> dict:
 def measure(png: bytes) -> dict:
     img = np.asarray(Image.open(io.BytesIO(png)).convert("RGB"), dtype=np.float32)
     lines = [drop_caret(img, l) for l in ocr_lines(img)]
-    from .typography import infer
+    from .typography import DEFAULT, family_scores, infer, page_families
     for l in lines:
         l["color"], l["backdrop"] = ink_and_backdrop(img, l["box"])
         l["typo"] = infer(l["text"], l["box"], img)     # size / weight / letter-spacing from Inter's real metrics
+    # the font of each line, from its glyph shapes; the page vote keeps a family only when it wins several lines or a
+    # display line (Oct 12: a catalogue of 16 open families — a page can mix them)
+    votes = []
+    for k, l in enumerate(lines):
+        sc = family_scores(l["text"], l["box"], img, words=l.get("words")) if l["box"][3] >= 8 and k < 30 else {}
+        votes.append({"winner": max(sc, key=sc.get) if sc else None, "scores": sc,
+                      "size_px": (l["typo"] or {}).get("size_px")})
+    fonts = page_families(votes)
+    for l, v in zip(lines, votes):
+        fam = v["winner"] if v["winner"] in fonts["kept"] else fonts["body"]
+        if fam != DEFAULT:
+            l["typo"] = infer(l["text"], l["box"], img, family=fam)
+        l["font"], l["font_vote"] = fam, v
     text_boxes = [t["box"] for t in lines]
     # small blocks too (icons / image placeholders ≥ 100 px²), minus glyph fragments: solid parts of large letters
     # sit inside text boxes and are small (a button/input IS bigger than its label, so it is never dropped)
@@ -663,7 +676,40 @@ def measure(png: bytes) -> dict:
         lines.append(l)
     blocks.sort(key=lambda b: (b["box"][1], b["box"][0]))
     return {"size": [img.shape[1], img.shape[0]], "background": _hex(background(img)),
-            "text_lines": lines, "blocks": blocks}
+            "text_lines": lines, "blocks": blocks, "fonts": fonts}
+
+
+def unify_fonts(meas: dict[str, dict], pngs: dict[str, bytes]) -> dict:
+    """The three frames are one page: pool their line votes, decide the page's families once, and re-measure the
+    lines whose family changes (a first screen alone has few lines — the desktop nav + headline voted a mono body)."""
+    from .typography import DEFAULT, infer, page_families
+    votes = [l["font_vote"] for m in meas.values() for l in m["text_lines"] if l.get("font_vote")]
+    fonts = page_families(votes)
+    # the same text in several frames is the same element: one family, from its scores summed over the frames
+    pooled: dict[str, dict[str, float]] = {}
+    for m in meas.values():
+        for l in m["text_lines"]:
+            for f, sc in ((l.get("font_vote") or {}).get("scores") or {}).items():
+                key = " ".join(l["text"].lower().split())
+                pooled.setdefault(key, {})[f] = pooled.setdefault(key, {}).get(f, 0.0) + sc
+    for bp, m in meas.items():
+        img = None
+        for l in m["text_lines"]:
+            v = l.get("font_vote")
+            if v is None:
+                continue
+            sc = {f: x for f, x in pooled.get(" ".join(l["text"].lower().split()), {}).items() if f in fonts["kept"]}
+            fam = max(sc, key=sc.get) if sc else fonts["body"]
+            if (v.get("scores") or {}) and fam != fonts["body"]:      # a kept face must still beat the body here
+                if sc.get(fam, 0) - sc.get(fonts["body"], 0) <= 0:
+                    fam = fonts["body"]
+            if fam != l.get("font"):
+                if img is None:
+                    img = np.asarray(Image.open(io.BytesIO(pngs[bp])).convert("RGB"), dtype=np.float32)
+                l["typo"] = infer(l["text"], l["box"], img) if fam == DEFAULT else infer(l["text"], l["box"], img, family=fam)
+                l["font"] = fam
+        m["fonts"] = fonts
+    return fonts
 
 
 def second_chance(img: np.ndarray, lines: list, blocks: list, bg=None, max_lines: int = 30) -> list[dict]:

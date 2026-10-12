@@ -269,7 +269,7 @@ def merge(vlm: dict, meas: dict) -> dict:
             if sub is not None or len(idxs) > 1 or _norm(first["text"]) == _norm(t.get("text", "")) or score >= 0.95:
                 used.update(words_of(best))
             ltexts = [best[1]] if sub is not None else [lines[k]["text"] for k in idxs]
-            item.update(box=box, color=first["color"], on=first["backdrop"], measured=True, lines=len(idxs),
+            item.update(box=box, color=first["color"], on=first["backdrop"], measured=True, lines=len(idxs), font=first.get("font"),
                         line_boxes=[box] if sub is not None else [lines[k]["box"] for k in idxs], line_texts=ltexts)
             ty = first.get("typo") or {}
             item["size_px"] = ty.get("size_px") or font_px(first["text"], first["box"][2], first["box"][3], t.get("size_px"))
@@ -284,6 +284,7 @@ def merge(vlm: dict, meas: dict) -> dict:
                 used.update(words_of(c))
                 matched.update(c[0])
                 item.update(box=box, color=first["color"], on=first["backdrop"], measured=True, extended=True, lines=1,
+                            font=first.get("font"),
                             line_boxes=[box], line_texts=[t.get("text", "")])
                 ty = first.get("typo") or {}
                 item["size_px"] = ty.get("size_px") or font_px(c[1], c[2][2], c[2][3], t.get("size_px"))
@@ -307,7 +308,7 @@ def merge(vlm: dict, meas: dict) -> dict:
             continue
         item = {"text": tx, "role": "other", "size_px": None, "weight": None, "box": list(l["box"]), "color": l["color"],
                 "on": l["backdrop"], "measured": True, "lines": 1, "line_boxes": [list(l["box"])], "line_texts": [tx],
-                "ocr_only": True}
+                "ocr_only": True, "font": l.get("font")}
         ty = l.get("typo") or {}
         item["size_px"] = ty.get("size_px") or font_px(tx, l["box"][2], l["box"][3], None)
         if ty:
@@ -357,6 +358,7 @@ def merge(vlm: dict, meas: dict) -> dict:
     return fold_headings({
         "size": meas["size"],
         "background": meas["background"],
+        "fonts": meas.get("fonts"),
         "texts": texts,
         "blocks": blocks,
         "layout": vlm.get("layout", ""),
@@ -545,6 +547,8 @@ def perceive(client: TFClient, frames: dict[str, bytes], cache=_DEFAULT, hedge_a
         reads = {bp: ex.submit(safe_read, (bp, png)) for bp, png in frames.items()}   # vision reads: network, parallel
         # measurement (Tesseract + numpy) one frame at a time: three at once peaked near 500 MB (Render free: 512 MB)
         meas = {bp: measure(png) for bp, png in frames.items()}
+        from .measure import unify_fonts
+        unify_fonts(meas, frames)           # one page: its fonts are decided over all three frames
         vlm = {bp: f.result() for bp, f in reads.items()}
     for bp in frames:   # a frame the vision model couldn't read still gets a spec (OCR-only, flagged)
         if vlm[bp] is None:

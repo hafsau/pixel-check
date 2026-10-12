@@ -26,7 +26,27 @@ from .scaffold import (BPS, MENU, PREFIX, SEGMENTS, SIZES, TAGS, Item, _attr, _b
 
 W = {bp: SIZES[bp][0] for bp in BPS}
 VH = {bp: SIZES[bp][1] for bp in BPS}
-WEIGHT = {400: "font-normal", 500: "font-medium", 600: "font-semibold", 700: "font-bold"}
+WEIGHT = {300: "font-light", 400: "font-normal", 500: "font-medium", 600: "font-semibold", 700: "font-bold",
+          800: "font-extrabold", 900: "font-black"}
+BODY_FONT = ["Inter"]          # the page's body family for the compile in progress (set by compile_fluid)
+
+
+def _family_cls(f: str) -> str:
+    return "font-sans" if f == "Inter" else "font-['" + f.replace(" ", "_") + "']"
+
+
+def root_family(body: str) -> str:
+    """The page root's family class: Inter stays the renderer's default font-sans."""
+    return _family_cls(body or "Inter")
+
+
+def _family(a: dict, body: str) -> str:
+    """A text's family classes — only when it differs from the page's body family at some size (a mono label, a
+    display headline); unmeasured texts inherit the body family."""
+    fams = {bp: ((a.get(bp) or {}).get("font") or body) for bp in BPS}
+    if all(f == body for f in fams.values()):
+        return ""
+    return _resp({bp: _family_cls(fams[bp]) for bp in BPS})
 STACK = {"disp": "flex", "dir": "flex-col", "wrap": "flex-nowrap", "justify": "justify-start", "pl": "pl-0", "pr": "pr-0"}
 STATE: dict = {}   # per compile: {"all": [items], "intents": {...}}
 BGS: dict = {}     # per compile: page background per breakpoint (the layer pass compares fills with it)
@@ -300,6 +320,7 @@ def _text_inner(c: Item, indent: int, vis: dict, pos: str) -> list[str]:
     multi = {bp: a[bp].get("lines", 1) > 1 for bp in BPS}
     br = _breaks(c)
     cls = [_resp({bp: f"text-[{a[bp]['fs']}px]" for bp in BPS}),
+           _family(a, BODY_FONT[0]),
            _resp({bp: f"text-[{a[bp]['color']}]" for bp in BPS}),
            _resp({bp: WEIGHT.get(a[bp]["weight"], "font-normal") for bp in BPS}),
            _resp({bp: (f"tracking-[{a[bp]['tracking']}em]" if a[bp].get("tracking") else "tracking-normal") for bp in BPS}),
@@ -1354,6 +1375,8 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
     SEGMENTS.clear()
     BGS.clear()
     BGS.update({bp: (spec["breakpoints"].get(bp) or {}).get("background") for bp in BPS})
+    BODY_FONT[0] = next((((spec["breakpoints"].get(bp) or {}).get("fonts") or {}).get("body")
+                         for bp in BPS if ((spec["breakpoints"].get(bp) or {}).get("fonts") or {}).get("body")), "Inter")
     items = prepare(spec)
     intents = intents or {}
     if intents.get("cards"):
@@ -1528,7 +1551,7 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
         out += emit_body(list(enumerate(body)), 3)
     _link_segments()
     bgs = {bp: spec["breakpoints"].get(bp, {}).get("background", "#ffffff") for bp in BPS}
-    root_cls = f"flow-root min-h-screen w-full font-sans {_resp({bp: f'bg-[{bgs[bp]}]' for bp in BPS})}"
+    root_cls = f"flow-root min-h-screen w-full {root_family(BODY_FONT[0])} {_resp({bp: f'bg-[{bgs[bp]}]' for bp in BPS})}"
     head = ('import { useState } from "react";\n\nexport default function App() {\n'
             '  const [menuOpen, setMenuOpen] = useState(false);\n  return (\n') if MENU else "export default function App() {\n  return (\n"
     return head + f'    <div className="{root_cls}">\n' + "\n".join(out) + "\n    </div>\n  );\n}\n"

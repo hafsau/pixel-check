@@ -41,14 +41,30 @@ const arg = (name, dflt) => {
   return i > 0 ? process.argv[i + 1] : dflt;
 };
 
-function fontCss() {
+// the font catalogue (sandbox/fonts/catalog.json, Oct 12): 16 open-licence families. Inter + IBM Plex Mono are always
+// embedded (unchanged: identical renders); a family the code names with font-['Family_Name'] is embedded as well.
+const CATALOG = JSON.parse(fs.readFileSync(path.join(HERE, "fonts", "catalog.json"), "utf8"));
+const BASE_FAMILIES = ["Inter", "IBM Plex Mono"];
+
+export function usedFamilies(src) {
+  const out = new Set();
+  for (const m of src.matchAll(/font-\[['"]?([A-Za-z0-9_ ]+?)['"]?\]/g)) {
+    const name = m[1].replace(/_/g, " ");
+    if (CATALOG[name] && !BASE_FAMILIES.includes(name)) out.add(name);
+  }
+  return [...out].sort();
+}
+
+function fontCss(extra = []) {
   const face = (family, file, weight) => {
     const b64 = fs.readFileSync(path.join(HERE, "fonts", file)).toString("base64");
     return `@font-face{font-family:'${family}';font-style:normal;font-weight:${weight};font-display:block;` +
       `src:url(data:font/woff2;base64,${b64}) format('woff2');}`;
   };
   return [400, 500, 600, 700].map((w) => face("Inter", `inter-latin-${w}-normal.woff2`, w)).join("") +
-    [400, 500].map((w) => face("IBM Plex Mono", `ibm-plex-mono-latin-${w}-normal.woff2`, w)).join("");
+    [400, 500].map((w) => face("IBM Plex Mono", `ibm-plex-mono-latin-${w}-normal.woff2`, w)).join("") +
+    extra.map((fam) => CATALOG[fam].weights.map((w) => face(fam, `${CATALOG[fam].slug}-latin-${w}-normal.woff2`, w))
+      .join("")).join("");
 }
 
 // Determinism: no motion, no caret, no scrollbars, no smoothing differences.
@@ -74,7 +90,8 @@ export async function build(appPath, log) {
     .process("@tailwind base;@tailwind components;@tailwind utilities;", { from: undefined });
   for (const w of js.warnings) log.push(`esbuild warning: ${w.text}`);
   return `<!doctype html><html><head><meta charset="utf-8">` +
-    `<style>${fontCss()}${tw.css}${DETERMINISM_CSS}</style></head>` +
+    `<style>${fontCss(usedFamilies(src))}${tw.css}${DETERMINISM_CSS}</style></head>` +
+    (usedFamilies(src).length ? `<script>window.__pcFonts=${JSON.stringify(["Inter", ...usedFamilies(src)])}</script>` : "") +
     `<body><div id="root"></div><script>${js.outputFiles[0].text}</script></body></html>`;
 }
 
@@ -315,7 +332,11 @@ export async function captureFrame(page, outDir, name) {
   const dom = await page.evaluate(extractDom);
   fs.writeFileSync(path.join(outDir, `${name}.dom.json`), JSON.stringify(dom));
   const health = { ...(await page.evaluate(layoutHealth)), ...(await page.evaluate(fluidity)) };
-  const fontsOk = await page.evaluate(() => document.fonts.check("16px Inter"));
+  const fontsOk = await page.evaluate(async () => {
+    const fams = window.__pcFonts || ["Inter"];
+    if (window.__pcFonts) await Promise.all(fams.map((f) => document.fonts.load(`16px '${f}'`)));   // load unused ones too
+    return fams.every((f) => document.fonts.check(`16px '${f}'`));
+  });
   const dump = await page.evaluate(integrityDump);
   fs.writeFileSync(path.join(outDir, `${name}.nodes.json`), JSON.stringify(dump));
   // Same page with every glyph transparent: text is readable only where these pixels differ from the
@@ -572,6 +593,12 @@ export async function render(appPath, outDir) {
     return { ok: false, build_log: log.join("\n") };
   }
   const result = await renderHtml(html, outDir);
+  result.fonts = [...BASE_FAMILIES, ...usedFamilies(fs.readFileSync(appPath, "utf8"))];
+  if (fs.existsSync(path.join(outDir, "checks.json"))) {
+    const c = JSON.parse(fs.readFileSync(path.join(outDir, "checks.json"), "utf8"));
+    c.fonts = result.fonts;
+    fs.writeFileSync(path.join(outDir, "checks.json"), JSON.stringify(c, null, 2));
+  }
   for (const e of result.runtime_errors) log.push(`runtime error: ${e}`);
   fs.writeFileSync(path.join(outDir, "build.log"), log.join("\n"));
   return { ok: result.runtime_errors.length === 0, build_log: log.join("\n"), ...result };

@@ -151,7 +151,7 @@ def _collect(spec: dict, anchored: bool = False) -> list[Item]:
                          "align": align, "leading": leading, "line_texts": t.get("line_texts"),
                          "underline": bool(t.get("underline")),
                          "weight": _weight(t.get("weight")), "approx": bool(t.get("approx")),
-                         "tracking": float(t.get("tracking_em") or 0.0), "top_em": t.get("top_em")}
+                         "tracking": float(t.get("tracking_em") or 0.0), "top_em": t.get("top_em"), "font": t.get("font")}
         ranks: dict[str, int] = {}
         for b in sorted(frame["blocks"], key=lambda b: (b["box"][1], b["box"][0])):
             if b["box"][2] * b["box"][3] < 120 and not b.get("rule"):
