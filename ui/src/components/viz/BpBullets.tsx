@@ -1,8 +1,14 @@
 import type { BpName, PerBp } from '../../lib/types';
 import { cap } from '../../lib/format';
 import { fmtScore } from '../../lib/score';
-import { BULLET_BANDS, BULLET_TARGET, bulletModel } from '../../lib/viz';
-import { StatusIcon } from '../PassPill';
+import { BULLET_BANDS, BULLET_TARGET, bulletModel, scoreMark, type ScoreMark } from '../../lib/viz';
+import { IconCheck, IconMinus, IconX } from '../Icons';
+
+const MARK: Record<ScoreMark, { tone: string; icon: JSX.Element; word: string }> = {
+  pass: { tone: 'text-good', icon: <IconCheck />, word: 'at or above the target' },
+  near: { tone: 'text-warn', icon: <IconMinus />, word: 'below the target' },
+  fail: { tone: 'text-bad', icon: <IconX />, word: 'not the design' },
+};
 
 // Band shades: darker = worse (classic bullet chart), drawn in ink so they work in both themes.
 const BAND_SHADE = ['bg-ink/[0.13]', 'bg-ink/[0.07]', 'bg-ink/[0.03]'];
@@ -30,7 +36,7 @@ export function BpBullets({ perBp, bps = ['mobile', 'tablet', 'desktop'], legend
       <dl className="grid gap-2">
         {bps.map((bp) => {
           const v = perBp[bp];
-          const m = bulletModel(v);
+          const mark = scoreMark(v);
           const isWorst = v != null && v === worst;
           return (
             <div key={bp} className="grid grid-cols-[4.25rem_minmax(0,1fr)_3.75rem] items-center gap-2.5 text-xs">
@@ -39,10 +45,14 @@ export function BpBullets({ perBp, bps = ['mobile', 'tablet', 'desktop'], legend
                 <Bullet value={v} />
               </dd>
               <dd className={`flex items-center justify-end gap-1 num ${isWorst ? 'font-semibold text-ink' : 'text-ink-muted'}`}>
-                {m.pass != null && <StatusIcon status={m.pass ? 'pass' : 'fail'} />}
+                {mark && (
+                  <span className={`inline-flex ${MARK[mark].tone}`} aria-hidden="true">
+                    {MARK[mark].icon}
+                  </span>
+                )}
                 {fmtScore(v)}
                 <span className="sr-only">
-                  {m.pass == null ? '' : m.pass ? `, at or above the ${BULLET_TARGET} target` : `, below the ${BULLET_TARGET} target`}
+                  {mark == null ? '' : mark === 'fail' ? ', below 46: not the design' : `, ${MARK[mark].word} (${BULLET_TARGET})`}
                   {isWorst ? ' (worst breakpoint)' : ''}
                 </span>
               </dd>

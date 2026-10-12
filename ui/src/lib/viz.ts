@@ -19,6 +19,14 @@ export function bulletModel(value: number | null | undefined, target = BULLET_TA
   return { pct, pass: pct >= target };
 }
 
+/** The mark next to a size's score: ✓ at the target, a neutral "near" mark for recognisable / small slips (46–89),
+ *  ✕ only for "not the design" (< 46, the scorer's calibration in lib/score.ts). */
+export type ScoreMark = 'pass' | 'near' | 'fail';
+export function scoreMark(value: number | null | undefined, target = BULLET_TARGET): ScoreMark | null {
+  if (value == null || Number.isNaN(value)) return null;
+  return value >= target ? 'pass' : value >= 46 ? 'near' : 'fail';
+}
+
 // ------------------------------------------------------------------------------------------------ score ring
 
 export function ringModel(score: number | null | undefined, radius: number): { circumference: number; dash: number; gap: number } {
@@ -83,4 +91,15 @@ export function stripSummary(cells: StripCell[]): string {
 export function bestReplayHref(entries: IndexEntry[]): string {
   const best = entries.filter((e) => e.type === 'static').sort((a, b) => (b as { match: number }).match - (a as { match: number }).match)[0];
   return best ? entryHref(best) : '/#runs';
+}
+
+// ------------------------------------------------------------------------------------------------ dev replays
+
+/** Dev replays (third-party captures, `npm run dev` only) stay hidden unless "Show dev runs" is on. */
+export function visibleRuns<T extends { dev?: boolean }>(runs: T[], showDev: boolean): T[] {
+  return showDev ? runs : runs.filter((r) => !r.dev);
+}
+
+export function devCount<T extends { dev?: boolean }>(runs: T[]): number {
+  return runs.filter((r) => r.dev).length;
 }

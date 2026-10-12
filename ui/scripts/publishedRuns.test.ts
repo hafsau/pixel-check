@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { shipRuns } from './publishedRuns';
+import { devIndex, publishedFile, shipRuns } from './publishedRuns';
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'pc-ship-'));
@@ -36,5 +36,29 @@ describe('shipRuns', () => {
     const root = setup();
     shipRuns(join(root, 'dist'), join(root, 'published'), true);
     expect(existsSync(join(root, 'dist/runs/dev-capture/run.json'))).toBe(true);
+  });
+});
+
+// Oct 12 (Hafsa): localhost should show what production shows; the dev replays stay one toggle away
+describe('devIndex (npm run dev)', () => {
+  it('lists the published runs first and marks every dev replay', () => {
+    const idx = devIndex(
+      [{ id: 'hafsausmani-home', source: 'owned:hafsausmani.com' }],
+      [{ id: 'abl-plan-lambda' }, { id: 'hafsausmani-home', title: 'an older dev copy' }],
+    );
+    expect(idx).toEqual([
+      { id: 'hafsausmani-home', source: 'owned:hafsausmani.com' },
+      { id: 'abl-plan-lambda', dev: true },
+    ]);
+  });
+
+  it('serves a published bundle\'s files from ui/published, everything else falls through', () => {
+    const root = setup();
+    expect(publishedFile(join(root, 'published'), '/runs/hafsausmani-home/run.json')).toBe(
+      join(root, 'published/hafsausmani-home/run.json'),
+    );
+    expect(publishedFile(join(root, 'published'), '/runs/dev-capture/run.json')).toBeNull();
+    expect(publishedFile(join(root, 'published'), '/runs/../../secret.env')).toBeNull();
+    expect(publishedFile(join(root, 'published'), '/runs/hafsausmani-home/%2e%2e/%2e%2e/x')).toBeNull();
   });
 });

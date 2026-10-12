@@ -10,9 +10,12 @@ dev replays (ui/public/runs/, third-party captures — never published).
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +36,34 @@ def _entry(run: dict, run_id: str, source: str) -> dict:
             "source": source}
 
 
-def publish(src: Path, out: Path, *, run_id: str, title: str, label: str, source: str) -> Path:
+_MIME = {".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".gif": "image/gif", ".avif": "image/avif",
+         ".svg": "image/svg+xml"}
+
+
+def render_display_thumb(bundle_dir: Path) -> str:
+    """Render the delivered code (display/App.jsx, the page's own images put back) at the mobile size into
+    display/mobile.webp — the card's thumbnail. Local render with sandbox/render.mjs; the bundle's images are inlined
+    as data URIs (this render is never scored)."""
+    from PIL import Image
+    code = (bundle_dir / "display" / "App.jsx").read_text()
+
+    def inline(m):
+        f = bundle_dir / "assets" / m.group(1)
+        if not f.is_file() or f.suffix.lower() not in _MIME:
+            return m.group(0)
+        return f"data:{_MIME[f.suffix.lower()]};base64,{base64.b64encode(f.read_bytes()).decode()}"
+    code = re.sub(r"/assets/([A-Za-z0-9_-]+\.[a-z0-9]+)", inline, code)
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "App.jsx").write_text(code)
+        subprocess.run(["node", "render.mjs", "--in", str(Path(tmp) / "App.jsx"), "--out", str(Path(tmp) / "out")],
+                       cwd=ROOT / "sandbox", check=True, capture_output=True, timeout=180)
+        Image.open(Path(tmp) / "out" / "mobile.png").convert("RGB").save(bundle_dir / "display" / "mobile.webp",
+                                                                         "WEBP", quality=80)
+    return "display/mobile.webp"
+
+
+def publish(src: Path, out: Path, *, run_id: str, title: str, label: str, source: str,
+            thumb=render_display_thumb) -> Path:
     if not _ID.match(run_id):
         raise ValueError(f"id {run_id!r}: lowercase letters, digits and dashes only")
     if not _SOURCE.match(source or ""):
@@ -51,9 +81,12 @@ def publish(src: Path, out: Path, *, run_id: str, title: str, label: str, source
             shutil.copy(f, t)
     run.update(id=run_id, title=title, label=label, source=source)
     (dest / "run.json").write_text(json.dumps(run, indent=1))
+    entry = _entry(run, run_id, source)
+    if (dest / "display" / "App.jsx").exists():         # owned site: the thumbnail shows its own images
+        entry["thumb"] = thumb(dest)
     idx_p = Path(out) / "index.json"
     idx = json.loads(idx_p.read_text()) if idx_p.exists() else []
-    idx = [e for e in idx if e.get("id") != run_id] + [_entry(run, run_id, source)]
+    idx = [e for e in idx if e.get("id") != run_id] + [entry]
     idx_p.write_text(json.dumps(idx, indent=1))
     return dest
 

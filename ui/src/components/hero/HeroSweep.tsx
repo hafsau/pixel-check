@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { prefersReducedMotion } from '../../lib/theme';
 import { Link, navigate } from '../../lib/router';
-import { useRunIndex } from '../../lib/data';
-import { bestReplayHref, type CellState, type StripCell } from '../../lib/viz';
+import { useRunIndex, useShowDevRuns } from '../../lib/data';
+import { bestReplayHref, visibleRuns, type CellState, type StripCell } from '../../lib/viz';
 import {
   RULER_MARKS,
   SWEEP_CELLS,
@@ -54,7 +54,8 @@ const detail = (m: Measure) => (m.overflow > 0 ? `overflow ${m.overflow} px` : m
  */
 export function HeroSweep() {
   const idx = useRunIndex();
-  const seeRun = idx.status === 'ready' ? bestReplayHref(idx.data) : '/#runs';
+  const [showDev] = useShowDevRuns();
+  const seeRun = idx.status === 'ready' ? bestReplayHref(visibleRuns(idx.data, showDev)) : '/#runs';
   return (
     <section aria-labelledby="hero-title" className="pt-10 sm:pt-16">
       <h1 id="hero-title" className="display text-[40px] sm:text-6xl lg:text-[84px]">

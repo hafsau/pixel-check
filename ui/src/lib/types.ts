@@ -179,6 +179,7 @@ export interface StaticEntry {
   usd?: number | null;
   fluid_pass?: boolean | null;
   thumb?: string | null;
+  dev?: boolean; // npm run dev only: a dev replay of a third-party capture (never in production)
 }
 
 export interface InteractionEntryVariant {
@@ -200,6 +201,7 @@ export interface InteractionEntry {
   bps: BpName[];
   variants: InteractionEntryVariant[];
   thumb?: string | null;
+  dev?: boolean; // npm run dev only: a dev replay of a third-party capture (never in production)
 }
 
 export interface GroupEntry {
@@ -213,6 +215,7 @@ export interface GroupEntry {
   review?: string | null;
   variants: { planner: string; notes: string | null; oracle: boolean; held_out_pass: number; held_out_total: number; held_out_delta: number }[];
   thumb?: string | null;
+  dev?: boolean; // npm run dev only: a dev replay of a third-party capture (never in production)
 }
 
 export type IndexEntry = StaticEntry | InteractionEntry | GroupEntry;

@@ -41,6 +41,36 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): Load<T> {
   return state;
 }
 
+const DEV_KEY = 'pc-show-dev-runs';
+
+function readShowDev(): boolean {
+  try {
+    return localStorage.getItem(DEV_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** "Show dev runs" (npm run dev only — production has no dev replays): remembered per browser, shared by every reader. */
+export function useShowDevRuns(): [boolean, (on: boolean) => void] {
+  const [on, setOn] = useState(readShowDev);
+  useEffect(() => {
+    const sync = () => setOn(readShowDev());
+    window.addEventListener('pc-dev-runs', sync);
+    return () => window.removeEventListener('pc-dev-runs', sync);
+  }, []);
+  const set = useCallback((v: boolean) => {
+    try {
+      localStorage.setItem(DEV_KEY, v ? '1' : '0');
+    } catch {
+      /* private window: the toggle still works for this page */
+    }
+    setOn(v);
+    window.dispatchEvent(new Event('pc-dev-runs'));
+  }, []);
+  return [on, set];
+}
+
 export function useRunIndex(): Load<IndexEntry[]> {
   return useLoad(async () => normalizeIndex(await getJson<unknown>(`${BASE}/runs/index.json`)), []);
 }

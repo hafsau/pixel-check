@@ -71,3 +71,50 @@ def test_dev_capture_bundles_are_refused(tmp_path):
 def test_ids_are_safe_folder_names(tmp_path):
     with pytest.raises(ValueError):
         P.publish(bundle(tmp_path / "s"), tmp_path / "p", run_id="../evil", title="t", label="l", source="original")
+
+
+# the card's thumbnail for an owned site shows the delivered page with its own images (display/App.jsx), not the
+# scored render where every image is a grey block (Oct 12, Hafsa: "a grey box where my headshot is")
+def test_owned_site_thumbnail_is_the_display_render(tmp_path):
+    src = bundle(tmp_path / "src")
+    (src / "display").mkdir()
+    (src / "display" / "App.jsx").write_text("export default function App(){return null}")
+    calls = []
+
+    def fake_thumb(bundle_dir):
+        calls.append(bundle_dir)
+        (bundle_dir / "display" / "mobile.webp").write_bytes(b"RIFF....WEBP")
+        return "display/mobile.webp"
+    out = tmp_path / "published"
+    P.publish(src, out, run_id="hafsausmani-home", title="t", label="l", source="owned:hafsausmani.com",
+              thumb=fake_thumb)
+    entry = json.loads((out / "index.json").read_text())[0]
+    assert entry["thumb"] == "display/mobile.webp" and calls == [out / "hafsausmani-home"]
+
+
+def test_without_display_code_the_scored_render_stays_the_thumbnail(tmp_path):
+    src = bundle(tmp_path / "src")
+    out = tmp_path / "published"
+    P.publish(src, out, run_id="x-site", title="t", label="l", source="original",
+              thumb=lambda d: pytest.fail("no display code, nothing to render"))
+    assert json.loads((out / "index.json").read_text())[0]["thumb"] == "c/c1/mobile.webp"
+
+
+def test_display_thumbnail_renders_the_page_with_its_images(tmp_path):
+    src = bundle(tmp_path / "src")
+    (src / "display").mkdir()
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), (220, 30, 30)).save(buf, "WEBP")
+    (src / "assets" / ("b" * 64 + ".webp")).write_bytes(buf.getvalue())
+    (src / "display" / "App.jsx").write_text(
+        'export default function App(){return <main className="p-0"><img src="/assets/' + "b" * 64 +
+        '.webp" alt="" className="block w-[390px] h-[400px]" /></main>}')
+    out = tmp_path / "published"
+    P.publish(src, out, run_id="red-site", title="t", label="l", source="original")
+    entry = json.loads((out / "index.json").read_text())[0]
+    assert entry["thumb"] == "display/mobile.webp"
+    im = Image.open(out / "red-site" / "display" / "mobile.webp").convert("RGB")
+    r, g, b = im.getpixel((100, 100))
+    assert r > 180 and g < 80 and b < 80          # the image is painted, not a grey block

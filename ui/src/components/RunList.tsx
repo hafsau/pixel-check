@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { useRunIndex } from '../lib/data';
+import { useRunIndex, useShowDevRuns } from '../lib/data';
+import { devCount, visibleRuns } from '../lib/viz';
 import { splitIndex } from '../lib/bundle';
 import { RunCard } from './RunCard';
 import { InteractionCard } from './InteractionCard';
@@ -7,13 +8,22 @@ import { GroupCard } from './GroupCard';
 
 export function RunList() {
   const idx = useRunIndex();
-  const s = idx.status === 'ready' ? splitIndex(idx.data) : null;
+  const [showDev, setShowDev] = useShowDevRuns();
+  const all = idx.status === 'ready' ? idx.data : [];
+  const nDev = devCount(all);
+  const s = idx.status === 'ready' ? splitIndex(visibleRuns(all, showDev)) : null;
   return (
     <section id="runs" aria-labelledby="runs-title" className="section scroll-mt-6" tabIndex={-1}>
       <h2 id="runs-title" className="h2">
         Replay a run
       </h2>
       <p className="mt-1 text-sm text-ink-muted">Recorded runs, played back step by step. No models or sandboxes are called in replay.</p>
+      {nDev > 0 && (
+        <label className="mt-3 inline-flex items-center gap-2 rounded-pill border border-dashed border-line px-3 py-1 text-xs text-ink-muted">
+          <input type="checkbox" checked={showDev} onChange={(e) => setShowDev(e.target.checked)} className="accent-[rgb(var(--c-accent))]" />
+          Show dev runs ({nDev}) — local only: third-party captures, never published
+        </label>
+      )}
       {idx.status === 'loading' && <p className="mt-4 text-sm text-ink-muted" role="status">Loading runs…</p>}
       {idx.status === 'error' && (
         <p className="mt-4 text-sm text-bad" role="alert">

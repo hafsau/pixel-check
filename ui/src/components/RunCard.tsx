@@ -39,10 +39,10 @@ export function RunCard({ run }: { run: StaticEntry }) {
         </header>
         <BpBullets perBp={run.per_bp} />
         <footer className="mt-auto flex items-center justify-between gap-2 text-xs text-ink-muted">
-          <span className="truncate">
-            {bandLabel(run.match)}
-            {run.usd != null && <> · {fmtUsd(run.usd, 3)} all-in</>}
-            <span className="sr-only"> · recorded {fmtDate(run.created)}</span>
+          <span className="flex min-w-0 items-baseline gap-1">
+            <span className="truncate">{bandLabel(run.match)}</span>
+            {run.usd != null && <span className="num shrink-0 whitespace-nowrap">· {fmtUsd(run.usd, 3)}</span>}
+            <span className="sr-only"> · {run.usd != null ? 'all-in cost, ' : ''}recorded {fmtDate(run.created)}</span>
           </span>
           <span className="flex shrink-0 items-center gap-3">
             <Link to={codeHref(run)!} className="relative z-10 rounded-sm font-medium text-ink-muted underline decoration-line underline-offset-2 hover:text-ink" aria-label={`Code of ${t.title}`}>

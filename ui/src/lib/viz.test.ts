@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BULLET_BANDS, BULLET_TARGET, bestReplayHref, bulletModel, cellState, fluidityCells, ringModel, stripSummary } from './viz';
+import { BULLET_BANDS, BULLET_TARGET, bestReplayHref, bulletModel, cellState, fluidityCells, ringModel, scoreMark, stripSummary, visibleRuns, devCount } from './viz';
 import type { Fluidity, IndexEntry } from './types';
 
 describe('bullet chart', () => {
@@ -85,5 +85,36 @@ describe('"See a run" link', () => {
   it('ignores interactions and groups, falls back to the run list', () => {
     expect(bestReplayHref([{ type: 'interaction', id: 'x', title: 'x', page: '', state: '', kind: null, created: 1, bps: [], variants: [] }])).toBe('/#runs');
     expect(bestReplayHref([])).toBe('/#runs');
+  });
+});
+
+// Oct 12 (Hafsa): a red ✕ on 70–89 read as "failed" next to "Recognisable but off" — the mark follows the bands:
+// ✓ at the 90 target, a neutral "near" mark for 46–89, ✕ only for "not the design" (< 46)
+describe('scoreMark', () => {
+  it('follows the score bands', () => {
+    expect(scoreMark(94.6)).toBe('pass');
+    expect(scoreMark(90)).toBe('pass');
+    expect(scoreMark(89.99)).toBe('near');
+    expect(scoreMark(70.3)).toBe('near');
+    expect(scoreMark(46)).toBe('near');
+    expect(scoreMark(45.9)).toBe('fail');
+    expect(scoreMark(0)).toBe('fail');
+  });
+  it('is empty without a score', () => {
+    expect(scoreMark(null)).toBeNull();
+    expect(scoreMark(undefined)).toBeNull();
+    expect(scoreMark(Number.NaN)).toBeNull();
+  });
+});
+
+describe('visibleRuns', () => {
+  const runs = [{ id: 'mine' }, { id: 'lab', dev: true }] as { id: string; dev?: boolean }[];
+  it('hides dev replays unless asked', () => {
+    expect(visibleRuns(runs, false).map((r) => r.id)).toEqual(['mine']);
+    expect(visibleRuns(runs, true).map((r) => r.id)).toEqual(['mine', 'lab']);
+  });
+  it('counts what the toggle would reveal', () => {
+    expect(devCount(runs)).toBe(1);
+    expect(devCount(runs.slice(0, 1))).toBe(0);
   });
 });
