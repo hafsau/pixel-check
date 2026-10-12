@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import shlex
 
-from .evaluate import RENDER_CMD
+from .evaluate import RENDER_CMD, sizes_job
 
 SCORE_CHECK = "cd /opt/pc && timeout 120 python3 evaluate.py --check"
 BPS = ("mobile", "tablet", "desktop")
@@ -51,7 +51,8 @@ def check_url(url: str, frames: dict[str, bytes], *, sb, read_design, verify, em
     from .api import capture_files
     emit("capture")
     cmd = f"cd /opt/pc && timeout 150 node /opt/pc/check_page.mjs {shlex.quote(url)} --out /work/out --wait 2000 --block-private"
-    r = sb.run(cmd, files=capture_files("check_page.mjs"), timeout_s=180, networking=True, step="check capture")
+    cmd, files = sizes_job(cmd, capture_files("check_page.mjs"))
+    r = sb.run(cmd, files=files, timeout_s=180, networking=True, step="check capture")
     if r.exit_code != 0 or not r.result_image:
         raise CheckError("the build could not be captured — is the address public and reachable?")
     got = sb.download_dir(r.result_image, "/work/out")
@@ -78,7 +79,8 @@ def check_code(code: str, frames: dict[str, bytes], *, sb, read_design, emit, sp
     """An App.jsx (React + Tailwind, one file) rendered with network off, then scored in check mode. spec: a design
     reading already made (the repair loop checks several versions against the same frames)."""
     emit("render")
-    r = sb.run(RENDER_CMD, files={"/work/App.jsx": code.encode()}, step="check render")
+    cmd, files = sizes_job(RENDER_CMD, {"/work/App.jsx": code.encode()})
+    r = sb.run(cmd, files=files, step="check render")
     if not r.ok or not r.result_image:
         raise CheckError("the code could not be rendered")
     got = sb.download_dir(r.result_image, "/work/out")

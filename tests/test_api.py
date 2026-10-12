@@ -72,21 +72,47 @@ def test_wrong_or_missing_passcode_is_refused(tmp_path, code):
     assert r.status_code == 403 and "letmein" not in r.text
 
 
-def test_frames_must_have_the_exact_sizes(tmp_path):
-    r = client(tmp_path).post("/api/runs", files=frames(tablet=("t.png", png(800, 1024), "image/png")),
+def test_frames_outside_the_bounds_are_refused_with_a_reason(tmp_path):
+    """Oct 12 (council plan): any width 320–1600 px and any height are accepted; outside the bounds, a reason."""
+    r = client(tmp_path).post("/api/runs", files=frames(tablet=("t.png", png(300, 1024), "image/png")),
                               data={"passcode": "letmein"})
-    assert r.status_code == 422 and "tablet" in r.text and "768" in r.text
+    assert r.status_code == 422 and "tablet" in r.text and "320" in r.text
 
 
-def test_frames_must_be_png_images(tmp_path):
+def test_frames_can_be_png_jpeg_or_webp_but_must_be_images(tmp_path):
     b = io.BytesIO()
     Image.new("RGB", (390, 844)).save(b, "JPEG")
     r = client(tmp_path).post("/api/runs", files=frames(mobile=("m.jpg", b.getvalue(), "image/jpeg")),
                               data={"passcode": "letmein"})
-    assert r.status_code == 422 and "mobile" in r.text and "PNG" in r.text
+    assert r.status_code == 202
     r2 = client(tmp_path).post("/api/runs", files=frames(mobile=("m.png", b"not an image", "image/png")),
                                data={"passcode": "letmein"})
-    assert r2.status_code == 422
+    assert r2.status_code == 422 and "mobile" in r2.text
+
+
+def test_designers_exports_are_labelled_cropped_and_explained(tmp_path):
+    """Hafsa's real export sizes: 402 × 2453 (full page), 768 × 1936, 1071 × 1177 — uploaded with tablet and
+    desktop swapped. The run gets them labelled by width and cropped to the first screen; the status says so."""
+    seen = {}
+
+    def pipe(run_id, fr, run_dir, emit):
+        from PIL import Image as I
+        seen.update({bp: I.open(io.BytesIO(b)).size for bp, b in fr.items()})
+        return fake_pipeline(run_id, fr, run_dir, emit)
+    c = client(tmp_path, pipeline=pipe)
+    up = {"mobile": ("mobile.png", png(402, 2453), "image/png"), "tablet": ("desktop.png", png(1071, 1177), "image/png"),
+          "desktop": ("tablet.png", png(768, 1936), "image/png")}
+    r = c.post("/api/runs", files=up, data={"passcode": "letmein"})
+    assert r.status_code == 202, r.text
+    st = wait_done(c, r.json()["id"])
+    assert seen == {"mobile": (402, 870), "tablet": (768, 1024), "desktop": (1071, 1177)}
+    fr = st["frames"]
+    assert fr["sizes"] == {"mobile": [402, 870], "tablet": [768, 1024], "desktop": [1071, 1177]}
+    assert fr["original"]["mobile"] == [402, 2453] and fr["prefixes"]["desktop"] == "lg:"
+    text = " ".join(fr["notes"])
+    assert "1071 px wide → used as the desktop frame" in text and "first screen" in text
+    run_dir = tmp_path / r.json()["id"]
+    assert (run_dir / "frames" / "full" / "mobile.png").exists()
 
 
 def test_missing_frame_is_rejected(tmp_path):
@@ -193,3 +219,18 @@ def test_runs_left_running_by_a_restart_are_marked_failed(tmp_path):
     assert a["state"] == "failed" and "restart" in a["error"]
     assert c.get("/api/runs/20261005-100001-bbbbbb").json()["state"] == "failed"
     assert c.get("/api/runs/20261005-100002-cccccc").json()["state"] == "done"
+
+
+def test_the_pipeline_runs_inside_the_runs_sizes_and_they_are_restored(tmp_path):
+    from orchestrator import config, scaffold
+    seen = {}
+
+    def pipe(run_id, fr, run_dir, emit):
+        seen.update(bps=dict(config.BREAKPOINTS), prefix=dict(scaffold.PREFIX))
+        return fake_pipeline(run_id, fr, run_dir, emit)
+    c = client(tmp_path, pipeline=pipe)
+    up = {"mobile": ("m.png", png(402, 870), "image/png"), "tablet": ("t.png", png(768, 1024), "image/png"),
+          "desktop": ("d.png", png(1071, 1177), "image/png")}
+    wait_done(c, c.post("/api/runs", files=up, data={"passcode": "letmein"}).json()["id"])
+    assert seen["bps"]["desktop"] == (1071, 1177) and seen["prefix"]["desktop"] == "lg:"
+    assert config.BREAKPOINTS["desktop"] == (1280, 800) and scaffold.PREFIX["desktop"] == "xl:"

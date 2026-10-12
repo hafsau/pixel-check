@@ -17,6 +17,7 @@ const url = process.argv[2];
 const out = arg("--out", "/work/out");
 const maxWait = Number(arg("--wait", "2000"));
 const BLOCK_PRIVATE = process.argv.includes("--block-private");
+if (arg("--sizes")) R.setSizes(JSON.parse(fs.readFileSync(arg("--sizes"), "utf8")));     // a run's own frame sizes
 if (!url) { console.error("usage: node check_page.mjs <url> --out DIR"); process.exit(2); }
 
 // motion to its end state and no caret / scrollbars — the page's own fonts stay (nothing is normalised)
@@ -36,7 +37,7 @@ async function settle(page, max) {        // no DOM change / new resource for 50
 }
 
 // warnings, not verdicts (council, Oct 8): signs that a build imitates the frames instead of laying them out
-function warningsScan(name) {
+function warningsScan([name, widths]) {
   const vw = innerWidth, vh = innerHeight, out = [];
   let cover = 0;
   for (const el of document.querySelectorAll("*")) {
@@ -48,18 +49,29 @@ function warningsScan(name) {
     cover = Math.max(cover, a / (vw * vh));
   }
   if (cover > 0.3) out.push(`${name}: a picture covers ${Math.round(cover * 100)} % of the screen — the build may be a screenshot`);
-  const widths = [360, 375, 390, 500, 768, 1024, 1280, 1600];
+  // a width window ≤ 2 px wide at a measured width — also built from nested @media rules (red team, Oct 12)
+  const walk = (rules, mn, mx) => {
+    for (const rule of rules || []) {
+      let lo = mn, hi = mx;
+      const q = rule.conditionText || (rule.media && rule.media.mediaText) || "";
+      if (q) {
+        const ex = q.match(/\(\s*width\s*:\s*(\d+)px\s*\)/);
+        const a = q.match(/min-width\s*:\s*(\d+)px/), b = q.match(/max-width\s*:\s*(\d+)px/);
+        if (ex) { lo = Math.max(lo, Number(ex[1])); hi = Math.min(hi, Number(ex[1])); }
+        if (a) lo = Math.max(lo, Number(a[1]));
+        if (b) hi = Math.min(hi, Number(b[1]));
+        if (hi - lo <= 2 && widths.some((w) => w >= lo - 2 && w <= hi + 2))
+          out.push(`a media query targets exactly ${lo} px — layouts tuned to the measured widths`);
+      }
+      let inner = null;
+      try { inner = rule.cssRules; } catch (e) { inner = null; }
+      if (inner) walk(inner, lo, hi);
+    }
+  };
   for (const sh of document.styleSheets) {
     let rules;
     try { rules = sh.cssRules; } catch (e) { continue; }       // cross-origin sheets
-    for (const rule of rules || []) {
-      const q = rule.conditionText || (rule.media && rule.media.mediaText) || "";
-      if (!q) continue;
-      const exact = q.match(/\(\s*width\s*:\s*(\d+)px\s*\)/);
-      const mn = q.match(/min-width\s*:\s*(\d+)px/), mx = q.match(/max-width\s*:\s*(\d+)px/);
-      const hit = exact ? Number(exact[1]) : (mn && mx && Math.abs(Number(mn[1]) - Number(mx[1])) <= 2 ? Number(mn[1]) : null);
-      if (hit && widths.some((w) => Math.abs(w - hit) <= 2)) out.push(`a media query targets exactly ${hit} px — layouts tuned to the measured widths`);
-    }
+    walk(rules, 0, Infinity);
   }
   return out;
 }
@@ -111,7 +123,9 @@ try {
     meta.finals[bp] = page.url();
     meta.pages.push(await page.evaluate(() => ({ title: document.title || "",
       site_name: (document.querySelector('meta[property="og:site_name"]') || {}).content || "" })));
-    const warn = await page.evaluate(warningsScan, bp);
+    const measured = [...new Set([360, 375, 390, 500, 768, 1024, 1280, 1600, ...R.BETWEEN_WIDTHS,
+      ...Object.values(R.BREAKPOINTS).map(([fw]) => fw)])];
+    const warn = await page.evaluate(warningsScan, [bp, measured]);
     const { dom, health, fontsOk, dump } = await R.captureFrame(page, out, bp);
     result.breakpoints[bp] = { width: w, height: h, elements: dom.length, fonts_ok: fontsOk, ...health };
     const texts = (dump || []).filter((e) => e.v && e.t);
@@ -131,6 +145,7 @@ try {
 const uniq = (xs) => [...new Set(xs.filter(Boolean))];
 const finals = uniq(Object.keys(R.BREAKPOINTS).map((bp) => meta.finals[bp]));
 result.warnings = [...new Set(warnings)];
+result.sizes = R.BREAKPOINTS;
 fs.writeFileSync(path.join(out, "checks.json"), JSON.stringify(result, null, 2));
 fs.writeFileSync(path.join(out, "meta.json"), JSON.stringify({
   url, sensitive: meta.sensitive, page: meta.pages[0] || {}, pages: meta.pages,

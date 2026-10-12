@@ -24,6 +24,9 @@ const BANNED_TEXT = [
   [/\bbg-gradient-to-|\bfrom-\[|\bconic|\bradial-gradient|\blinear-gradient/i, null], // allowed; listed for clarity
   [/matchMedia|innerWidth|outerWidth|clientWidth|screen\.width|visualViewport|ResizeObserver|addEventListener\(\s*['"]resize/,
     "JS width detection"],
+  // breakpoints are the standard Tailwind screens only: arbitrary / range variants can pin a layout to one
+  // measured width (min-[402px]:max-[403px]:) where the width sweep never looks (red team, Oct 12)
+  [/(?:^|[\s"'`{:])(?:min|max)-\[[^\]]*\]:|\[@media|(?:^|[\s"'`{:])max-(?:sm|md|lg|xl|2xl):/, "arbitrary breakpoint variant"],
   [/dangerouslySetInnerHTML/, "dangerouslySetInnerHTML"],
   [/\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts)\b/, "network API"],
   [/\beval\s*\(|new\s+Function\s*\(/, "dynamic code"],

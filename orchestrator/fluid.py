@@ -345,13 +345,26 @@ def _block(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]
     return _mark_trigger(lines, name) if name else lines
 
 
+def _fill(at: dict, empty: str = "bg-transparent") -> str:
+    """Fill classes per breakpoint: the colour, plus a linear gradient where one was measured (Oct 12). The mean
+    colour stays as the fallback; without gradients the classes are exactly as before."""
+    base = _resp({bp: f"bg-[{at[bp]['fill']}]" if (at.get(bp) or {}).get("fill") else empty for bp in BPS})
+    g = {bp: (at.get(bp) or {}).get("gradient") for bp in BPS}
+    if not any(g.values()):
+        return base
+    return _j([base, _resp({bp: f"bg-gradient-to-{g[bp]['dir']}" if g[bp] else "bg-none" for bp in BPS}),
+               _resp({bp: f"from-[{g[bp]['from']}]" if g[bp] else None for bp in BPS}),
+               _resp({bp: f"via-[{g[bp]['via']}]" if g[bp] and g[bp].get("via") else None for bp in BPS}),
+               _resp({bp: f"to-[{g[bp]['to']}]" if g[bp] else None for bp in BPS})])
+
+
 def _block_inner(c: Item, indent: int, cont_w: dict, vis: dict, pos: str) -> list[str]:
     pad = "  " * indent
     at = {bp: c.at.get(bp) or c.at[next(iter(c.at))] for bp in BPS}
     box = {bp: at[bp]["box"] for bp in BPS}
     full = {bp: box[bp][2] >= 0.92 * cont_w[bp] for bp in BPS}
     width = _resp({bp: ("w-full" if full[bp] else f"w-[{box[bp][2]}px] max-w-full") for bp in BPS})
-    style = [_resp({bp: f"bg-[{at[bp]['fill']}]" if at[bp].get("fill") else "bg-transparent" for bp in BPS}),
+    style = [_fill(at),
              _borders(at),
              _resp({bp: f"rounded-[{at[bp]['radius']}px]" if at[bp].get("radius") else "rounded-none" for bp in BPS}),
              _resp({bp: _shadow(at[bp]) for bp in BPS})]
@@ -492,7 +505,7 @@ def _apply_cards(items: list[Item], groups: list[list[list[str]]]) -> list[Item]
                     box = [ob[0], ob[1], ob[2], min(ob[3], u[1] + u[3] + p_b - ob[1])]
                 else:
                     box = [u[0] - pl, u[1] - pt, u[2] + 2 * pl, u[3] + pt + p_b]
-                it.at[bp] = {"box": box, "fill": own.get("fill"),
+                it.at[bp] = {"box": box, "fill": own.get("fill"), "gradient": own.get("gradient"),
                              "border": own.get("border"), "radius": own.get("radius"), "shadow": own.get("shadow", False)}
             card_items.append(it)
         for bp in BPS:     # stacked cards must not overlap (a measured card box can run to the fold)
@@ -878,7 +891,7 @@ def _layer_lines(L: Item, band_top: dict, indent: int, only: set | None = None) 
     centred = all(abs(box[bp][0] + box[bp][2] / 2 - W[bp] / 2) <= 4 for bp in L.at)
     horiz = "left-1/2 -translate-x-1/2" if centred else _resp({bp: f"left-[{box[bp][0]}px]" for bp in BPS})
     top = _resp({bp: f"top-[{box[bp][1] - (band_top.get(bp) or 0)}px]" for bp in BPS})
-    style = [_resp({bp: f"bg-[{at[bp]['fill']}]" for bp in BPS}), _borders(at),
+    style = [_fill(at), _borders(at),
              _resp({bp: f"rounded-[{at[bp]['radius']}px]" if at[bp].get("radius") else "rounded-none" for bp in BPS}),
              _resp({bp: _shadow(at[bp]) for bp in BPS})]
     size = [_resp({bp: f"w-[{box[bp][2]}px]" for bp in BPS}), _resp({bp: f"h-[{box[bp][3]}px]" for bp in BPS})]
@@ -1415,7 +1428,8 @@ def compile_fluid(spec: dict, intents: dict | None = None, triggers: dict | None
             out += emit_band(k, b, 3)
         _link_segments()
         return "\n".join(out)
-    show = {"mobile": "block md:hidden", "tablet": "hidden md:block xl:hidden", "desktop": "hidden xl:block"}
+    t_pre, d_pre = PREFIX["tablet"], PREFIX["desktop"]       # the run's screens (frames.use)
+    show = {"mobile": f"block {t_pre}hidden", "tablet": f"hidden {t_pre}block {d_pre}hidden", "desktop": f"hidden {d_pre}block"}
 
     def emit_body(indexed, indent):
         """Body bands; with side columns: the bands above them full width, then a row in flow in that frame —

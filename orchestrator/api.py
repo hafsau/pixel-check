@@ -105,6 +105,40 @@ def _check_png(bp: str, data: bytes):
         raise HTTPException(422, f"{bp}: the frame must be exactly {w}×{h} px (got {size[0]}×{size[1]})")
 
 
+async def _read_frames(uploads) -> tuple[dict[str, bytes], dict, dict[str, bytes]]:
+    """Three uploads (field, UploadFile) → frames labelled by width and cropped to the first screen
+    (orchestrator/frames.py), what was inferred for the user, and the full originals of cropped frames."""
+    from . import frames as F
+    raw = {}
+    for field, up in uploads:
+        data = await up.read(MAX_BYTES + 1)
+        if len(data) > MAX_BYTES:
+            raise HTTPException(413, f"{field}: the frame is larger than {MAX_BYTES // (1024 * 1024)} MB")
+        raw[field] = data
+    try:
+        assigned, notes = F.assign(raw)
+    except F.FrameError as e:
+        raise HTTPException(422, str(e)) from None
+    sizes = F.sizes(assigned)
+    info = {"sizes": {bp: list(v) for bp, v in sizes.items()},
+            "original": {bp: list(f.original) for bp, f in assigned.items()},
+            "sources": {bp: f.source for bp, f in assigned.items()},
+            "prefixes": F.prefixes(sizes), "notes": notes}
+    full = {bp: raw[f.source] for bp, f in assigned.items() if f.original != f.size}
+    return {bp: f.png for bp, f in assigned.items()}, info, full
+
+
+def _save_frames(run_dir: Path, frames: dict[str, bytes], full: dict[str, bytes]) -> None:
+    """frames/{bp}.png = what is perceived and scored; frames/full/{bp}.png = a cropped frame's whole page (display)."""
+    (run_dir / "frames").mkdir(parents=True)
+    for bp, data in frames.items():
+        (run_dir / "frames" / f"{bp}.png").write_bytes(data)
+    if full:
+        (run_dir / "frames" / "full").mkdir()
+        for bp, data in full.items():
+            (run_dir / "frames" / "full" / f"{bp}.png").write_bytes(data)
+
+
 def _resolve(host: str) -> list[str]:
     import socket
     return sorted({ai[4][0] for ai in socket.getaddrinfo(host, None)})
@@ -225,6 +259,7 @@ def _ledger_entries(path: Path) -> list[dict]:
 def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | None = None, capture=None,
                resolver=None, checker=None, repairer=None, store=None) -> FastAPI:
     from . import config
+    from . import frames as _frames
     from . import state as _state
     from .tf_client import Ledger
     s = {"enabled": config.LIVE_ENABLED, "passcode": config.LIVE_PASSCODE, "daily": config.LIVE_DAILY_RUNS,
@@ -370,7 +405,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 (run_dir / "frames").mkdir(parents=True, exist_ok=True)
                 for bp, data in frames.items():
                     (run_dir / "frames" / f"{bp}.png").write_bytes(data)
-            result = run_pipeline(rid, frames, run_dir, emit)
+            with _frames.use(_frames.sizes_of(frames)):        # the run's own frame sizes; defaults restored
+                result = run_pipeline(rid, frames, run_dir, emit)
             if url is not None:          # rebuilt from a page: say where it came from, in the code itself
                 from urllib.parse import urlsplit
                 if owned:
@@ -405,20 +441,12 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         require_live()
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
             raise HTTPException(403, "wrong passcode")
-        frames = {}
-        for bp, up in (("mobile", mobile), ("tablet", tablet), ("desktop", desktop)):
-            data = await up.read(MAX_BYTES + 1)
-            if len(data) > MAX_BYTES:
-                raise HTTPException(413, f"{bp}: the frame is larger than {MAX_BYTES // (1024 * 1024)} MB")
-            _check_png(bp, data)
-            frames[bp] = data
+        frames, info, full = await _read_frames((("mobile", mobile), ("tablet", tablet), ("desktop", desktop)))
         take_run(request)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         run_dir = root / rid
-        (run_dir / "frames").mkdir(parents=True)
-        for bp, data in frames.items():
-            (run_dir / "frames" / f"{bp}.png").write_bytes(data)
-        write_status(rid, state="queued", stages=[], created=time.time())
+        _save_frames(run_dir, frames, full)
+        write_status(rid, state="queued", stages=[], created=time.time(), frames=info)
         threading.Thread(target=worker, args=(rid, frames), daemon=True).start()
         return {"id": rid}
 
@@ -460,7 +488,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         jobs.acquire()
         try:
             write_status(rid, state="running")
-            out = run_check(kind, build, frames, run_dir, emit, verify)
+            with _frames.use(_frames.sizes_of(frames)):        # the run's own frame sizes; defaults restored
+                out = run_check(kind, build, frames, run_dir, emit, verify)
             rep = out.get("report") or {}
             bundle = run_dir / "bundle"
             paths = {}
@@ -529,13 +558,10 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         want_repair = repair.strip().lower() in ("true", "1", "yes", "on")
         if want_repair and not has_code:
             raise HTTPException(422, "repair works on code: give the build's App.jsx")
-        frames = {}
-        for bp, up in (("mobile", mobile), ("tablet", tablet), ("desktop", desktop)):
-            data = await up.read(MAX_BYTES + 1)
-            if len(data) > MAX_BYTES:
-                raise HTTPException(413, f"{bp}: the frame is larger than {MAX_BYTES // (1024 * 1024)} MB")
-            _check_png(bp, data)
-            frames[bp] = data
+        frames, info, full = await _read_frames((("mobile", mobile), ("tablet", tablet), ("desktop", desktop)))
+        if want_repair and any(info["sizes"][bp] != list(v) for bp, v in SIZES.items()):
+            raise HTTPException(422, "repair works on the standard frame sizes (390 × 844, 768 × 1024, 1280 × 800) "
+                                     "for now — check mode itself accepts these frames")
         if url:
             url = _check_url(url, resolve)
             _policy_or_422(url)
@@ -547,11 +573,9 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                     raise HTTPException(422, f"this demo only checks pages from: {', '.join(allow)}")
         take_run(request, weight=3 if want_repair else 1)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
-        (root / rid / "frames").mkdir(parents=True)
-        for bp, data in frames.items():
-            (root / rid / "frames" / f"{bp}.png").write_bytes(data)
+        _save_frames(root / rid, frames, full)
         write_status(rid, id=rid, kind="check", state="queued", stages=[], created=time.time(),
-                     source={"url": _bare(url)} if url else {"code": True}, repair=want_repair)
+                     source={"url": _bare(url)} if url else {"code": True}, repair=want_repair, frames=info)
         threading.Thread(target=check_worker, args=(rid, "url" if url else "code", url or code, frames, want_repair),
                          daemon=True).start()
         return {"id": rid}

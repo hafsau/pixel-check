@@ -30,10 +30,22 @@ def background(img: np.ndarray) -> np.ndarray:
     """Most frequent colour: mode over 64 levels/channel, refined to the mean of that bin. (8-level bins merged a
     black page with its dark-grey footer band into one bin; the drifted mean put the band right on the content
     threshold, so identical dark footers were 'content' in one image and background in the other.)"""
-    q = (img // 4).astype(np.int64)
-    keys = (q[..., 0] * 64 + q[..., 1]) * 64 + q[..., 2]
-    mode = np.bincount(keys.ravel()).argmax()
-    return np.clip(img[keys == mode].mean(axis=0, dtype=np.float64), 0, 255)
+    def mode_of(px):
+        q = (px // 4).astype(np.int64)
+        keys = (q[..., 0] * 64 + q[..., 1]) * 64 + q[..., 2]
+        counts = np.bincount(keys.ravel())
+        mode = counts.argmax()
+        return np.clip(px[keys == mode].mean(axis=0, dtype=np.float64), 0, 255), counts[mode] / keys.size
+
+    # the page shows in the side margins: a light page under white cards that cover more of it (Hafsa's dashboard,
+    # Oct 12) had the cards' white as its most frequent colour. Fall back to the whole frame's mode when the
+    # margins have no dominant colour (full-bleed content).
+    if img.shape[1] >= 64:
+        side = np.concatenate([img[:, :6].reshape(-1, 3), img[:, -6:].reshape(-1, 3)])
+        c, share = mode_of(side)
+        if share >= 0.4:
+            return c
+    return mode_of(img)[0]
 
 
 def ocr_lines(img: np.ndarray) -> list[dict]:
@@ -123,11 +135,179 @@ def solid_blocks(img: np.ndarray, text_boxes: list, min_area: int = 600) -> list
     for b in blocks:  # drop near-duplicates of larger blocks
         if all(_iou(b["box"], k["box"]) < 0.8 for k in kept):
             kept.append(b)
-    for b in kept:
+    kept = kept[:60]                  # the largest 60 (cutting after a positional sort dropped every card low on a
+    for b in kept:                    # dense page — Oct 12)
         b["contains_text"] = [t["text"] for t in text_boxes if _inside(t["box"], b["box"])][:4]
         del b["area"]
     kept.sort(key=lambda b: (b["box"][1], b["box"][0]))
-    return kept[:60]
+    return kept
+
+
+def gradient_blocks(img: np.ndarray, text_boxes: list, min_area: int = 3000) -> list[dict]:
+    """Smooth regions whose colour runs from one side to the other (a blue→purple banner): ONE block with a linear
+    gradient, instead of the dozen colour-quantised strips solid_blocks finds in it (Oct 12). A region = pixels that
+    stand out from the page (> 30) and change by ≤ 6 per channel to every neighbour; text and icons inside it are holes.
+    Solid regions (colour range < 24) are left to solid_blocks."""
+    H, W, _ = img.shape
+    bg = background(img)
+    strong = np.linalg.norm(img - bg, axis=2) > 30
+    dx = np.abs(np.diff(img, axis=1)).max(axis=2) <= 6
+    dy = np.abs(np.diff(img, axis=0)).max(axis=2) <= 6
+    smooth = np.ones((H, W), bool)
+    smooth[:, :-1] &= dx
+    smooth[:, 1:] &= dx
+    smooth[:-1, :] &= dy
+    smooth[1:, :] &= dy
+    m = strong & smooth
+    # no closing: it glued a banner to its own soft glow / shadow (both smooth) across the 1–2 px edge between them
+    lab, n = ndimage.label(m)
+    out = []
+    for i, sl in enumerate(ndimage.find_objects(lab), 1):
+        ys, xs = sl
+        bw, bh = xs.stop - xs.start, ys.stop - ys.start
+        if bw * bh < min_area or min(bw, bh) < 24:
+            continue
+        if xs.start <= 2 and xs.stop >= W - 2:      # edge to edge: a section background band, not an element
+            continue
+        own = lab[sl] == i
+        if ndimage.binary_fill_holes(own).mean() < 0.85:     # text / icons inside are holes; the outline is a box
+            continue
+        sub = img[sl]
+        cnt_x, cnt_y = own.sum(axis=0), own.sum(axis=1)
+        col = (sub * own[..., None]).sum(axis=0) / np.maximum(cnt_x, 1)[:, None]
+        row = (sub * own[..., None]).sum(axis=1) / np.maximum(cnt_y, 1)[:, None]
+        cx, cy = np.nonzero(cnt_x)[0], np.nonzero(cnt_y)[0]
+        prof_h, prof_v = col[cx], row[cy]
+        # how far the colour travels across the region (end to end, or out and back: blue → purple → blue)
+        span_h = np.linalg.norm(prof_h - prof_h[: max(2, len(prof_h) // 20)].mean(axis=0), axis=1).max()
+        span_v = np.linalg.norm(prof_v - prof_v[: max(2, len(prof_v) // 20)].mean(axis=0), axis=1).max()
+        if max(span_h, span_v) < 24:
+            continue
+        d, prof = ("r", prof_h) if span_h >= span_v else ("b", prof_v)
+        # one colour profile along the direction must explain the region (a photo's sky varies both ways)
+        model = col[None, :, :] if d == "r" else row[:, None, :]
+        if np.abs(sub - model)[own].max(axis=-1).mean() > 6:
+            continue
+        k = max(2, len(prof) // 20)
+        a0, a1 = prof[:k].mean(axis=0), prof[-k:].mean(axis=0)
+        mid = prof[len(prof) // 2 - k // 2: len(prof) // 2 + k // 2 + 1].mean(axis=0)
+        grad = {"dir": d, "from": _hex(a0), "to": _hex(a1)}
+        if np.linalg.norm(mid - (a0 + a1) / 2) > 16:          # a middle stop
+            grad = {"dir": d, "from": _hex(a0), "via": _hex(mid), "to": _hex(a1)}
+        out.append({"box": [xs.start, ys.start, bw, bh], "fill": _hex(sub[own].mean(axis=0)), "gradient": grad,
+                    "contains_text": [t["text"] for t in text_boxes if _inside(t["box"], [xs.start, ys.start, bw, bh])][:4]})
+    return out
+
+
+def _edge_steps(img: np.ndarray, box) -> list[float]:
+    """The colour step across each side of the box's outline (median, 1 px inside vs 2 px outside)."""
+    H, W, _ = img.shape
+    x, y, w, h = box
+    steps = []
+    if y >= 2:
+        steps.append(np.median(np.linalg.norm(img[y, x:x + w] - img[y - 2, x:x + w], axis=1)))
+    if y + h + 1 < H:
+        steps.append(np.median(np.linalg.norm(img[y + h - 1, x:x + w] - img[y + h + 1, x:x + w], axis=1)))
+    if x >= 2:
+        steps.append(np.median(np.linalg.norm(img[y:y + h, x] - img[y:y + h, x - 2], axis=1)))
+    if x + w + 1 < W:
+        steps.append(np.median(np.linalg.norm(img[y:y + h, x + w - 1] - img[y:y + h, x + w + 1], axis=1)))
+    return steps
+
+
+def _glow(img: np.ndarray, b: dict, bg) -> bool:
+    """A faint box with an edge on fewer than 3 sides: a soft haze quantised into boxes, not an element (Oct 12).
+    A card has an edge all round (border / shadow); a haze strip only where it happens to touch a divider or a
+    banner."""
+    rgb = np.array([int(b["fill"][i:i + 2], 16) for i in (1, 3, 5)], float)
+    steps = _edge_steps(img, b["box"])
+    crisp = sum(st >= 5 for st in steps) + (4 - len(steps))      # a side on the frame's edge counts as an edge
+    return np.linalg.norm(rgb - bg) < 24 and not b.get("border") and crisp < 3
+
+
+def _haze_runs(blocks: list[dict], bg) -> set[int]:
+    """Indices of faint blocks in a run of ≥ 3 side by side (same top and height, touching, colours stepping by
+    < 20): a soft haze cut into strips by the colour quantisation, not elements (Oct 12)."""
+    rgb = lambda h: np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], float)
+    faint = [i for i, b in enumerate(blocks) if not b.get("border") and not b.get("gradient") and b.get("fill")
+             and np.linalg.norm(rgb(b["fill"]) - bg) < 48]
+    out = set()
+    rows: dict = {}
+    for i in faint:
+        x, y, w, h = blocks[i]["box"]
+        rows.setdefault((round(y / 4), round(h / 4)), []).append(i)
+    for idx in rows.values():
+        idx.sort(key=lambda i: blocks[i]["box"][0])
+        run = [idx[0]] if idx else []
+        for i in idx[1:] + [None]:
+            p = run[-1] if run else None
+            if i is not None and p is not None:
+                pb, cb = blocks[p]["box"], blocks[i]["box"]
+                if cb[0] - (pb[0] + pb[2]) <= 3 and np.linalg.norm(rgb(blocks[i]["fill"]) - rgb(blocks[p]["fill"])) < 20:
+                    run.append(i)
+                    continue
+            if len(run) >= 3:
+                out.update(run)
+            run = [i] if i is not None else []
+    return out
+
+
+MEDIA_GREY = "#d4d4d8"     # the capture's image placeholder (tools/capture/capture.mjs)
+
+
+def photo_blocks(img: np.ndarray, text_boxes: list, min_side: int = 40) -> list[dict]:
+    """Photos in a designer's export (the dev captures greyed every image, so perception never saw one; Oct 12).
+    Seeds: 12 px tiles with many distinct colours (> 20 at 32 levels/channel) — text, icons and gradients have few.
+    Each seed grows to the photo's rectangle while its edge row / column is not plain (a smooth sky still varies
+    along the row; the card around the photo is plain) → a media placeholder block at that box."""
+    H, W, _ = img.shape
+    T = 12
+    q = (img // 8).astype(np.int32)
+    key = (q[..., 0] * 32 + q[..., 1]) * 32 + q[..., 2]
+    th, tw = H // T, W // T
+    tiles = key[: th * T, : tw * T].reshape(th, T, tw, T).transpose(0, 2, 1, 3).reshape(th, tw, T * T)
+    srt = np.sort(tiles, axis=2)
+    div = 1 + (np.diff(srt, axis=2) != 0).sum(axis=2)
+    lab, n = ndimage.label(div > 20)
+    out = []
+    for sl in ndimage.find_objects(lab):
+        y0, y1, x0, x1 = sl[0].start * T, sl[0].stop * T, sl[1].start * T, sl[1].stop * T
+        if (x1 - x0) * (y1 - y0) < 3 * T * T:
+            continue
+        plain = lambda seg: seg.std(axis=0).max() < 4
+        for _ in range(600):
+            grew = False
+            if y0 > 0 and not plain(img[y0 - 1, x0:x1]):
+                y0 -= 1; grew = True
+            if y1 < H and not plain(img[y1, x0:x1]):
+                y1 += 1; grew = True
+            if x0 > 0 and not plain(img[y0:y1, x0 - 1]):
+                x0 -= 1; grew = True
+            if x1 < W and not plain(img[y0:y1, x1]):
+                x1 += 1; grew = True
+            if not grew:
+                break
+        box = [x0, y0, x1 - x0, y1 - y0]
+        if min(box[2], box[3]) < min_side or box[2] * box[3] > 0.4 * W * H:
+            continue
+        texty = sum(max(0, min(tb[0] + tb[2], x1) - max(tb[0], x0)) * max(0, min(tb[1] + tb[3], y1) - max(tb[1], y0))
+                    for tb in text_boxes) / (box[2] * box[3])
+        if texty > 0.25 or any(_iou(box, o["box"]) > 0.5 for o in out):
+            continue
+        out.append({"box": box, "fill": MEDIA_GREY, "media": True, "contains_text": []})
+    return out
+
+
+def _on_gradient(fill: str, g: dict, tol: float = 24) -> bool:
+    """Is this colour on the segment between the gradient's two ends (a strip of it)?"""
+    rgb = lambda h: np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], float)
+    stops = [rgb(g[k]) for k in ("from", "via", "to") if g.get(k)]
+    p = rgb(fill)
+    for a, b in zip(stops, stops[1:]):
+        t = np.clip(np.dot(p - a, b - a) / max(np.dot(b - a, b - a), 1e-6), 0, 1)
+        if float(np.linalg.norm(p - (a + t * (b - a)))) <= tol:
+            return True
+    return False
 
 
 def outlined_boxes(img: np.ndarray, min_w: int = 40, min_h: int = 24) -> list[dict]:
@@ -404,6 +584,14 @@ def measure(png: bytes) -> dict:
     blocks = [b for b in solid_blocks(img, lines, min_area=100)
               if not any(_frac_inside(b["box"], tb) >= 0.6 and b["box"][2] * b["box"][3] < 0.5 * tb[2] * tb[3]
                          for tb in text_boxes)]
+    grads = gradient_blocks(img, lines)
+    def strip(b, g):                  # a slice of the gradient: inside it, on its colours, thin along its direction
+        (x, y, w, h), (gx, gy, gw, gh) = b["box"], g["box"]       # (a card inside a gradient band is not thin)
+        along = w / gw if g["gradient"]["dir"] == "r" else h / gh
+        return along <= 0.25 and _frac_inside(b["box"], g["box"]) >= 0.8 and _on_gradient(b["fill"], g["gradient"])
+    if grads:                         # the strips a gradient was quantised into go; the gradient is one block
+        blocks = [b for b in blocks if not any(strip(b, g) for g in grads)]
+        blocks = [b for b in blocks if all(_iou(b["box"], g["box"]) < 0.8 for g in grads)] + grads
     for o in outlined_boxes(img):
         same = [b for b in blocks if _iou(o["box"], b["box"]) >= 0.7]
         if same:                      # a filled block that also has a border (e.g. an input)
@@ -413,6 +601,12 @@ def measure(png: bytes) -> dict:
             o["contains_text"] = [t["text"] for t in lines if _inside(t["box"], o["box"])][:4]
             blocks.append(o)
     bg_c = background(img)
+    photos = [ph for ph in photo_blocks(img, text_boxes)       # anti-aliased text on a gradient is not a photo
+              if not any(_iou(ph["box"], g["box"]) > 0.3 or _frac_inside(ph["box"], g["box"]) >= 0.6 for g in grads)]
+    if photos:                        # a photo's colour pieces go; the photo is one placeholder block
+        blocks = [b for b in blocks if not any(_frac_inside(b["box"], ph["box"]) >= 0.8 for ph in photos)] + photos
+    haze = _haze_runs(blocks, bg_c)
+    blocks = [b for k, b in enumerate(blocks) if b.get("gradient") or (k not in haze and not _glow(img, b, bg_c))]
     from .shadow import fit_shadow
     for b in blocks:                  # borders and corner radius, measured on every block
         _border_and_radius(img, b, bg_c)

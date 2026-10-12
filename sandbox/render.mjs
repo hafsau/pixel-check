@@ -20,6 +20,17 @@ import { chromium } from "playwright";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const BREAKPOINTS = { mobile: [390, 844], tablet: [768, 1024], desktop: [1280, 800] };
 export const BETWEEN_WIDTHS = [360, 375, 500, 1024, 1600];   // fluidity check (council, Oct 1)
+
+// A run's own frame sizes (frames exported at any width 320–1600, first screen; council plan Oct 12): each frame
+// renders at its size and the sweep moves between them — phones, the midpoint between each pair of frames, wide —
+// skipping widths within 8 px of a frame. Mutated in place so importers (check_page.mjs) see the same sizes.
+export function setSizes(sizes) {
+  for (const bp of Object.keys(BREAKPOINTS)) BREAKPOINTS[bp] = [Number(sizes[bp][0]), Number(sizes[bp][1])];
+  const ws = Object.values(BREAKPOINTS).map(([w]) => w).sort((a, b) => a - b);
+  const sweep = [360, 375, Math.round((ws[0] + ws[1]) / 2), Math.round((ws[1] + ws[2]) / 2), 1600]
+    .filter((w) => ws.every((f) => Math.abs(w - f) > 8));
+  BETWEEN_WIDTHS.splice(0, BETWEEN_WIDTHS.length, ...[...new Set(sweep)].sort((a, b) => a - b));
+}
 export const NOTEXT_CSS = `*,*::before,*::after{color:transparent!important;-webkit-text-fill-color:transparent!important;
 text-shadow:none!important;text-decoration-color:transparent!important;-webkit-background-clip:border-box!important;
 background-clip:border-box!important}*::placeholder{color:transparent!important;-webkit-text-fill-color:transparent!important}`;
@@ -405,6 +416,7 @@ async function renderHtml(html, outDir) {
     await browser.close();
   }
   result.integrity = integrity(dumps);
+  result.sizes = BREAKPOINTS;
   fs.writeFileSync(path.join(outDir, "checks.json"), JSON.stringify(result, null, 2));
   return result;
 }
@@ -605,6 +617,7 @@ async function selftest() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  if (arg("--sizes")) setSizes(JSON.parse(fs.readFileSync(arg("--sizes"), "utf8")));
   if (process.argv.includes("--selftest")) {
     await selftest();
   } else if (process.argv.includes("--interact")) {

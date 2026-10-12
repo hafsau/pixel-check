@@ -11,15 +11,28 @@ The nearest frame is the one whose Tailwind classes apply at that width: < 768 m
 from __future__ import annotations
 
 
-def nearest(w: int) -> str:
-    return "mobile" if w < 768 else "tablet" if w < 1280 else "desktop"
+SCREENS = (640, 768, 1024, 1280, 1536)       # Tailwind sm md lg xl 2xl
+
+
+def _screen_min(width: int) -> int:
+    """The min-width of the largest standard screen at or below the width (0 = no prefix)."""
+    return max([s for s in SCREENS if s <= width], default=0)
+
+
+def nearest(w: int, sizes: dict | None = None) -> str:
+    """The design frame whose layout is in effect at width w: each frame's classes switch on at its Tailwind screen
+    (a 1071 px desktop uses lg: → from 1024 px). Standard frames: tablet from 768, desktop from 1280."""
+    t = _screen_min(sizes["tablet"][0]) if sizes else 768
+    d = _screen_min(sizes["desktop"][0]) if sizes else 1280
+    return "mobile" if w < t else "tablet" if w < d else "desktop"
 
 
 def report(checks: dict) -> dict:
     bp = checks.get("breakpoints", {})
+    sizes = checks.get("sizes")
     rows, fails = {}, []
     for w, v in sorted(((int(k), v) for k, v in (checks.get("between") or {}).items())):
-        ref = bp.get(nearest(w), {})
+        ref = bp.get(nearest(w, sizes), {})
         drift = abs((v.get("centre_ratio") or 0) - (ref.get("centre_ratio") or 0)) if v.get("content") and ref.get("content") else None
         # overlaps the design itself has at its nearest size (a decorative mark over a headline) are not breakage
         overlaps = max(0, (v.get("text_overlaps") or 0) - (ref.get("text_overlaps") or 0))

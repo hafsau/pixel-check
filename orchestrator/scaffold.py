@@ -211,6 +211,8 @@ def _collect(spec: dict, anchored: bool = False) -> list[Item]:
             it = items.setdefault(key, Item(key, "block"))
             it.at[bp] = {"box": list(b["box"]), "fill": b.get("fill"), "border": b.get("border"), "radius": b.get("radius"),
                          "shadow": bool(b.get("shadow")), "shadow_fit": b.get("shadow_fit")}
+            if b.get("gradient"):
+                it.at[bp]["gradient"] = b["gradient"]
     return list(items.values())
 
 
@@ -409,7 +411,8 @@ def _emit(children: list[Item], origin, view_h, indent: int) -> list[str]:
             if c.role == "input-placeholder":
                 # a real, typeable input whose placeholder is the design's text (not a styled div)
                 ph = [x.replace("text-[#", "placeholder:text-[#") if x and "text-[#" in x else x for x in cls]
-                ph = [" ".join((("placeholder:" + t[3:]) if t.startswith("md:text-[#") or t.startswith("xl:text-[#") else t)
+                bp_pre = [p for p in (PREFIX["tablet"], PREFIX["desktop"]) if p]
+                ph = [" ".join(next(("placeholder:" + t[len(p):] for p in bp_pre if t.startswith(p + "text-[#")), t)
                                .replace("placeholder:text-[#", "placeholder:text-[#") for t in x.split()) if x else x for x in ph]
                 ph = [" ".join(_placeholder_variant(t) for t in x.split()) if x else x for x in ph]
                 label = _attr(c.text)
@@ -462,7 +465,7 @@ def _emit(children: list[Item], origin, view_h, indent: int) -> list[str]:
 
 def _placeholder_variant(t: str) -> str:
     """text colour → placeholder colour, keeping the breakpoint prefix (md:text-[#x] → md:placeholder:text-[#x])."""
-    for pre in ("md:", "xl:", ""):
+    for pre in (PREFIX["tablet"], PREFIX["desktop"], ""):
         if t.startswith(pre + "text-[#") or t.startswith(pre + "placeholder:text-[#"):
             return pre + "placeholder:" + t[len(pre):].replace("placeholder:", "")
     return t

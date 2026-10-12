@@ -104,6 +104,8 @@ _FORBID = re.compile(r"^-?(hidden|invisible|sr-only|text-transparent|opacity-\S+
 _DISPLAY = re.compile(r"^(block|flex|grid|inline|inline-block|inline-flex|inline-grid|table|contents)$")
 _SPACE = re.compile(r"^-?(m|p)[trblxy]?-(\[(\d+(?:\.\d+)?)px\]|(\d+(?:\.\d+)?))$")
 _TEXT_PX = re.compile(r"^text-\[(\d+(?:\.\d+)?)px\]$")
+# a breakpoint variant inside an edit: arbitrary / range screens can pin one measured width (red team, Oct 12)
+_WIDTH_VARIANT = re.compile(r"(^|:)(min|max)-\[[^\]]*\]:|\[@media|(^|:)max-(sm|md|lg|xl|2xl):")
 
 
 def _base(tok: str) -> str:
@@ -119,7 +121,7 @@ def filter_edits(edits: list[dict]) -> tuple[list[dict], list[str]]:
         for t in (e.get("add") or "").split():
             b = _base(t)
             m, mt = _SPACE.match(b), _TEXT_PX.match(b)
-            if _FORBID.match(b):
+            if _FORBID.match(b) or _WIDTH_VARIANT.search(t):
                 bad.append(t)
             elif m and (float(m.group(3)) if m.group(3) else float(m.group(4)) * 4) > FAR:
                 bad.append(t)

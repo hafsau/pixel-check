@@ -31,11 +31,25 @@ class Evaluation:
         return self.render_run.result_image
 
 
+def sizes_job(cmd: str, files: dict) -> tuple[str, dict]:
+    """A run's own frame sizes (frames.use): render.mjs / check_page.mjs get /work/sizes.json + --sizes. Standard runs
+    keep exactly their command and files."""
+    from . import config, frames
+    if frames.is_standard(config.BREAKPOINTS):
+        return cmd, files
+    sizes = {bp: list(config.BREAKPOINTS[bp]) for bp in frames.BPS}
+    cmd = cmd.replace("render.mjs --in", "render.mjs --sizes /work/sizes.json --in", 1)
+    if "check_page.mjs" in cmd:                  # the URL is its first argument: the flag goes last
+        cmd += " --sizes /work/sizes.json"
+    return cmd, {**files, "/work/sizes.json": json.dumps(sizes).encode()}
+
+
 def evaluate(sb: Sandbox, app_jsx: str, targets: dict[str, bytes], target_texts: dict[str, list] | None = None,
              *, base_image: str | None = None, fetch_renders: bool = True) -> Evaluation:
     """targets: {"mobile": png, "tablet": png, "desktop": png}; target_texts: {bp: [str|{"text":…}]}."""
     kw = {"image": base_image} if base_image else {}
-    render = sb.run(RENDER_CMD, files={"/work/App.jsx": app_jsx.encode()}, disposable=False, **kw)
+    cmd, rfiles = sizes_job(RENDER_CMD, {"/work/App.jsx": app_jsx.encode()})
+    render = sb.run(cmd, files=rfiles, disposable=False, **kw)
     if not render.ok or not render.result_image:
         return Evaluation(0.0, {"disqualified": True, "reason": f"render run failed: {render.status} {render.stderr[:300]}"}, render, None)
     files = {f"/work/targets/{bp}.png": png for bp, png in targets.items()}

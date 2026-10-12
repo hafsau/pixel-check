@@ -66,6 +66,10 @@ def pixel_checks(out: Path, target_strings: list[str]) -> dict | None:
         readable_at[bp] = r
     n = min(len(v) for v in nodes.values())
     size = {"mobile": (390, 844), "tablet": (768, 1024), "desktop": (1280, 800)}
+    try:                                    # a run's own frame sizes (render.mjs --sizes): "on-screen" means its frame
+        size.update({bp: tuple(v) for bp, v in json.loads((out / "checks.json").read_text()).get("sizes", {}).items()})
+    except (OSError, ValueError):
+        pass
 
     # duplicated layouts over readable text
     by_text: dict[str, list[set]] = {}

@@ -78,9 +78,17 @@ def test_gates_match_live_mode(tmp_path):
     assert r.status_code == 422 and "does not" in r.json()["detail"]
 
 
-def test_frames_must_have_the_design_sizes(tmp_path):
-    bad = dict(SIZES, tablet=(800, 1000))
-    assert post(client(tmp_path), sizes=bad).status_code == 422
+def test_frames_must_be_within_the_bounds(tmp_path):
+    """Oct 12: check mode takes the same frames as a rebuild (any width 320–1600, any height)."""
+    assert post(client(tmp_path), sizes=dict(SIZES, tablet=(300, 1000))).status_code == 422
+    assert post(client(tmp_path), sizes=dict(SIZES, tablet=(800, 1000))).status_code == 202
+
+
+def test_repair_needs_the_standard_sizes_for_now(tmp_path):
+    files = {bp: ("f.png", png(*wh), "image/png") for bp, wh in dict(SIZES, desktop=(1071, 1177)).items()}
+    r = client(tmp_path).post("/api/checks", files=files, data={"owns": "true", "passcode": "letmein", "repair": "true",
+                                                                "code": "export default function App(){return null}"})
+    assert r.status_code == 422 and "standard frame sizes" in r.text
 
 
 def test_sensitive_builds_are_refused_after_the_capture(tmp_path):

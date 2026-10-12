@@ -61,11 +61,16 @@ BLEED = (b'<!doctype html><html><head><title>Bleed</title><style>body{margin:0}.
          b'.b span{display:block;width:calc(100vw + 4px);font-size:120px;line-height:1}</style></head><body>'
          b'<div class="b"><span>Hi</span></div><p>Designer and engineer</p></body></html>')
 
+NESTED = (b'<!doctype html><html><head><title>Nested</title><style>body{margin:0}'
+          b'@media (min-width: 1071px){@media (max-width: 1072px){h1{color:red}}}</style></head>'
+          b'<body><h1>Hi there</h1></body></html>')
+
 
 class _H(http.server.BaseHTTPRequestHandler):
     routes = {"/fluid": FLUID, "/wide": WIDE, "/login": LOGIN, "/hidden": HIDDEN, "/split": SPLIT, "/fade": FADE,
               "/clip": CLIP, "/shot": SHOT, "/exact": EXACT,
-              "/marquee": MARQUEE, "/carousel": CAROUSEL, "/bleed": BLEED}
+              "/marquee": MARQUEE, "/carousel": CAROUSEL, "/bleed": BLEED,
+              "/nested": NESTED}
 
     def do_GET(self):
         body = self.routes.get(self.path)
@@ -263,3 +268,25 @@ def test_exact_width_media_queries_are_flagged(tmp_path, server):
 def test_an_honest_page_has_no_warnings(tmp_path, server):
     r = run(f"{server}/fluid", tmp_path)
     assert json.loads((tmp_path / "checks.json").read_text())["warnings"] == []
+
+
+def test_a_runs_own_sizes_are_captured(tmp_path, server):
+    sizes = {"mobile": [402, 870], "tablet": [768, 1024], "desktop": [1071, 1177]}
+    (tmp_path / "sizes.json").write_text(json.dumps(sizes))
+    r = run(f"{server}/fluid", tmp_path / "out", "--sizes", str(tmp_path / "sizes.json"))
+    assert r.returncode == 0, r.stderr[-400:]
+    checks = json.loads((tmp_path / "out" / "checks.json").read_text())
+    assert {bp: [v["width"], v["height"]] for bp, v in checks["breakpoints"].items()} == sizes == checks["sizes"]
+    assert sorted(int(w) for w in checks["between"]) == [360, 375, 585, 920, 1600]
+    b = (tmp_path / "out" / "desktop.png").read_bytes()
+    assert (int.from_bytes(b[16:20], "big"), int.from_bytes(b[20:24], "big")) == (1071, 1177)
+
+
+def test_a_nested_media_window_at_a_runs_own_width_is_flagged(tmp_path, server):
+    """Red team (Oct 12): a 2 px window built from nested @media rules at the run's desktop width (1071) slipped
+    past the check, which only looked at single rules and the standard widths."""
+    (tmp_path / "sizes.json").write_text(json.dumps({"mobile": [402, 870], "tablet": [768, 1024], "desktop": [1071, 1177]}))
+    r = run(f"{server}/nested", tmp_path / "out", "--sizes", str(tmp_path / "sizes.json"))
+    assert r.returncode == 0, r.stderr[-400:]
+    w = json.loads((tmp_path / "out" / "checks.json").read_text())["warnings"]
+    assert any("exactly 1071" in x for x in w), w

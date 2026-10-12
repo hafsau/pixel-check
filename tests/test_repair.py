@@ -416,3 +416,16 @@ def test_font_edits_carry_the_rendered_sizes_of_the_other_sizes_as_pins():
     nodes = {"tablet": [{"pc": "1", "fs": 44}], "desktop": [{"pc": "1", "fs": 48}]}
     out = R.with_pins(edits, nodes)
     assert out[0]["pins"] == {"tablet": ["text-[44px]"], "desktop": ["text-[48px]"]} and "pins" not in out[1]
+
+
+def test_edits_with_their_own_breakpoint_variants_are_refused():
+    """Red team (Oct 12): _base() dropped prefixes before filtering, so an edit pinned to one exact width
+    (min-[402px]:max-[403px]:mt-[37px]) passed. Edits are plain classes; the tool adds the size's prefix."""
+    from orchestrator.repair import filter_edits
+    kept, refused = filter_edits([
+        {"id": "1", "bp": "mobile", "add": "min-[402px]:max-[403px]:mt-[37px]"},
+        {"id": "2", "bp": "desktop", "add": "[@media(width:1071px)]:hidden"},
+        {"id": "3", "bp": "tablet", "add": "max-md:text-[19px]"},
+        {"id": "4", "bp": "tablet", "add": "mt-[12px] hover:underline"},
+    ])
+    assert [e["id"] for e in kept] == ["4"] and len(refused) == 3
