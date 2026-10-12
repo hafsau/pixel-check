@@ -195,6 +195,7 @@ def merge(vlm: dict, meas: dict) -> dict:
     """
     lines = meas["text_lines"]
     used: set[tuple] = set()          # (line, word) pairs taken by a matched text
+    matched: set[int] = set()         # OCR lines any vision text matched (even loosely)
     nwords = lambda i: max(1, len(lines[i].get("words") or [None]))
     texts = []
     # candidates: single OCR lines, joins of 2–3 vertically consecutive lines (wrapped headings/paragraphs: OCR
@@ -263,6 +264,7 @@ def merge(vlm: dict, meas: dict) -> dict:
         # Email" scored 0.8 and stole its box when OCR missed the white-on-dark Google label
         if best is not None and score >= 0.9:
             idxs, _, box, sub = best
+            matched.update(idxs)
             first = lines[idxs[0]]
             if sub is not None or len(idxs) > 1 or _norm(first["text"]) == _norm(t.get("text", "")) or score >= 0.95:
                 used.update(words_of(best))
@@ -280,6 +282,7 @@ def merge(vlm: dict, meas: dict) -> dict:
                 c, box = part
                 first = lines[c[0][0]]
                 used.update(words_of(c))
+                matched.update(c[0])
                 item.update(box=box, color=first["color"], on=first["backdrop"], measured=True, extended=True, lines=1,
                             line_boxes=[box], line_texts=[t.get("text", "")])
                 ty = first.get("typo") or {}
@@ -290,6 +293,26 @@ def merge(vlm: dict, meas: dict) -> dict:
             else:
                 item.update(box=None, color=t.get("color"), measured=False,
                             vlm_box=t.get("box") if isinstance(t.get("box"), list) and len(t["box"]) == 4 else None)
+        texts.append(item)
+    # clean OCR lines no vision text matched: the vision model skips some (Hafsa's "720 XP", "280 to Level 5" —
+    # Oct 12). Kept as measured text; junk (an avatar read as "@", icon glyphs) and text inside photos are not.
+    for i, l in enumerate(lines):
+        tx = l["text"].strip()
+        if i in matched or any((i, k) in used for k in range(nwords(i))):
+            continue
+        alnum = sum(ch.isalnum() for ch in tx)
+        if alnum < 2 or alnum < 0.7 * len(tx.replace(" ", "")) or l["box"][3] < 7:
+            continue
+        if any(b.get("media") and _inside_box(l["box"], b["box"]) for b in meas.get("blocks", [])):
+            continue
+        item = {"text": tx, "role": "other", "size_px": None, "weight": None, "box": list(l["box"]), "color": l["color"],
+                "on": l["backdrop"], "measured": True, "lines": 1, "line_boxes": [list(l["box"])], "line_texts": [tx],
+                "ocr_only": True}
+        ty = l.get("typo") or {}
+        item["size_px"] = ty.get("size_px") or font_px(tx, l["box"][2], l["box"][3], None)
+        if ty:
+            item.update(weight=ty["weight"], tracking_em=ty["tracking_em"], top_em=ty["top_em"],
+                        underline=ty.get("underline", False))
         texts.append(item)
     # a label extended over letters OCR did not read: blocks inside its box are those letters' ink, not blocks
     for it in texts:

@@ -148,3 +148,29 @@ def test_an_edge_to_edge_gradient_band_is_a_section_background_not_a_block():
     buf = io.BytesIO()
     Image.fromarray(a.astype(np.uint8)).save(buf, "PNG")
     assert not [b for b in measure.measure(buf.getvalue())["blocks"] if b.get("gradient")]
+
+
+def test_a_rounded_gradient_banner_keeps_its_radius():
+    png, box = page("r", via=True)
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    a = np.asarray(im).copy()
+    x0, y0, bw, bh = box
+    r = 16
+    for (cx, cy) in ((x0 + r, y0 + r), (x0 + bw - r - 1, y0 + r), (x0 + r, y0 + bh - r - 1), (x0 + bw - r - 1, y0 + bh - r - 1)):
+        for yy in range(cy - r, cy + r + 1):
+            for xx in range(cx - r, cx + r + 1):
+                inside_corner = (xx < x0 + r or xx > x0 + bw - r - 1) and (yy < y0 + r or yy > y0 + bh - r - 1)
+                if inside_corner and (xx - cx) ** 2 + (yy - cy) ** 2 > r * r:
+                    a[yy, xx] = BG
+    buf = io.BytesIO()
+    Image.fromarray(a).save(buf, "PNG")
+    g = [b for b in measure.measure(buf.getvalue())["blocks"] if b.get("gradient")]
+    assert g and 12 <= (g[0].get("radius") or 0) <= 20, g
+
+
+def test_haze_strips_of_slightly_different_heights_are_one_run():
+    from orchestrator.measure import _haze_runs
+    bg = np.array([244, 246, 250], float)
+    blocks = [{"box": [10, 133, 139, 27], "fill": "#d7e0fb"}, {"box": [134, 133, 63, 24], "fill": "#dddff9"},
+              {"box": [190, 133, 57, 24], "fill": "#e0e6fa"}, {"box": [241, 133, 44, 24], "fill": "#ebecf9"}]
+    assert _haze_runs(blocks, bg) == {0, 1, 2, 3}

@@ -232,11 +232,15 @@ def _haze_runs(blocks: list[dict], bg) -> set[int]:
     faint = [i for i, b in enumerate(blocks) if not b.get("border") and not b.get("gradient") and b.get("fill")
              and np.linalg.norm(rgb(b["fill"]) - bg) < 48]
     out = set()
-    rows: dict = {}
-    for i in faint:
+    rows: list[list[int]] = []        # same top and height within 4 px (rounding split 27 px from 24 px strips)
+    for i in sorted(faint, key=lambda i: blocks[i]["box"][1]):
         x, y, w, h = blocks[i]["box"]
-        rows.setdefault((round(y / 4), round(h / 4)), []).append(i)
-    for idx in rows.values():
+        row = next((r for r in rows if abs(blocks[r[0]]["box"][1] - y) <= 4 and abs(blocks[r[0]]["box"][3] - h) <= 4), None)
+        if row is None:
+            rows.append([i])
+        else:
+            row.append(i)
+    for idx in rows:
         idx.sort(key=lambda i: blocks[i]["box"][0])
         run = [idx[0]] if idx else []
         for i in idx[1:] + [None]:
@@ -524,6 +528,8 @@ def _border_and_radius(img: np.ndarray, b: dict, bg: np.ndarray) -> None:
                 b["shadow"] = True
             b["box"] = [x - 1, y - 1, w + 2, h + 2]
             x, y, w, h = b["box"]
+    if b.get("gradient"):             # the top-left corner shows the gradient's start, not its average colour
+        fill = np.array([int(b["gradient"]["from"][i:i + 2], 16) for i in (1, 3, 5)], np.float32)
     k = 0
     while k < min(w, h) // 2 and np.linalg.norm(img[y + k, x + k] - fill) > 12:
         k += 1

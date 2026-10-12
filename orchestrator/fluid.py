@@ -153,6 +153,28 @@ def _same_line(a: list[Item], b: list[Item], bp: str) -> bool:
     return disjoint_x and ov >= 0.5 * min(ua[3], ub[3])
 
 
+def _wrapped_grid(boxes: list) -> tuple[int, int, int] | None:
+    """≥ 2 lines with the same number (≥ 2) of items whose columns line up (x within 8 px) and whose gaps are even:
+    (columns, gap-x, gap-y); else None."""
+    lines: list[list] = []
+    for b in sorted(boxes, key=lambda b: (b[1], b[0])):
+        if lines and min(lines[-1][-1][1] + lines[-1][-1][3], b[1] + b[3]) - max(lines[-1][-1][1], b[1]) > 0:
+            lines[-1].append(b)
+        else:
+            lines.append([b])
+    n = len(lines[0]) if lines else 0
+    if len(lines) < 2 or n < 2 or any(len(ln) != n for ln in lines):
+        return None
+    lines = [sorted(ln) for ln in lines]
+    if any(max(ln[j][0] for ln in lines) - min(ln[j][0] for ln in lines) > 8 for j in range(n)):
+        return None
+    gx = [ln[j + 1][0] - (ln[j][0] + ln[j][2]) for ln in lines for j in range(n - 1)]
+    gy = [min(b[1] for b in lines[k + 1]) - max(b[1] + b[3] for b in lines[k]) for k in range(len(lines) - 1)]
+    if min(gx) < 0 or min(gy) < 0 or max(gx) - min(gx) > 8 or max(gy) - min(gy) > 8:
+        return None
+    return n, round(sum(gx) / len(gx)), round(sum(gy) / len(gy))
+
+
 def _row_mode(p: list[Item], bp: str, frame) -> tuple[dict, dict]:
     """Row container classes at bp + per-item (mt, ml, self) for the present items p (sorted by x)."""
     fx, fy, fw, _ = frame
@@ -161,6 +183,16 @@ def _row_mode(p: list[Item], bp: str, frame) -> tuple[dict, dict]:
     same_line = all(min(boxes[k][1] + boxes[k][3], boxes[k + 1][1] + boxes[k + 1][3]) - max(boxes[k][1], boxes[k + 1][1]) > 0
                     and boxes[k + 1][0] >= boxes[k][0] + boxes[k][2] - 4 for k in range(len(p) - 1))
     per = {}
+    grid = None if same_line else _wrapped_grid(boxes)
+    if grid:
+        # lines of equal length with aligned columns (stat cards 2 × 2 here, 1 × 4 at desktop): a grid (Oct 12)
+        n, gx, gy = grid
+        l = min(b[0] for b in boxes) - fx
+        r = fx + fw - max(b[0] + b[2] for b in boxes)
+        for c in p:
+            per[id(c)] = (0, 0, "self-start")
+        return {"disp": "grid", "dir": f"grid-cols-{n}", "wrap": "", "justify": "justify-start", "pl": _px("pl", max(0, l)),
+                "pr": _px("pr", max(0, r)), "gapx": _px("gap-x", gx), "gapy": _px("gap-y", gy)}, per
     if not same_line:
         # stacked: a column in reading order; each item's own horizontal placement
         prev = top
@@ -603,13 +635,18 @@ def _layout(items: list[Item], frame: dict, indent: int, depth: int = 0) -> list
                 rcls[bp], per[bp], mt[bp] = dict(STACK), {}, 0     # below the fold / menu: plain stack
             else:
                 rcls[bp], per[bp], mt[bp] = dict(STACK, disp="hidden"), {}, 0
+        if any("gapx" in rcls[bp] for bp in BPS):       # a grid somewhere: the other sizes reset its gaps
+            for bp in BPS:
+                rcls[bp].setdefault("gapx", "gap-x-0")
+                rcls[bp].setdefault("gapy", "gap-y-0")
         out.append(f'{pad}<div className="{_rc(rcls)} items-start {_resp({bp: _px("mt", mt[bp]) for bp in BPS})} w-full">')
         # DOM order = x order at the widest frame; where a stacked frame reads in another order, use order-
         need_order = {}
         for bp in BPS:
             p = [c for c in row if bp in c.at]
             ys = sorted(p, key=lambda c: (_box(c, bp)[1], _box(c, bp)[0]))
-            if rcls[bp]["dir"] == "flex-col" and rcls[bp]["disp"] != "hidden" and [id(c) for c in ys] != [id(c) for c in p]:
+            if (rcls[bp]["dir"] == "flex-col" or rcls[bp]["disp"] == "grid") and rcls[bp]["disp"] != "hidden" \
+                    and [id(c) for c in ys] != [id(c) for c in p]:
                 need_order[bp] = {id(c): k for k, c in enumerate(ys)}
         for c in row:
             v = {bp: per[bp].get(id(c)) for bp in BPS}
