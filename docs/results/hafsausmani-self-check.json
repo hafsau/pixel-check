@@ -1,0 +1,53 @@
+{
+ "what": "Check-mode sanity check (reproducibility, not accuracy on a different build): hafsausmani.com (owned) checked against its own real screenshots",
+ "run_id": "20261006-114648-07a836",
+ "date": "2026-10-06",
+ "build": {
+  "url": "https://hafsausmani.com"
+ },
+ "design": "real screenshots of the same page (owned-site capture)",
+ "runtime_image": "pixel-check-runtime:v16",
+ "match": 99.77,
+ "breakpoints": {
+  "mobile": {
+   "score": 99.77,
+   "components": {
+    "structure": 0.9991,
+    "layout": 0.9991,
+    "text": 1.0,
+    "color": 0.9982,
+    "content_color": 0.9964,
+    "bg_match": 1.0
+   },
+   "missing_text": []
+  },
+  "tablet": {
+   "score": 99.85,
+   "components": {
+    "structure": 0.9994,
+    "layout": 0.9986,
+    "text": 1.0,
+    "color": 0.9993,
+    "content_color": 0.9986,
+    "bg_match": 1.0
+   },
+   "missing_text": []
+  },
+  "desktop": {
+   "score": 99.93,
+   "components": {
+    "structure": 0.9997,
+    "layout": 0.9996,
+    "text": 1.0,
+    "color": 0.9995,
+    "content_color": 0.999,
+    "bg_match": 1.0
+   },
+   "missing_text": []
+  }
+ },
+ "fluidity": {
+  "pass": true,
+  "fails": []
+ }
+}

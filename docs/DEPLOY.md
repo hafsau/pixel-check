@@ -1,54 +1,87 @@
-# Deploying PixelCheck (Phase 4)
+# Deploying PixelCheck (Phase 4) — free hosting
 
-Two pieces: the **web app** (static, Vercel, `ui/`) and the **live API** (Docker, Render, repo root). The demo must
-keep working through **Dec 15**: replays need no API; live runs need the API and credit.
+Two pieces, both free: the **web app** (static, Vercel, `ui/`) and the **live API** (Docker, Render free plan,
+repo root). The demo must keep working through **Dec 15**: replays need no API; live runs need the API and credit.
+
+What the Render free plan means, and how the code copes:
+
+| Free-plan limit | Effect | What PixelCheck does |
+|---|---|---|
+| Sleeps after 15 idle minutes, ~1 min to wake | first visit waits | the web app retries for 90 s and shows "Waking the live server…" |
+| Files wiped on every sleep, restart or deploy | caps and spend would reset | caps + spend live in a private GitHub gist (`STATE_GIST_*`); no gist → live mode stays off |
+| 512 MB RAM, 0.1 CPU | one run at a time | `JOB_SLOTS=1`: other runs wait as "queued" |
+| Run results under `/tmp` | a finished live run's page expires when the server sleeps | replays in the web app never expire |
 
 ## 0. Before you start
-- Accounts: Render (API, ~$7/mo starter + $0.25/GB disk) and Vercel (free hobby tier is enough).
+- Accounts: Render and Vercel (free tiers) and GitHub (for the state gist).
 - A new passcode for judges (goes in the Devpost testing notes only).
-- Remaining credit: `SPEND_CAP_USD` = what is left minus headroom (check `var/spend.jsonl` locally; the cap counts
-  model calls **and** sandbox runs).
+- Credit check (see §4 "Spend"): decide `SPEND_CAP_USD`.
 
-## 1. API on Render (Blueprint: `render.yaml`)
-1. Render dashboard → New → Blueprint → this GitHub repo. It reads `render.yaml`: one Docker web service
-   `pixelcheck-api`, 1 instance, a 1 GB disk at `/data` (runs, caps, spend ledger, vision cache), health check
-   `/api/health`.
-2. Fill the secret env vars when prompted (never commit them):
+## 1. State gist (5 min)
+1. gist.github.com → **Create secret gist**, file name `pixelcheck-state.json`, content:
+   `{"caps": [], "spend_usd": 0.0, "spend_day": [null, 0.0]}`. Copy the gist ID (the last part of its URL).
+2. GitHub → Settings → Developer settings → **Fine-grained token**: no repository access, account permission
+   **Gists: Read and write**, expiry after Dec 31. Nothing else.
+3. A secret gist is unlisted, not private: anyone with its URL can read it. It holds only run times, a keyed hash
+   of each visitor (never an address) and spend totals.
+
+## 2. API on Render (Blueprint: `render.yaml`)
+1. Render → New → Blueprint → this GitHub repo. It reads `render.yaml`: one Docker web service `pixelcheck-api`,
+   free plan, health check `/api/health`, `autoDeploy: false`.
+2. Fill the secrets when prompted (never commit them):
    - `NEBIUS_API_KEY`, `NEBIUS_AI_PROJECT`
    - `LIVE_PASSCODE` — the judges' passcode
-   - `LIVE_ORIGINS` — the web app's URL from step 2, e.g. `https://pixelcheck.vercel.app` (comma-separated list)
-   - `SPEND_CAP_USD` — e.g. `30`
-   Preset in the blueprint: `LIVE_ENABLED=1`, caps 10/day · 40 total · 3 per visitor/day, `LIVE_TRUST_PROXY=1`,
-   `OWNED_HOSTS=hafsausmani.com`.
-3. On start the container runs `python -m orchestrator.preflight` (logs one line per check, never a secret's
-   value), then uvicorn. A `FAIL` line names what is missing.
-4. Smoke test: `curl https://<api>.onrender.com/api/health` → `{"live": true, "runs_left_today": 10, ...}`.
+   - `LIVE_ORIGINS` — the web app's origin from step 3, **exactly** as the browser sends it: scheme + host, no path,
+     no trailing slash (`https://pixelcheck.vercel.app`). Comma-separated for several.
+   - `STATE_GIST_ID`, `STATE_GIST_TOKEN` — from step 1
+   - `SPEND_CAP_USD` — see §4
+   Preset in the blueprint: `LIVE_ENABLED=1`, caps 10/day · 40 total · 3 per visitor/day, $4/day spend cap,
+   `JOB_SLOTS=1`, `LIVE_TRUST_PROXY=1`, `OWNED_HOSTS=hafsausmani.com`, state paths under `/tmp/pixelcheck`.
+3. On start the container runs `python -m orchestrator.preflight`: one line per check, never a secret's value.
+   It includes the **state store** line (`gist: $X recorded, N run entries`). A `FAIL` line names what is missing;
+   if the gist cannot be read, live mode stays off (fail closed) and replays still work.
+4. Smoke test: `curl https://<api>.onrender.com/api/health` → `{"live": true, "runs_left_today": 10, ...}`
+   (the first call after a sleep takes up to a minute).
 
-## 2. Web app on Vercel
+## 3. Web app on Vercel
 1. New Project → this repo → **Root Directory `ui`**. Framework preset: Vite (build `npm run build`, output `dist`;
    `ui/vercel.json` adds the client-route rewrite).
-2. Env var: `VITE_API_BASE=https://<api>.onrender.com` (no trailing slash).
-3. Deploy. Then put the Vercel URL into the API's `LIVE_ORIGINS` (step 1.2) and redeploy the API.
+2. Env var: `VITE_API_BASE=https://<api>.onrender.com` (no trailing slash). It is baked in at build time: after
+   changing it, **redeploy** the web app.
+3. Deploy. Put the Vercel URL into the API's `LIVE_ORIGINS` (step 2.2) and redeploy the API (Manual Deploy).
 4. Replays: the build serves **only** `ui/published/` (bundles published with `tools/publish_run.py`, an owned site
    or original designs). Dev replays in `ui/public/runs/` are third-party captures and are dropped by the build.
 
-## 3. Check it end to end (5 min, ~$0.01)
+## 4. Spend and caps
+- **Two ledgers.** The server counts only its own spend (restored from the gist). Local dev runs are in
+  `var/spend.jsonl` and the server never sees them. So set the server's cap from what is really left:
+  `SPEND_CAP_USD` = $50 credit − local spend so far − a reserve for local work − $3 headroom.
+  Example on Oct 8: $50 − $13 − $10 − $3 ≈ **$24**. Check the Token Factory billing page weekly: it is the truth.
+- Per run: about $0.05 for a rebuild, about $0.55 for a check with repair (mostly sandbox time). A repair weighs
+  3 runs against the caps. The $4/day cap stops a bad day from draining the credit.
+- The API refuses runs past `SPEND_CAP_USD` or the daily cap, and when the gist cannot record a run.
+
+## 5. Check it end to end (5 min, ~$0.10)
 - Home → the published replay plays without the API.
-- Live run → From a URL → `https://hafsausmani.com`, tick ownership, passcode → done in ~1 min, side by side shows
-  the real site, the target and the rebuild with the real headshot.
-- Check a build → App.jsx tab with a small App.jsx + three frames → result page; tick "Also repair it" once.
-- `/api/health` shows the run counters going down.
+- Wait 20 min (server asleep), open Live → "Waking the live server…" → then available.
+- Live run → From a URL → `https://hafsausmani.com`, tick ownership, passcode → done in ~1–2 min (0.1 CPU is
+  slower than local); side by side shows the real site, the target and the rebuild with the real headshot.
+- Check a build → App.jsx tab with a small App.jsx + three frames → result page.
+- `/api/health` counters go down, and the gist's `caps` gains entries.
 
-## 4. Keep it alive until Dec 15
+## 6. Keep it alive until Dec 15
+- **Do not deploy Dec 1–15** (judging): a deploy restarts the service and fails runs in flight.
 - Kill switch: set `LIVE_ENABLED=0` (replays keep working).
-- Caps reset: stop the service, delete `/data/live/caps.json` (Render shell), start again — do this before judging
-  (Dec 1).
-- Spend: the ledger is `/data/spend.jsonl`; the API refuses runs past `SPEND_CAP_USD`.
-- Weekly: open one replay and do one live run.
+- Caps reset before judging (by Nov 30): edit the gist, set `"caps": []`. **Keep** `spend_usd` (it is the money).
+- Weekly: open one replay and do one live run; check the billing page against `spend_usd`.
+- Devpost testing notes: "The first live request can take up to a minute while the free server wakes."
 
-## Verified so far (Oct 7)
-- The Dockerfile builds (built in a Token Factory sandbox from a clean copy of the needed files — never the repo
-  folder, which holds `.env`): image preflight passes — Tesseract **5.5.0**, node + JSX tool, fonts, capture scripts.
-- Inside the image: `/api/health` answers; OCR on a stored frame matches the Mac's Tesseract on 8/9 lines within
-  2 px, and reads one label better ("SEE MY WORK" in full).
+## Verified so far
+- Oct 7: the Dockerfile builds (in a Token Factory sandbox, from a clean copy of the needed files — never the repo
+  folder, which holds `.env`); image preflight passes — Tesseract **5.5.0**, node + JSX tool, fonts, capture
+  scripts. Inside the image `/api/health` answers; OCR on a stored frame matches the Mac's Tesseract on 8/9 lines
+  within 2 px.
 - `npm run build` ships no runs unless published; with the hafsausmani.com replay published, `vite preview` serves it.
+- Oct 8 (tests, no deploy yet): state restored from a gist after a wiped disk; live mode off when the gist is
+  unreadable; runs refused when the gist cannot record them; visitors stored only as keyed hashes; preflight
+  state-store check; the web app's waking retry.

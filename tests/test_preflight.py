@@ -68,3 +68,49 @@ def test_cli_exit_code_and_json(tmp_path):
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stdout + r.stderr
     assert all(x["ok"] for x in json.loads(r.stdout))
+
+
+# the durable state store (Render free wipes the disk): a gist needs both settings, must be readable, and on Render
+# live mode needs it at all (a file under /tmp would reset the caps and the spend on every wake-up) — Oct 8
+class FakeStore:
+    def __init__(self, data=None, fail=None):
+        self.data, self.fail = data or {"caps": [], "spend_usd": 0.0, "spend_day": [None, 0.0]}, fail
+
+    def load(self):
+        if self.fail:
+            from orchestrator.state import StateError
+            raise StateError(self.fail)
+        return self.data
+
+
+def test_a_readable_gist_passes_and_reports_the_recorded_spend(tmp_path):
+    e = env(tmp_path, STATE_GIST_ID="g1", STATE_GIST_TOKEN="tok-very-secret", RENDER="true")
+    res = P.run(e, static=False, store=FakeStore({"caps": [[1, "a"]], "spend_usd": 13.13, "spend_day": [None, 0]}))
+    r = by_name(res)["state store"]
+    assert r["ok"] and "13.13" in r["detail"] and "gist" in r["detail"]
+    assert "tok-very-secret" not in json.dumps(res)
+
+
+def test_half_configured_gist_fails(tmp_path):
+    r = by_name(P.run(env(tmp_path, STATE_GIST_ID="g1"), static=False))["state store"]
+    assert not r["ok"] and "STATE_GIST_TOKEN" in r["detail"]
+
+
+def test_unreadable_gist_fails_without_the_token(tmp_path):
+    e = env(tmp_path, STATE_GIST_ID="g1", STATE_GIST_TOKEN="tok-very-secret")
+    res = P.run(e, static=False, store=FakeStore(fail="the state gist answered 401"))
+    r = by_name(res)["state store"]
+    assert not r["ok"] and "401" in r["detail"] and "tok-very-secret" not in json.dumps(res)
+
+
+def test_live_mode_on_render_needs_the_gist(tmp_path):
+    r = by_name(P.run(env(tmp_path, RENDER="true"), static=False))["state store"]
+    assert not r["ok"] and "STATE_GIST_ID" in r["detail"]
+    r = by_name(P.run(env(tmp_path), static=False))["state store"]       # local: a file is fine
+    assert r["ok"] and "file" in r["detail"]
+
+
+def test_recorded_spend_at_the_cap_fails(tmp_path):
+    e = env(tmp_path, STATE_GIST_ID="g1", STATE_GIST_TOKEN="t", SPEND_CAP_USD="20")
+    r = by_name(P.run(e, static=False, store=FakeStore({"caps": [], "spend_usd": 20.5, "spend_day": [None, 0]})))
+    assert not r["state store"]["ok"] and "20.5" in r["state store"]["detail"]

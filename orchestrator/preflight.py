@@ -41,7 +41,14 @@ def _static() -> list[dict]:
         out.append(_check("node + JSX tool", False, f"{type(e).__name__}: {str(e)[:160]}"))
     fonts = [ROOT / "sandbox" / "fonts" / f"inter-latin-{w}-normal.woff2" for w in (400, 500, 600, 700)]
     missing = [f.name for f in fonts if not f.exists()]
-    out.append(_check("fonts", not missing, "missing: " + ", ".join(missing) if missing else "Inter 400–700"))
+    if not missing:                         # build the TTFs now (at image build), not on the first concurrent run
+        try:
+            from . import typography
+            typography._ensure_fonts()
+            missing = [f"inter-{w}.ttf" for w in (400, 500, 600, 700) if not (typography.FONT_DIR / f"inter-{w}.ttf").exists()]
+        except Exception as e:
+            missing = [f"TTF build failed: {type(e).__name__}"]
+    out.append(_check("fonts", not missing, "missing: " + ", ".join(missing) if missing else "Inter 400–700 (TTFs built)"))
     try:
         from .api import capture_files
         files = capture_files("check_page.mjs")
@@ -62,7 +69,29 @@ def _writable(name: str, path: Path) -> dict:
         return _check(f"writable {name}", False, f"{path}: {e.strerror or e}")
 
 
-def _env(env: dict) -> list[dict]:
+def _state(env: dict, live: bool, cap: float | None, store=None) -> dict:
+    """The durable store behind the caps and the spend (orchestrator/state.py). Never prints the token."""
+    from . import state
+    gid, tok = (env.get("STATE_GIST_ID") or "").strip(), (env.get("STATE_GIST_TOKEN") or "").strip()
+    if bool(gid) != bool(tok):
+        return _check("state store", False, "set both STATE_GIST_ID and STATE_GIST_TOKEN (one is missing)")
+    if not gid and live and (env.get("RENDER") or "").strip():
+        return _check("state store", False, "live mode on Render needs STATE_GIST_ID + STATE_GIST_TOKEN — the disk "
+                                            "is wiped on every wake-up, which would reset the caps and the spend")
+    kind = "gist" if gid else "file"
+    try:
+        st = store or state.from_env(env, Path(env.get("LIVE_DIR") or ROOT / "var" / "live"))
+        d = st.load()
+    except state.StateError as e:
+        return _check("state store", False, f"{kind}: {e}")
+    spent = float(d.get("spend_usd") or 0.0)
+    detail = f"{kind}: ${spent:.2f} recorded, {len(d.get('caps') or [])} run entries"
+    if cap is not None and spent >= cap:
+        return _check("state store", False, detail + f" — at or past the ${cap:g} cap")
+    return _check("state store", True, detail)
+
+
+def _env(env: dict, store=None) -> list[dict]:
     out = []
     for k in ("NEBIUS_API_KEY", "NEBIUS_AI_PROJECT"):
         out.append(_check(f"env {k}", bool((env.get(k) or "").strip()), "set" if env.get(k) else "missing"))
@@ -72,19 +101,21 @@ def _env(env: dict) -> list[dict]:
     out.append(_check("env LIVE_ORIGINS", not live or bool((env.get("LIVE_ORIGINS") or "").strip()),
                       env.get("LIVE_ORIGINS", "") if env.get("LIVE_ORIGINS") else
                       ("missing — the web app's origin, e.g. https://<app>.vercel.app" if live else "not needed")))
+    cap = None
     try:
         cap = float(env.get("SPEND_CAP_USD") or 40)
         out.append(_check("spend cap", 0 < cap <= CREDIT_USD, f"${cap:g} of ${CREDIT_USD:g} credit"))
     except ValueError:
         out.append(_check("spend cap", False, "SPEND_CAP_USD is not a number"))
+    out.append(_state(env, live, cap, store))
     out.append(_writable("LIVE_DIR", Path(env.get("LIVE_DIR") or ROOT / "var" / "live")))
     out.append(_writable("LEDGER_PATH", Path(env.get("LEDGER_PATH") or ROOT / "var" / "spend.jsonl").parent))
     out.append(_writable("VISION_CACHE_DIR", Path(env.get("VISION_CACHE_DIR") or ROOT / "var" / "cache" / "vision")))
     return out
 
 
-def run(env: dict, static: bool = False) -> list[dict]:
-    return _static() + ([] if static else _env(env))
+def run(env: dict, static: bool = False, store=None) -> list[dict]:
+    return _static() + ([] if static else _env(env, store))
 
 
 def main(argv: list[str]) -> int:

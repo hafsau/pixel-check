@@ -19,8 +19,8 @@ const maxWait = Number(arg("--wait", "2000"));
 const BLOCK_PRIVATE = process.argv.includes("--block-private");
 if (!url) { console.error("usage: node check_page.mjs <url> --out DIR"); process.exit(2); }
 
-// motion off and no caret / scrollbars — but the page's own fonts stay (unlike our renders, nothing is normalised)
-const STILL_CSS = `*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}
+// motion to its end state and no caret / scrollbars — the page's own fonts stay (nothing is normalised)
+const STILL_CSS = `*,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;animation-iteration-count:1!important;transition:none!important;caret-color:transparent!important}
 html{scrollbar-width:none}::-webkit-scrollbar{display:none}`;
 
 async function settle(page, max) {        // no DOM change / new resource for 500 ms, at most `max`
@@ -35,6 +35,35 @@ async function settle(page, max) {        // no DOM change / new resource for 50
   }, [Math.min(500, max), max]);
 }
 
+// warnings, not verdicts (council, Oct 8): signs that a build imitates the frames instead of laying them out
+function warningsScan(name) {
+  const vw = innerWidth, vh = innerHeight, out = [];
+  let cover = 0;
+  for (const el of document.querySelectorAll("*")) {
+    const cs = getComputedStyle(el);
+    const pic = /^(IMG|PICTURE|CANVAS|VIDEO|OBJECT|EMBED|IFRAME)$/.test(el.tagName) || /url\(/.test(cs.backgroundImage);
+    if (!pic || cs.visibility === "hidden" || cs.display === "none" || Number(cs.opacity) === 0) continue;
+    const r = el.getBoundingClientRect();
+    const a = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+    cover = Math.max(cover, a / (vw * vh));
+  }
+  if (cover > 0.3) out.push(`${name}: a picture covers ${Math.round(cover * 100)} % of the screen — the build may be a screenshot`);
+  const widths = [360, 375, 390, 500, 768, 1024, 1280, 1600];
+  for (const sh of document.styleSheets) {
+    let rules;
+    try { rules = sh.cssRules; } catch (e) { continue; }       // cross-origin sheets
+    for (const rule of rules || []) {
+      const q = rule.conditionText || (rule.media && rule.media.mediaText) || "";
+      if (!q) continue;
+      const exact = q.match(/\(\s*width\s*:\s*(\d+)px\s*\)/);
+      const mn = q.match(/min-width\s*:\s*(\d+)px/), mx = q.match(/max-width\s*:\s*(\d+)px/);
+      const hit = exact ? Number(exact[1]) : (mn && mx && Math.abs(Number(mn[1]) - Number(mx[1])) <= 2 ? Number(mn[1]) : null);
+      if (hit && widths.some((w) => Math.abs(w - hit) <= 2)) out.push(`a media query targets exactly ${hit} px — layouts tuned to the measured widths`);
+    }
+  }
+  return out;
+}
+
 const guard = makeGuard(url);
 let preHops = null;
 if (BLOCK_PRIVATE) {
@@ -44,10 +73,11 @@ if (BLOCK_PRIVATE) {
 fs.mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ args: R.CHROMIUM_ARGS });
 const result = { breakpoints: {}, between: {}, runtime_errors: [], mode: "check" };
+const warnings = [];
 const meta = { url, sensitive: { password: 0, payment: 0, signin: 0, crypto: 0 }, finals: {}, ips: [], pages: [] };
 
 async function open(w, h) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, reducedMotion: "reduce", serviceWorkers: "block" });
   if (BLOCK_PRIVATE) await guard.route(ctx);
   const page = await ctx.newPage();
   page.on("pageerror", (e) => result.runtime_errors.length < 20 && result.runtime_errors.push(String(e.message).slice(0, 300)));
@@ -57,6 +87,8 @@ async function open(w, h) {
   await page.addStyleTag({ content: STILL_CSS });
   await page.evaluate(() => document.fonts.ready);
   await settle(page, maxWait);
+  // fade-ins end visible (an animation frozen at its start state hid an honest page's text — council, Oct 8)
+  await page.evaluate(() => { for (const a of document.getAnimations()) { try { a.finish(); } catch (e) { /* infinite */ } } });
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.addScriptTag({ content: `window.__inkInfo = ${R.inkInfo.toString()};` });
   const addr = resp ? await resp.serverAddr().catch(() => null) : null;
@@ -74,8 +106,13 @@ try {
     meta.finals[bp] = page.url();
     meta.pages.push(await page.evaluate(() => ({ title: document.title || "",
       site_name: (document.querySelector('meta[property="og:site_name"]') || {}).content || "" })));
-    const { dom, health, fontsOk } = await R.captureFrame(page, out, bp);
+    const warn = await page.evaluate(warningsScan, bp);
+    const { dom, health, fontsOk, dump } = await R.captureFrame(page, out, bp);
     result.breakpoints[bp] = { width: w, height: h, elements: dom.length, fonts_ok: fontsOk, ...health };
+    const texts = (dump || []).filter((e) => e.v && e.t);
+    const positioned = texts.length ? texts.filter((e) => e.p).length / texts.length : 0;
+    if (positioned > 0.3) warn.push(`${bp}: ${Math.round(positioned * 100)} % of the text is absolutely positioned — pinned, not laid out`);
+    warnings.push(...warn);
     await ctx.close();
   }));
   for (const w of R.BETWEEN_WIDTHS) {
@@ -88,6 +125,7 @@ try {
 }
 const uniq = (xs) => [...new Set(xs.filter(Boolean))];
 const finals = uniq(Object.keys(R.BREAKPOINTS).map((bp) => meta.finals[bp]));
+result.warnings = [...new Set(warnings)];
 fs.writeFileSync(path.join(out, "checks.json"), JSON.stringify(result, null, 2));
 fs.writeFileSync(path.join(out, "meta.json"), JSON.stringify({
   url, sensitive: meta.sensitive, page: meta.pages[0] || {}, pages: meta.pages,

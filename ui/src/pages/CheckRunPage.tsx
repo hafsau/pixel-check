@@ -207,7 +207,7 @@ export function CheckResult({ id, check }: { id: string; check: CheckBundle }) {
       </div>
 
       <p className="mt-6 text-xs text-ink-muted">
-        Measured in a Token Factory Sandbox{check.usd != null ? ` · ${fmtUsd(check.usd, 4)}` : ''}. Your build was not changed{check.repair && repairOutcome(check.repair).improved ? ' — the repair is a separate copy' : ''}.
+        Measured in a Token Factory Sandbox{check.usd != null ? ` · model cost ${fmtUsd(check.usd, 4)}` : ''}. Your build was not changed{check.repair && repairOutcome(check.repair).improved ? ' — the repair is a separate copy' : ''}.
       </p>
     </div>
   );

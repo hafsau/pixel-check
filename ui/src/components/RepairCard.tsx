@@ -28,6 +28,15 @@ export function RepairCard({ id, repair }: { id: string; repair: Repair }) {
   const summary = useMemo(() => repairSummary(repair, o), [repair, o]);
   const rounds = Math.max(0, ...repair.history.map((h) => h.round));
 
+  if (repair.error)
+    return (
+      <section aria-labelledby="repair-title" className="card card-pad mt-6" role="status">
+        <h2 id="repair-title" className="eyebrow">Repair · Nemotron</h2>
+        <p className="mt-2 text-sm text-ink">The repair could not finish — the check below still stands.</p>
+        <p className="mt-1 font-mono text-xs text-ink-muted">{repair.error}</p>
+      </section>
+    );
+
   return (
     <section aria-labelledby="repair-title" className="card card-pad mt-6">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -61,7 +70,7 @@ function Headline({ o, repair }: { o: RepairOutcome; repair: Repair }) {
           <span className="text-xs text-ink-muted">worst size</span>
         </p>
         <p className="mt-3 text-sm font-medium text-ink">No round improved it — your code is unchanged.</p>
-        <p className="mt-1 text-xs text-ink-muted">The repair only edits Tailwind classes; it cannot add, move or remove elements.</p>
+        <p className="mt-1 text-xs text-ink-muted">Experimental. The repair only edits Tailwind classes: it cannot add, move or remove elements, but it can restyle or hide them.</p>
       </div>
     );
   const kept = linesKeptLabel(repair.linesKept);

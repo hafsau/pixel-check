@@ -7,6 +7,7 @@ Rules enforced here, not by callers:
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -39,9 +40,12 @@ class RunResult:
 
 
 class Sandbox:
-    def __init__(self, client: httpx.Client | None = None):
+    def __init__(self, client: httpx.Client | None = None, meter=None):
+        """meter: an object with run_spend / run_budget (a TFClient): sandbox cost counts in that run's budget."""
         self._h = {"Authorization": f"Bearer {config.api_key()}", "Project": config.project_id()}
         self._c = client or httpx.Client(timeout=60)
+        self.meter = meter
+        self._mlock = threading.Lock()
 
     def _get(self, path: str) -> dict:
         for attempt in range(5):
@@ -77,6 +81,8 @@ class Sandbox:
         ledger = Ledger(config.LEDGER_PATH)
         if ledger.total() >= config.SPEND_CAP_USD:      # sandbox runs cost credits too: same global cap as models
             raise SpendCapExceeded(f"global spend ${ledger.total():.2f} ≥ cap ${config.SPEND_CAP_USD:.2f}")
+        if self.meter is not None and self.meter.run_spend >= self.meter.run_budget:
+            raise SpendCapExceeded(f"run spend ${self.meter.run_spend:.3f} ≥ run budget ${self.meter.run_budget:.2f}")
         mapped = {path: {"uuid": self.upload(data), "mode": "0644"} for path, data in (files or {}).items()}
         body = {
             "image": image, "command": command, "shell": True,
@@ -85,7 +91,16 @@ class Sandbox:
             "truncate_output_at": config.SANDBOX_OUTPUT_CAP, "files": mapped,
         }
         t0 = time.time()
-        r = self._c.post(f"{config.SANDBOX_BASE}/instances", headers=self._h, json=body)  # never retried
+        # a spawn is never retried after it may have created a VM; a 429 means none was created: retry that only
+        for attempt in range(3):
+            r = self._c.post(f"{config.SANDBOX_BASE}/instances", headers=self._h, json=body)
+            if r.status_code != 429 or attempt == 2:
+                break
+            try:
+                wait = min(30.0, float(r.headers.get("retry-after") or 2 ** (attempt + 1)))
+            except ValueError:
+                wait = 2.0 ** (attempt + 1)
+            time.sleep(wait)
         r.raise_for_status()
         op_id = r.json()["uuid"]
         deadline = t0 + timeout_s + 60
@@ -102,7 +117,11 @@ class Sandbox:
         resources = res.get("resources") or {}
         if resources.get("cost"):         # recorded before returning, like every model call
             ledger.add({"ts": time.time(), "kind": "sandbox", "step": step, "op": op_id,
-                        "usd": float(resources["cost"]), "elapsed_s": resources.get("elapsed_time")})
+                        "usd": float(resources["cost"]), "elapsed_s": resources.get("elapsed_time"),
+                        **({"run": getattr(self.meter, "run_id", None)} if self.meter is not None else {})})
+            if self.meter is not None:
+                with self._mlock:
+                    self.meter.run_spend += float(resources["cost"])
         return RunResult(
             op_id=op_id, status=op.get("status"), exit_code=state.get("exit_code"),
             timed_out=bool(state.get("timed_out")), stdout=_decode(out), stderr=_decode(err),

@@ -3,7 +3,7 @@ import { navigate } from '../lib/router';
 import { FRAME_SIZES, LIVE_BPS, validatePageUrl, type LiveBp } from '../lib/live';
 import { checkMissing, checkPath, checkReady, codeCounter, validateCode, wantsRepair, type CheckSource } from '../lib/check';
 import { REPAIR_ROUNDS } from '../lib/repair';
-import { getHealth, startCheck } from '../lib/liveApi';
+import { getHealth, startCheck, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
 import { Availability, type HealthState } from './LiveRunPanel';
@@ -27,7 +27,7 @@ export function CheckPanel() {
 
   useEffect(() => {
     let alive = true;
-    getHealth().then((r) => alive && setHealth(r.ok ? { status: 'ok', health: r.health } : { status: 'unreachable', message: r.message }));
+    wakeAndGetHealth(() => alive && setHealth({ status: 'waking' })).then((r) => alive && setHealth(r.ok ? { status: 'ok', health: r.health } : { status: 'unreachable', message: r.message }));
     return () => {
       alive = false;
     };
@@ -68,7 +68,7 @@ export function CheckPanel() {
             Check a build
           </h1>
           <p className="mt-1.5 text-sm text-ink-muted">
-            Measures your build against your frames at <span className="num">390 / 768 / 1280</span> and across <span className="num">360–1600</span> px. Nothing is changed.
+            Measures your build against your frames at <span className="num">390 / 768 / 1280</span> and across <span className="num">360–1600</span> px. Your build is not changed.
           </p>
         </div>
         <Availability health={health} />
@@ -158,7 +158,7 @@ export function CheckPanel() {
                   />
                   <div id={`${ids}-code-msg`} className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs" aria-live="polite">
                     <span className={codeError && (codeTouched || counter.over) ? 'text-bad' : 'text-ink-muted'}>
-                      {codeError && (codeTouched || counter.over) ? codeError : 'React + Tailwind, one file. Rendered offline.'}
+                      {codeError && (codeTouched || counter.over) ? codeError : 'React + Tailwind, one file. Rendered offline: Inter / IBM Plex Mono, default Tailwind, no remote images or fonts.'}
                     </span>
                     <span className={`font-mono num ${counter.over ? 'font-semibold text-bad' : counter.near ? 'font-medium text-warn' : 'text-ink-faint'}`}>{counter.label}</span>
                   </div>
@@ -174,7 +174,7 @@ export function CheckPanel() {
                     <span className="min-w-0">
                       <span className="font-medium text-ink">Also repair it</span>
                       <span id={`${ids}-repair-hint`} className="block text-xs text-ink-muted">
-                        Nemotron edits classes, ≤ {REPAIR_ROUNDS} rounds; your structure stays.
+                        Experimental. Nemotron edits classes (it can restyle or hide, not add or move), ≤ {REPAIR_ROUNDS} rounds.
                       </span>
                     </span>
                   </label>

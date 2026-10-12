@@ -43,7 +43,8 @@ def same_place(a, b) -> bool:
         return True
     if not (0.7 <= aw / bw <= 1 / 0.7 and 0.7 <= ah / bh <= 1 / 0.7):
         return False
-    tol = 0.35 * max(aw, ah, bw, bh)
+    # icons: a compiled row can shift a small box by a few pixels; up to 16 px for boxes ≤ 32 px
+    tol = 16 if max(aw, ah, bw, bh) <= 32 else 0.35 * max(aw, ah, bw, bh)
     return abs((ax + aw / 2) - (bx + bw / 2)) <= tol and abs((ay + ah / 2) - (by + bh / 2)) <= tol
 
 
@@ -76,16 +77,21 @@ def attach(code: str, nodes_by_bp: dict, manifest: dict | None) -> tuple[str, li
         seen = _visible_boxes(nodes_by_bp, m.group("pc"))
         if not seen:
             continue
+        def dist(box, b):
+            return abs(box[0] + box[2] / 2 - b[0] - b[2] / 2) + abs(box[1] + box[3] / 2 - b[1] - b[3] / 2)
         picks = []
         for bp, box in seen.items():              # the same place at EVERY size this block shows
-            cands = [a for a in items if any(same_place(box, b) for b in a["boxes"].get(bp) or [])]
+            cands = [(min(dist(box, b) for b in a["boxes"].get(bp) or [] if same_place(box, b)), a)
+                     for a in items if any(same_place(box, b) for b in a["boxes"].get(bp) or [])]
             if not cands:
                 picks = []
                 break
-            picks.extend(cands)
+            near = min(d for d, _ in cands)
+            picks.extend(a for d, a in cands if d <= near + 2)    # the nearest (ties: several sources)
         if not picks:
             continue
-        a = max(picks, key=lambda x: (x.get("bytes") or 0, x["hash"]))   # responsive sources: the largest file
+        # the source nearest at most sizes; among responsive sources of one picture, the largest file
+        a = max(picks, key=lambda x: (sum(p is x for p in picks), x.get("bytes") or 0, x["hash"]))
         rest = m.group("rest")
         alt = _esc(a.get("alt") or "") if ' aria-hidden="true"' in rest else ""   # keeps to_scoring() exact
         if alt:                                   # a described picture is not hidden from assistive tech

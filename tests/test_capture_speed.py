@@ -211,3 +211,15 @@ def test_split_letter_headings_are_one_target_string(tmp_path):
     name = next(t for t in items if t["text"] == "NAME")
     assert name["box"][2] > 120                         # the union of the letters
     assert "Hello" in texts and "World" in texts and "Two" in texts and "words" in texts   # ordinary inline text unchanged
+
+
+def test_oracle_dump_merges_split_letter_words(tmp_path):
+    """The oracle (DOM facts for error attribution) saw 'H', 'A', 'F'… as separate texts on a split-letter page."""
+    r, _ = cap((FX / "split.html").as_uri(), tmp_path, "--bps", "mobile", "--wait", "0", "--oracle")
+    assert r.returncode == 0, r.stderr[-400:]
+    o = json.loads((tmp_path / "fx" / "mobile.oracle.json").read_text())
+    texts = [t["text"] for t in o["texts"]]
+    assert "NAME" in texts and "ONE TWO" in texts and not any(t in texts for t in ("N", "M", "E"))
+    name = next(t for t in o["texts"] if t["text"] == "NAME")
+    x0 = min(l[0] for l in name["lines"]); x1 = max(l[0] + l[2] for l in name["lines"])
+    assert x1 - x0 > 120 and len(name["lines"]) == 1

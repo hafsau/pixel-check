@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { navigate } from '../lib/router';
 import { FRAME_SIZES, LIVE_BPS, framesReady, urlReady, validatePageUrl, type LiveBp } from '../lib/live';
-import { getHealth, startRun, startUrlRun, type Health } from '../lib/liveApi';
+import { getHealth, startRun, startUrlRun, type Health, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
 import { IconAlert } from './Icons';
 
-export type HealthState = { status: 'loading' } | { status: 'ok'; health: Health } | { status: 'unreachable'; message: string };
+export type HealthState = { status: 'loading' } | { status: 'waking' } | { status: 'ok'; health: Health } | { status: 'unreachable'; message: string };
 
 /** Live mode: three frames + passcode → POST /api/runs → /live/<id>. The passcode lives only in this component's state. */
 export function LiveRunPanel() {
@@ -22,7 +22,7 @@ export function LiveRunPanel() {
 
   useEffect(() => {
     let alive = true;
-    getHealth().then((r) => alive && setHealth(r.ok ? { status: 'ok', health: r.health } : { status: 'unreachable', message: r.message }));
+    wakeAndGetHealth(() => alive && setHealth({ status: 'waking' })).then((r) => alive && setHealth(r.ok ? { status: 'ok', health: r.health } : { status: 'unreachable', message: r.message }));
     return () => {
       alive = false;
     };
@@ -196,6 +196,14 @@ export function Availability({ health }: { health: HealthState }) {
       <span className="chip" role="status">
         Checking live mode…
       </span>
+    );
+  if (health.status === 'waking')
+    return (
+      <p className="max-w-xs text-xs text-ink-muted sm:text-right" role="status">
+        <span className="chip mb-1">Waking the live server…</span>
+        <br />
+        It sleeps after 15 idle minutes on free hosting and takes up to a minute to start. Replays work meanwhile.
+      </p>
     );
   if (health.status === 'unreachable')
     return (

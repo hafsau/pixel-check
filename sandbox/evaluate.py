@@ -29,7 +29,7 @@ def check():
     checks = json.loads(checks_path.read_text())
     res = score.score_run(TARGETS, OUT, TARGETS if any(TARGETS.glob("*.text.json")) else None)
     res.update(mode="check", disqualified=False, between=checks.get("between", {}), fluidity=fluidity.report(checks),
-               runtime_errors=checks.get("runtime_errors", [])[:10])
+               runtime_errors=checks.get("runtime_errors", [])[:10], warnings=checks.get("warnings", [])[:10])
     json.dump(res, sys.stdout)
 
 

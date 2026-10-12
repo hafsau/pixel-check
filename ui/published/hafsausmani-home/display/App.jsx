@@ -2,7 +2,7 @@
 export default function App() {
   return (
     <div data-pc="0" className="flow-root min-h-screen w-full font-sans bg-[#fff4e4]">
-      <div data-pc="1" className="flex flex-col w-full min-h-[63px] md:min-h-[82px] xl:min-h-[114px]">
+      <div data-pc="1" className="flex flex-col w-full min-h-[188px] md:min-h-[130px] xl:min-h-[114px]">
         <nav data-pc="2" data-seg="S1" className="flow-root w-full bg-transparent min-h-0 mt-[27px] md:mt-[36px] pt-[0px]">
           <div data-pc="3" className="w-full max-w-[264px] md:max-w-[352px] xl:max-w-[347px] mx-auto pl-[16px] pr-[16px]">
             <div data-pc="4" className="flex flex-row flex-wrap justify-center md:justify-between pl-0 md:pl-[0px] pr-0 md:pr-[0px] items-start mt-[0px] w-full">
@@ -12,15 +12,15 @@ export default function App() {
             </div>
           </div>
         </nav>
-      </div>
-      <div data-pc="8" data-seg="S2" className="flow-root w-full bg-transparent min-h-0 mt-[0px] pt-[0px]">
-        <div data-pc="9" className="w-full max-w-none md:max-w-[96px] xl:max-w-[1280px] mx-0 md:mx-auto pl-[153px] md:pl-[16px] xl:pl-[502px] pr-[153px] md:pr-[16px] xl:pr-[502px]">
-          <div data-pc="10" className="flex xl:hidden flex-row xl:flex-col flex-wrap xl:flex-nowrap justify-start pl-0 pr-0 items-start mt-[0px] w-full">
-            <h1 data-pc="11" className="block xl:hidden text-[16px] text-[#373634] font-medium tracking-[0.15em] leading-none text-left no-underline max-w-full min-w-0 mt-[0px] xl:mt-0 ml-[0px] xl:ml-0 self-auto whitespace-nowrap">HELLO</h1>
+        <div data-pc="8" data-seg="S2" className="flow-root w-full bg-transparent min-h-0 mt-[23px] md:mt-[33px] pt-[0px]">
+          <div data-pc="9" className="w-full max-w-none md:max-w-[96px] xl:max-w-[98px] mx-0 md:mx-auto pl-[153px] md:pl-[16px] pr-[153px] md:pr-[16px]">
+            <div data-pc="10" className="flex flex-row flex-wrap justify-start pl-0 pr-0 items-start mt-[0px] w-full">
+              <h1 data-pc="11" className="text-[16px] xl:text-[17px] text-[#373634] font-medium xl:font-normal tracking-[0.15em] leading-none text-left no-underline max-w-full min-w-0 mt-[0px] ml-[0px] self-auto whitespace-nowrap">HELLO</h1>
+            </div>
           </div>
         </div>
       </div>
-      <div data-pc="12" data-seg="S3" className="flow-root w-full relative bg-transparent min-h-0 mt-[109px] md:mt-[32px] xl:mt-[0px] pt-[0px]">
+      <div data-pc="12" data-seg="S3" className="flow-root w-full relative bg-transparent min-h-0 mt-[0px] pt-[0px]">
         <div data-pc="13" className="w-full max-w-[265px] md:max-w-[543px] xl:max-w-[797px] mx-auto pl-[16px] pr-[16px]">
           <div data-pc="14" className="flex xl:hidden flex-row xl:flex-col flex-wrap xl:flex-nowrap justify-start pl-0 pr-0 items-start mt-[0px] w-full">
             <h1 data-pc="15" className="block xl:hidden text-[70px] md:text-[151px] xl:text-[70px] text-[#191919] font-bold tracking-[-0.014em] md:tracking-normal xl:tracking-[-0.014em] leading-none text-left no-underline max-w-full min-w-0 mt-[0px] xl:mt-0 ml-[0px] xl:ml-0 self-auto whitespace-nowrap">HAFSA</h1>
@@ -47,8 +47,8 @@ export default function App() {
           <div data-pc="27" className="flex xl:hidden flex-row xl:flex-col flex-wrap xl:flex-nowrap justify-start pl-0 pr-0 items-start mt-[0px] w-full">
             <button data-pc="28" type="button" className="flex xl:hidden w-full xl:w-[203px] max-w-full h-[54px] bg-[#1a1a1a] md:bg-[#191919] xl:bg-[#1a1a1a] border-0 rounded-[27px] shadow-none items-center gap-[8px] shrink-0 justify-center px-[12px] cursor-pointer text-left mt-[0px] xl:mt-0 ml-[0px] xl:ml-0 self-auto">
               <span data-pc="29" className="block xl:hidden text-[13px] md:text-[15px] xl:text-[13px] text-[#fff4e4] font-semibold tracking-[0.138em] md:tracking-[0.077em] xl:tracking-[0.138em] leading-none text-left no-underline max-w-full min-w-0 whitespace-nowrap">SEE MY WORK</span>
-              <div data-pc="30" aria-hidden="true" className="w-[16px] max-w-full h-[10px] bg-[#f7ecdc] border-0 rounded-none shadow-none shrink-0" />
-              <div data-pc="31" aria-hidden="true" className="w-[16px] max-w-full h-[16px] bg-[#d4d4d8] border-0 rounded-none shadow-none shrink-0" />
+              <div data-pc="30" aria-hidden="true" className="hidden md:block xl:hidden w-[16px] max-w-full h-[10px] bg-[#f7ecdc] border-0 rounded-none shadow-none shrink-0" />
+              <img data-pc="31" src="/assets/666689185f619f63e8b5f64687827c346c4828710cd54b53c9c6c651b25a886b.svg" alt="" aria-hidden="true" className="w-[16px] max-w-full h-[16px] bg-[#d4d4d8] border-0 rounded-none shadow-none shrink-0 block object-cover" />
             </button>
           </div>
         </div>

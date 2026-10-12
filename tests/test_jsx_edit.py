@@ -138,3 +138,47 @@ def test_tag_reports_each_elements_parent_id():
     _, els = jsx_edit.tag(code)
     parent = {e["id"]: e["parent"] for e in els}
     assert parent == {0: None, 1: 0, 2: 1, 3: 1, 4: 0}
+
+
+# council red team (Oct 8): size-scoped edits leaked into other sizes
+def _apply(cls, edits):
+    code, _ = jsx_edit.tag(f'export default function App(){{ return <div className="{cls}">x</div> }}')
+    new, n, skipped = jsx_edit.apply(code, edits)
+    m = __import__("re").search(r'data-pc="0" className="([^"]*)"', new)
+    return (m.group(1).split() if m else []), n, skipped
+
+
+def test_a_shorthand_at_tablet_is_not_zeroed_by_a_mobile_longhand_edit():
+    cls, n, _ = _apply("p-4 md:p-8", [{"id": 0, "bp": "mobile", "add": "pt-6", "remove": ""}])
+    assert n == 1 and "md:pt-0" not in cls and "md:p-8" in cls   # md:p-8 (a media query) still sets tablet's 32 px
+
+
+def test_an_unprefixed_shorthand_is_pinned_at_tablet_as_its_longhand():
+    cls, n, _ = _apply("p-8", [{"id": 0, "bp": "mobile", "add": "pt-6", "remove": ""}])
+    assert "pt-6" in cls and "md:pt-8" in cls
+
+
+def test_margin_auto_survives_a_mobile_margin_edit():
+    cls, _, _ = _apply("ml-2 md:mx-auto", [{"id": 0, "bp": "mobile", "add": "ml-4", "remove": ""}])
+    assert "md:ml-0" not in cls and "md:mx-auto" in cls
+
+
+def test_an_edit_that_cannot_be_pinned_is_refused_not_applied():
+    cls, n, skipped = _apply("flex", [{"id": 0, "bp": "mobile", "add": "text-red-500", "remove": ""}])   # inherited colour
+    assert "text-red-500" not in cls and any("could not pin" in s["why"] for s in skipped)
+
+
+def test_all_edits_only_remove_unprefixed_classes():
+    cls, _, _ = _apply("w-96 md:w-96 lg:w-[415px]", [{"id": 0, "bp": "all", "add": "w-full", "remove": "w-96 lg:w-[415px] md:w-96"}])
+    assert "lg:w-[415px]" in cls and "md:w-96" in cls and "w-full" in cls and "w-96" not in cls
+
+
+def test_a_shorthand_edit_on_an_element_with_its_longhand_is_refused():
+    cls, n, skipped = _apply("pt-2 md:pt-6", [{"id": 0, "bp": "mobile", "add": "p-4", "remove": ""}])
+    assert "p-4" not in cls and any("shorthand" in s["why"] for s in skipped)
+
+
+def test_computed_pins_keep_an_inherited_font_size():
+    cls, _, _ = _apply("font-bold", [{"id": 0, "bp": "mobile", "add": "text-[15px]", "remove": "",
+                                      "pins": {"tablet": ["text-[18px]"], "desktop": ["text-[20px]"]}}])
+    assert "text-[15px]" in cls and "md:text-[18px]" in cls and "xl:text-[20px]" in cls

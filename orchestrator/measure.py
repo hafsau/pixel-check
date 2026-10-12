@@ -457,6 +457,71 @@ def measure(png: bytes) -> dict:
             if _inside(l["box"], b["box"]) and not b.get("rule"):
                 b["contains_text"] = (b.get("contains_text") or []) + [l["text"]]
                 break
+    for l in second_chance(img, lines, blocks, bg_c):   # small / letter-spaced labels the page pass missed
+        l["color"], l["backdrop"] = ink_and_backdrop(img, l["box"])
+        l["typo"] = infer(l["text"], l["box"], img)
+        lines.append(l)
     blocks.sort(key=lambda b: (b["box"][1], b["box"][0]))
     return {"size": [img.shape[1], img.shape[0]], "background": _hex(background(img)),
             "text_lines": lines, "blocks": blocks}
+
+
+def second_chance(img: np.ndarray, lines: list, blocks: list, bg=None, max_lines: int = 30) -> list[dict]:
+    """Text-like ink that no OCR line or block covers (glyph-sized components on the page background, grouped into
+    lines), OCR'd on its own upscaled ×3 (psm 7). The whole-page pass misses small letter-spaced labels."""
+    if not shutil.which("tesseract"):
+        return []
+    H, W, _ = img.shape
+    bg = background(img) if bg is None else np.asarray(bg, np.float32)
+    mask = np.linalg.norm(img - bg, axis=2) > 60
+    for l in lines:
+        x, y, w, h = [int(v) for v in l["box"]]
+        mask[max(0, y - 3):y + h + 3, max(0, x - 3):x + w + 3] = False
+    for b in blocks:
+        if not b.get("rule"):
+            x, y, w, h = [int(v) for v in b["box"]]
+            mask[max(0, y):y + h, max(0, x):x + w] = False
+    lab, _ = ndimage.label(mask)
+    comps = []
+    for sl in ndimage.find_objects(lab):
+        if sl is None:
+            continue
+        ys, xs = sl
+        h, w = ys.stop - ys.start, xs.stop - xs.start
+        if 5 <= h <= 60 and w <= 3 * h + 4 and w * h >= 12:
+            comps.append([xs.start, ys.start, w, h])
+    groups: list[dict] = []
+    for c in sorted(comps, key=lambda b: (b[0], b[1])):
+        for g in groups:
+            gx, gy, gw, gh = g["box"]
+            ov = min(gy + gh, c[1] + c[3]) - max(gy, c[1])
+            if ov >= 0.5 * min(gh, c[3]) and -2 <= c[0] - (gx + gw) <= 1.5 * max(gh, c[3]):
+                x0, y0 = min(gx, c[0]), min(gy, c[1])
+                g["box"] = [x0, y0, max(gx + gw, c[0] + c[2]) - x0, max(gy + gh, c[1] + c[3]) - y0]
+                g["n"] += 1
+                break
+        else:
+            groups.append({"box": list(c), "n": 1})
+    out = []
+    for g in sorted([g for g in groups if g["n"] >= 2], key=lambda g: (g["box"][1], g["box"][0]))[:max_lines]:
+        x, y, w, h = g["box"]
+        pad = max(4, h // 2)
+        crop = img[max(0, y - pad):min(H, y + h + pad), max(0, x - pad):min(W, x + w + pad)].mean(axis=2)
+        if crop.size == 0:
+            continue
+        if np.median(crop) < 128:                 # light text on a dark page: dark text for tesseract
+            crop = 255 - crop
+        im = Image.fromarray(crop.astype(np.uint8))
+        im = ImageOps.autocontrast(im.resize((im.width * 3, im.height * 3), Image.LANCZOS))
+        im = ImageOps.expand(im, border=20, fill=255)
+        buf = io.BytesIO(); im.save(buf, "PNG")
+        res = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "7", "tsv"], input=buf.getvalue(),
+                             capture_output=True).stdout.decode()
+        words = [r for r in csv.DictReader(io.StringIO(res), delimiter="\t")
+                 if (r.get("text") or "").strip() and float(r["conf"]) >= 60]
+        text = " ".join(r["text"] for r in words)
+        if len(re.sub(r"[^A-Za-z0-9]", "", text)) < 2:
+            continue
+        out.append({"text": text, "box": [x, y, w, h], "conf": float(np.mean([float(r["conf"]) for r in words])),
+                    "second": True, "words": [{"text": text, "box": [x, y, w, h]}]})
+    return out

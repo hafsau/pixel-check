@@ -4,6 +4,8 @@ stays) → re-check → best round kept, ≤ 3 rounds. Fake check, fake model; t
 Written before the module (TDD, Oct 7). The benchmark bar is docs/REPAIR.md."""
 import re
 
+import pytest
+
 from orchestrator import repair as R
 
 CODE = """export default function App() {
@@ -150,14 +152,14 @@ def test_one_shot_arm_gets_no_measurements_and_is_checked_once():
 # good ones): several candidates per round (temperatures), per-size acceptance (edits are scoped to one size, so each
 # size keeps the edits of the candidate that improved it), notes on what failed, structure hints by parent element
 class SizeCheck:
-    """mobile +15 with "mob-fix"; tablet +15 with "tab-fix", −20 with "tab-bad"; desktop fixed."""
+    """mobile +15 with pt-[11px]; tablet +15 with md:pt-[13px], −20 with md:pb-[19px]; desktop fixed."""
     def __init__(self):
         self.n = 0
 
     def __call__(self, code):
         self.n += 1
-        m = 40 + (15 if "mob-fix" in code else 0)
-        t = 40 + (15 if "tab-fix" in code else 0) - (20 if "tab-bad" in code else 0)
+        m = 40 + (15 if " pt-[11px]" in code else 0)
+        t = 40 + (15 if "md:pt-[13px]" in code else 0) - (20 if "md:pb-[19px]" in code else 0)
         rep = {"match": min(m, t, 90), "per_bp": {"mobile": m, "tablet": t, "desktop": 90},
                "breakpoints": {}, "fluidity": {"pass": True, "fails": [], "widths": {}}}
         return {"report": rep, "dom": {}}
@@ -172,10 +174,10 @@ def mixed_propose(calls):
         calls.append((temperature, fb))
         h1 = _ids(tagged)[1]
         if temperature < 0.5:      # good for mobile, bad for tablet
-            return [{"id": h1, "bp": "mobile", "add": "mob-fix", "remove": "", "why": ""},
-                    {"id": h1, "bp": "tablet", "add": "tab-bad", "remove": "", "why": ""}]
+            return [{"id": h1, "bp": "mobile", "add": "pt-[11px]", "remove": "", "why": ""},
+                    {"id": h1, "bp": "tablet", "add": "pb-[19px]", "remove": "", "why": ""}]
         if temperature < 0.9:      # good for tablet
-            return [{"id": h1, "bp": "tablet", "add": "tab-fix", "remove": "", "why": ""}]
+            return [{"id": h1, "bp": "tablet", "add": "pt-[13px]", "remove": "", "why": ""}]
         return []
     return propose
 
@@ -184,7 +186,7 @@ def test_each_size_keeps_the_edits_of_the_candidate_that_improved_it():
     calls = []
     out = R.repair(CODE, spec=SPEC, check=SizeCheck(), propose=mixed_propose(calls), rounds=1, candidates=3)
     assert out["best"]["per_bp"] == {"mobile": 55, "tablet": 55, "desktop": 90}
-    assert "mob-fix" in out["code"] and "tab-fix" in out["code"] and "tab-bad" not in out["code"]
+    assert " pt-[11px]" in out["code"] and "md:pt-[13px]" in out["code"] and "md:pb-[19px]" not in out["code"]
     assert sorted(t for t, _ in calls) == [0.3, 0.7, 1.0]
 
 
@@ -194,9 +196,9 @@ def test_the_next_round_is_told_what_failed():
     def propose(tagged, fb, temperature=0.4):
         calls.append(fb)
         h1 = _ids(tagged)[1]
-        return [{"id": h1, "bp": "tablet", "add": "tab-bad", "remove": "", "why": ""}]
+        return [{"id": h1, "bp": "tablet", "add": "pb-[19px]", "remove": "", "why": ""}]
     R.repair(CODE, spec=SPEC, check=SizeCheck(), propose=propose, rounds=2, candidates=1, feedback_fn=lambda *a: "rows")
-    assert len(calls) == 2 and "made tablet worse" in calls[1] and "tab-bad" not in calls[0]
+    assert len(calls) == 2 and "made tablet worse" in calls[1] and "made tablet worse" not in calls[0]
 
 
 def test_structure_hint_names_the_parent_and_the_designs_columns():
@@ -347,3 +349,70 @@ def test_design_boxes_match_build_elements_one_to_one():
     nodes = {"mobile": [{"pc": "5", "v": True, "b": [16, 300, 200, 36], "bg": "rgb(255, 255, 255)"}]}
     fb = R.feedback({"fluidity": {}}, {}, spec, None, nodes)
     assert fb.count("BOX [5]") == 1
+
+
+def test_a_spent_budget_stops_the_repair_with_its_best_round_so_far():
+    """Platform council: a budget running out mid-loop threw the whole repair away."""
+    from orchestrator.tf_client import SpendCapExceeded
+    chk, cl = FakeCheck(), FakeClient()
+    n = [0]
+
+    def check(code):
+        n[0] += 1
+        if n[0] > 2:                     # start + round 1, then the budget is gone
+            raise SpendCapExceeded("run spend $0.81 ≥ run budget $0.80")
+        return chk(code)
+    out = R.repair(CODE, spec=SPEC, check=check, propose=cl.edits, rounds=3, candidates=1)
+    assert out["best"]["worst"] == 70.0 and out["stopped"] == "budget" and "data-pc" not in out["code"]
+
+
+# red-team council (Oct 8): the repair could trade away non-worst sizes and hide content (dev calcom: `md:hidden` on
+# a grid the design shows cost tablet 5.4 points), "fix" width failures by clipping, and break the ≤ 64 px rule
+def test_a_round_that_drops_another_size_is_not_kept():
+    base = {"worst": 48.6, "per_bp": {"mobile": 61.8, "tablet": 70.0, "desktop": 48.6}, "fluid_fails": 4, "culprits": 2}
+    hidden = {"worst": 52.2, "per_bp": {"mobile": 52.2, "tablet": 70.0, "desktop": 60.0}, "fluid_fails": 0, "culprits": 0}
+    honest = {"worst": 60.0, "per_bp": {"mobile": 100.0, "tablet": 70.0, "desktop": 60.0}, "fluid_fails": 0, "culprits": 0}
+    assert not R.better(hidden, base)          # mobile fell 9.6 points
+    assert R.better(honest, base)
+
+
+def test_level_worst_needs_fewer_culprits_and_no_drop():
+    base = {"worst": 50.0, "per_bp": {"mobile": 50.0, "tablet": 60.0, "desktop": 70.0}, "fluid_fails": 4, "culprits": 2}
+    assert R.better({**base, "fluid_fails": 2, "culprits": 1}, base)
+    assert not R.better({**base, "per_bp": {"mobile": 50.0, "tablet": 57.0, "desktop": 70.0}, "fluid_fails": 0, "culprits": 0}, base)
+
+
+@pytest.mark.parametrize("add", ["hidden", "md:hidden", "invisible", "opacity-0", "overflow-hidden", "overflow-x-hidden",
+                                 "overflow-clip", "text-transparent", "sr-only", "h-0", "max-h-0", "scale-0",
+                                 "text-[6px]", "content-['x']", "mt-[352px]", "pl-[90px]", "mb-20", "-mt-[80px]"])
+def test_hiding_clipping_and_huge_spacing_edits_are_refused(add):
+    kept, refused = R.filter_edits([{"id": 3, "bp": "mobile", "add": add, "remove": "", "why": ""}])
+    assert kept == [] and refused
+
+
+@pytest.mark.parametrize("add", ["block", "md:flex", "grid grid-cols-2", "mt-[24px]", "px-4", "w-full max-w-[1280px]",
+                                 "text-[30px]", "flex-wrap", "mx-auto", "gap-6"])
+def test_ordinary_layout_edits_pass(add):
+    kept, refused = R.filter_edits([{"id": 3, "bp": "mobile", "add": add, "remove": "", "why": ""}])
+    assert kept and not refused
+
+
+def test_a_candidate_that_makes_design_text_unreadable_is_rejected():
+    start = {"mobile": [{"text": "Plan your week", "inked": True, "onscreen": True}, {"text": "Start", "inked": True, "onscreen": True}]}
+    lost = {"mobile": [{"text": "Plan your week", "inked": True, "onscreen": True}, {"text": "Start", "inked": False, "onscreen": True}]}
+    assert R.lost_text(start, lost, SPEC) == ["mobile: Start"]
+    assert R.lost_text(start, start, SPEC) == []
+
+
+def test_a_candidate_with_new_anti_cheat_violations_is_rejected():
+    start = {"lint": {"ok": True, "violations": []}, "integrity_failures": []}
+    worse = {"lint": {"ok": False, "violations": [{"rule": "positioned"}]}, "integrity_failures": ["traced layout"]}
+    assert R.new_violations(start, worse) == ["lint: positioned", "integrity: traced layout"]
+    assert R.new_violations(worse, worse) == []
+
+
+def test_font_edits_carry_the_rendered_sizes_of_the_other_sizes_as_pins():
+    edits = [{"id": 1, "bp": "mobile", "add": "text-[30px]", "remove": ""}, {"id": 2, "bp": "mobile", "add": "mt-4", "remove": ""}]
+    nodes = {"tablet": [{"pc": "1", "fs": 44}], "desktop": [{"pc": "1", "fs": 48}]}
+    out = R.with_pins(edits, nodes)
+    assert out[0]["pins"] == {"tablet": ["text-[44px]"], "desktop": ["text-[48px]"]} and "pins" not in out[1]

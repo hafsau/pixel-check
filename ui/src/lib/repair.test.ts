@@ -347,3 +347,14 @@ describe('repairFileUrls', () => {
     expect(repairFileUrls('', 'id1', parseRepair({ ...raw, original: null })!)).toBeNull();
   });
 });
+
+describe('repair error (Oct 7: a failing repair keeps the check result)', () => {
+  it('parses an error-only repair', () => {
+    const r = parseRepair({ error: 'the repair could not finish: RuntimeError: sandbox spawn failed' });
+    expect(r?.error).toMatch(/could not finish/);
+    expect(r?.code).toBeNull();
+  });
+  it('a normal repair has no error', () => {
+    expect(parseRepair({ code: 'repair/App.jsx', original: 'original/App.jsx', history: [] })?.error).toBeNull();
+  });
+});

@@ -14,7 +14,7 @@ import shlex
 
 from .evaluate import RENDER_CMD
 
-SCORE_CHECK = "cd /opt/pc && python3 evaluate.py --check"
+SCORE_CHECK = "cd /opt/pc && timeout 120 python3 evaluate.py --check"
 BPS = ("mobile", "tablet", "desktop")
 
 
@@ -50,8 +50,8 @@ def check_url(url: str, frames: dict[str, bytes], *, sb, read_design, verify, em
     """read_design(frames) → perception spec; verify(meta) raises CheckRefused for pages not to capture."""
     from .api import capture_files
     emit("capture")
-    cmd = f"cd /opt/pc && node /opt/pc/check_page.mjs {shlex.quote(url)} --out /work/out --wait 2000 --block-private"
-    r = sb.run(cmd, files=capture_files("check_page.mjs"), timeout_s=300, networking=True, step="check capture")
+    cmd = f"cd /opt/pc && timeout 150 node /opt/pc/check_page.mjs {shlex.quote(url)} --out /work/out --wait 2000 --block-private"
+    r = sb.run(cmd, files=capture_files("check_page.mjs"), timeout_s=180, networking=True, step="check capture")
     if r.exit_code != 0 or not r.result_image:
         raise CheckError("the build could not be captured — is the address public and reachable?")
     got = sb.download_dir(r.result_image, "/work/out")
@@ -86,5 +86,7 @@ def check_code(code: str, frames: dict[str, bytes], *, sb, read_design, emit, sp
         emit("read design")
         spec = read_design(frames)
     report = _score(sb, r.result_image, frames, spec, emit)
+    if "captured" in (report.get("reason") or ""):      # the scorer's wording is for URLs; here the code did not build
+        report["reason"] = "the code could not be rendered (it did not build)"
     return {"report": report, "build": {bp: got[f"{bp}.png"] for bp in BPS if f"{bp}.png" in got}, "meta": {},
             "design_texts": design_texts(spec), "dom": _doms(got), "nodes": _doms(got, "nodes")}

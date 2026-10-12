@@ -137,3 +137,20 @@ def test_repair_needs_code_not_a_url(tmp_path):
     r = c.post("/api/checks", files=files, data={"url": "https://example.com/app", "owns": "true", "passcode": "letmein",
                                                  "repair": "true"})
     assert r.status_code == 422 and "App.jsx" in r.json()["detail"]
+
+
+def test_a_failing_repair_keeps_the_check_result(tmp_path):
+    from orchestrator.api import create_app
+
+    def broken_repairer(code, frames, run_dir, emit):
+        emit("repair")
+        raise RuntimeError("sandbox spawn failed: 503")
+    s = {"enabled": True, "passcode": "letmein", "daily": 10, "total": 40, "origins": []}
+    c = TestClient(create_app(checker=fake_checker, repairer=broken_repairer, resolver=resolver, live_dir=tmp_path, settings=s))
+    files = {bp: ("f.png", png(*wh), "image/png") for bp, wh in SIZES.items()}
+    r = c.post("/api/checks", files=files, data={"code": "export default function App(){return null}", "owns": "true",
+                                                 "passcode": "letmein", "repair": "true"})
+    st = wait_done(c, r.json()["id"])
+    assert st["state"] == "done" and st["result"]["match"] == 64.2
+    rep = c.get(st["bundle"]).json()
+    assert rep["report"]["match"] == 64.2 and "could not finish" in rep["repair"]["error"] and "503" in rep["repair"]["error"]

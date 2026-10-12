@@ -41,7 +41,7 @@ function fontCss() {
 }
 
 // Determinism: no motion, no caret, no scrollbars, no smoothing differences.
-export const DETERMINISM_CSS = `*,*::before,*::after{animation:none!important;transition:none!important;
+export const DETERMINISM_CSS = `*,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;animation-iteration-count:1!important;transition:none!important;
 caret-color:transparent!important}html{scrollbar-width:none}::-webkit-scrollbar{display:none}
 body{margin:0;font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased}`;
 
@@ -186,9 +186,29 @@ export function layoutHealth() {
       if (examples.length < 5) examples.push([a.el.textContent.trim().slice(0, 40), b.el.textContent.trim().slice(0, 40)]);
     }
   }
+  // text cut off at the screen edge by a clipping wrapper (overflow hidden): no sideways scroll, still broken
+  // (a text cut at the edge, plus the texts after it on the same line inside the same clipping wrapper — the rest
+  // of a too-wide row; an off-canvas menu with no text cut at the edge does not count)
+  let clipped_overflow_px = 0;
+  const clipper = (el) => {
+    for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+      if (/hidden|clip/.test(getComputedStyle(a).overflowX)) return a;
+    }
+    return document.documentElement;
+  };
+  for (const { r, el } of boxes) {
+    if (!(r.left < innerWidth - 1 && r.right > innerWidth + 1)) continue;
+    const c = clipper(el);
+    let right = r.right;
+    for (const o of boxes) {
+      if (o.r.left >= r.left && Math.abs(o.r.top - r.top) <= 2 && c.contains(o.el)) right = Math.max(right, o.r.right);
+    }
+    clipped_overflow_px = Math.max(clipped_overflow_px, Math.round(right - innerWidth));
+  }
+  if (overflow_px > 0) clipped_overflow_px = 0;        // real sideways scroll is reported as overflow_px
   // what sticks out past the screen: the outermost visible elements whose right edge passes it (repair feedback)
   const over = [];
-  if (overflow_px > 0) {
+  if (overflow_px > 0 || clipped_overflow_px > 0) {
     for (const el of document.querySelectorAll((window.__pcRoot || "#root") + " *")) {
       const r = el.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0 || r.right <= innerWidth + 1) continue;
@@ -201,7 +221,7 @@ export function layoutHealth() {
   const overflowers = over.sort((a, b) => b.r.right - a.r.right).slice(0, 5).map(({ el, r }) => ({
     pc: el.closest("[data-pc]")?.getAttribute("data-pc") ?? null, tag: el.tagName.toLowerCase(),
     w: Math.round(r.width), right: Math.round(r.right), text: (el.textContent || "").trim().slice(0, 30) }));
-  return { overflow_px, text_overlaps: overlaps, examples, overflowers };
+  return { overflow_px, clipped_overflow_px, text_overlaps: overlaps, examples, overflowers };
 }
 
 // Runs in the page: every element in document order with its visibility, own text and position.

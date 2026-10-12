@@ -291,6 +291,12 @@ def merge(vlm: dict, meas: dict) -> dict:
                 item.update(box=None, color=t.get("color"), measured=False,
                             vlm_box=t.get("box") if isinstance(t.get("box"), list) and len(t["box"]) == 4 else None)
         texts.append(item)
+    # a label extended over letters OCR did not read: blocks inside its box are those letters' ink, not blocks
+    for it in texts:
+        if it.get("extended") and it.get("box"):
+            x, y, w, h = it["box"]
+            meas["blocks"] = [b for b in meas["blocks"] if b.get("contains_text") or b.get("rule")
+                              or not _inside_box(b["box"], [x - 2, y - 3, w + 4, h + 6]) or b["box"][3] > 2 * h]
     # interpolate unmatched positions from neighbours, then snap into empty blocks
     empty_blocks = [b for b in meas["blocks"] if not b.get("contains_text")]
     for i, it in enumerate(texts):
@@ -513,8 +519,10 @@ def perceive(client: TFClient, frames: dict[str, bytes], cache=_DEFAULT, hedge_a
         except ValueError:
             return None
     with ThreadPoolExecutor(len(frames)) as ex:
-        vlm = dict(zip(frames, ex.map(safe_read, frames.items())))
-        meas = dict(zip(frames, ex.map(lambda kv: measure(kv[1]), frames.items())))
+        reads = {bp: ex.submit(safe_read, (bp, png)) for bp, png in frames.items()}   # vision reads: network, parallel
+        # measurement (Tesseract + numpy) one frame at a time: three at once peaked near 500 MB (Render free: 512 MB)
+        meas = {bp: measure(png) for bp, png in frames.items()}
+        vlm = {bp: f.result() for bp, f in reads.items()}
     for bp in frames:   # a frame the vision model couldn't read still gets a spec (OCR-only, flagged)
         if vlm[bp] is None:
             vlm[bp] = ocr_fallback(meas[bp])

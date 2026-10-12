@@ -212,3 +212,29 @@ def test_build_display_without_assets_or_matches_is_none(tmp_path):
     assert A.build_display(run, tmp_path / "missing.json") is None
     (tmp_path / "assets.json").write_text(json.dumps({"assets": []}))
     assert A.build_display(run, tmp_path / "assets.json") is None
+
+
+# Oct 7: the button's arrow icon rendered 10 px right of the captured icon (a stray block pushed it) and stayed grey;
+# small icons match within 16 px, and always the NEAREST icon (a row of social icons must not swap)
+def test_a_small_icon_a_few_pixels_off_still_matches():
+    assert A.same_place([259, 680, 16, 16], [249, 681, 16, 16])
+    assert not A.same_place([280, 680, 16, 16], [249, 681, 16, 16])
+
+
+def test_the_nearest_icon_wins_in_a_row_of_icons():
+    code = """export default function App() {
+  return (
+    <div data-pc="0" className="flex">
+      <div data-pc="1" aria-hidden="true" className="w-[20px] h-[20px] bg-[#d4d4d8]" />
+      <div data-pc="2" aria-hidden="true" className="w-[20px] h-[20px] bg-[#d4d4d8]" />
+    </div>
+  );
+}
+"""
+    nodes = {"mobile": [node(1, [30, 100, 20, 20]), node(2, [58, 100, 20, 20])]}
+    man = {"assets": [
+        {"hash": H1, "ext": "svg", "kind": "svg", "bytes": 900, "alt": "", "boxes": {"mobile": [[28, 100, 20, 20]]}},
+        {"hash": H2, "ext": "svg", "kind": "svg", "bytes": 300, "alt": "", "boxes": {"mobile": [[56, 100, 20, 20]]}}]}
+    out, used = A.attach(code, nodes, man)
+    assert sorted(used) == ["1", "2"]
+    assert f'data-pc="1" src="/assets/{H1}.svg"' in out and f'data-pc="2" src="/assets/{H2}.svg"' in out

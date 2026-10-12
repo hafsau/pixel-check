@@ -40,6 +40,16 @@ def prices() -> dict[str, tuple[float, float]]:
     return _prices
 
 
+def _price(model: str) -> tuple[float, float]:
+    """Per-token prices; the fallback when the live price list is unreachable or lacks the model (a successful call's
+    cost must never go unrecorded)."""
+    try:
+        p = prices().get(model, (0.0, 0.0))
+    except Exception:
+        return config.FALLBACK_PRICE
+    return p if p != (0.0, 0.0) else config.FALLBACK_PRICE
+
+
 class Ledger:
     """Append-only JSONL of every paid call; total is the sum. Shared across runs and processes."""
 
@@ -122,9 +132,7 @@ class TFClient:
         msg = r.choices[0].message
         content = msg.content or ""
         reasoning = getattr(msg, "reasoning_content", None) or ""
-        pin, pout = prices().get(model, (0.0, 0.0))
-        if (pin, pout) == (0.0, 0.0):
-            pin, pout = config.FALLBACK_PRICE
+        pin, pout = _price(model)
         u = r.usage
         usd = u.prompt_tokens * pin + u.completion_tokens * pout
         self.run_spend += usd

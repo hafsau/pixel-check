@@ -35,8 +35,21 @@ SPLIT = (b'<!doctype html><html><head><title>Split</title><style>body{margin:0}.
          b'<p>Plain <b>bold</b> text</p></body></html>')
 
 
+FADE = (b'<!doctype html><html><head><title>Fade</title><style>body{margin:0}@keyframes in{to{opacity:1}}'
+        b'h1,p{opacity:0;animation:in 1s ease forwards}</style></head><body><h1>Plan your week</h1><p>One calm list.</p>'
+        b'</body></html>')
+CLIP = (b'<!doctype html><html><head><title>Clip</title><style>body{margin:0}.wrap{overflow-x:hidden;width:100%}'
+        b'.row{display:flex;gap:16px;width:620px}.row div{width:200px}</style></head><body><h1>Pricing</h1><div class="wrap">'
+        b'<div class="row"><div>Basic plan</div><div>Pro plan</div><div>Team plan</div></div></div></body></html>')
+SHOT = (b'<!doctype html><html><head><title>Shot</title><style>body{margin:0}img{display:block;width:100vw;height:100vh;'
+        b'background:#ccd}</style></head><body><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt=""></body></html>')
+EXACT = (b'<!doctype html><html><head><title>Exact</title><style>body{margin:0}@media (width: 390px){h1{color:red}}'
+         b'@media (min-width: 768px) and (max-width: 768px){h1{color:blue}}</style></head><body><h1>Hi there</h1></body></html>')
+
+
 class _H(http.server.BaseHTTPRequestHandler):
-    routes = {"/fluid": FLUID, "/wide": WIDE, "/login": LOGIN, "/hidden": HIDDEN, "/split": SPLIT}
+    routes = {"/fluid": FLUID, "/wide": WIDE, "/login": LOGIN, "/hidden": HIDDEN, "/split": SPLIT, "/fade": FADE,
+              "/clip": CLIP, "/shot": SHOT, "/exact": EXACT}
 
     def do_GET(self):
         body = self.routes.get(self.path)
@@ -186,3 +199,42 @@ def test_nodes_carry_background_colours_and_overflow_names_its_culprits(tmp_path
     culprits = checks["between"]["360"]["overflowers"]
     assert culprits and culprits[0]["right"] > 600 and culprits[0]["w"] >= 600   # the 620 px row, not its children
     assert len(culprits) <= 5 and not checks["between"]["1024"]["overflowers"]
+
+
+
+# red-team council (Oct 8): fade-in pages froze invisible, clipping hid sideways overflow, screenshot builds and
+# exact-width media queries passed silently
+def test_fade_in_content_is_captured_in_its_end_state(tmp_path, server):
+    r = run(f"{server}/fade", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    dom = {d["text"]: d for d in json.loads((tmp_path / "mobile.dom.json").read_text())}
+    assert dom["Plan your week"]["inked"] and dom["One calm list."]["inked"]
+
+
+def test_text_cut_off_by_a_clipping_wrapper_counts_as_overflow(tmp_path, server):
+    r = run(f"{server}/clip", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    checks = json.loads((tmp_path / "checks.json").read_text())
+    v = checks["between"]["360"]
+    assert v["overflow_px"] == 0 and v["clipped_overflow_px"] > 100
+    assert any("plan" in (c.get("text") or "").lower() for c in v["overflowers"])
+    assert checks["between"]["1024"]["clipped_overflow_px"] == 0
+
+
+def test_a_screenshot_build_is_flagged(tmp_path, server):
+    r = run(f"{server}/shot", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    w = json.loads((tmp_path / "checks.json").read_text())["warnings"]
+    assert any("picture covers" in x for x in w)
+
+
+def test_exact_width_media_queries_are_flagged(tmp_path, server):
+    r = run(f"{server}/exact", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    w = json.loads((tmp_path / "checks.json").read_text())["warnings"]
+    assert any("exactly 390" in x for x in w) and any("exactly 768" in x for x in w)
+
+
+def test_an_honest_page_has_no_warnings(tmp_path, server):
+    r = run(f"{server}/fluid", tmp_path)
+    assert json.loads((tmp_path / "checks.json").read_text())["warnings"] == []

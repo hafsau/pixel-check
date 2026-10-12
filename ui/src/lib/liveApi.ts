@@ -3,6 +3,7 @@ import { useEffect, useReducer, useRef } from 'react';
 import { apiBase, apiErrorMessage, initialPoll, joinUrl, pollReducer, POLL_MS, type LiveBp, type LiveStatus, type PollState } from './live';
 import { checkBundleUrl, checkFormData, parseCheck, type CheckBundle, type CheckDraft } from './check';
 import { repairFileUrls, type Repair } from './repair';
+import { wakeHealth, type HealthTry } from './wake';
 
 export interface Health {
   live: boolean;
@@ -18,14 +19,19 @@ async function body(res: Response): Promise<unknown> {
   }
 }
 
-export async function getHealth(): Promise<{ ok: true; health: Health } | { ok: false; message: string }> {
+export async function getHealth(): Promise<HealthTry> {
   try {
     const res = await fetch(joinUrl(apiBase(), '/api/health'), { cache: 'no-store' });
-    if (!res.ok) return { ok: false, message: apiErrorMessage(res.status, await body(res)) };
+    if (!res.ok) return { ok: false, status: res.status, message: apiErrorMessage(res.status, await body(res)) };
     return { ok: true, health: (await res.json()) as Health };
   } catch {
-    return { ok: false, message: apiErrorMessage(0, null) };
+    return { ok: false, status: 0, message: apiErrorMessage(0, null) };
   }
+}
+
+/** First visit after the free server slept: retries for up to 90 s, calling onWaking while it starts. */
+export function wakeAndGetHealth(onWaking: () => void): Promise<HealthTry> {
+  return wakeHealth({ fetchHealth: getHealth, onWaking });
 }
 
 export async function startRun(frames: Record<LiveBp, File>, passcode: string): Promise<{ ok: true; id: string } | { ok: false; status: number; message: string }> {

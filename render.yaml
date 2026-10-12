@@ -1,17 +1,15 @@
-# Render blueprint for the PixelCheck live API (Docker). Secrets are set in the Render dashboard (sync: false) —
-# never in this file. One instance only: run state, caps and the spend ledger live on the attached disk.
+# Render blueprint for the PixelCheck live API — FREE plan (Docker). Secrets are set in the Render dashboard
+# (sync: false), never in this file. The free plan sleeps after 15 idle minutes (~1 min to wake) and loses its files
+# on every sleep or restart, so the run caps and the spend ledger are kept in a private GitHub gist (STATE_GIST_*);
+# run results live in /tmp and expire when the service sleeps (replays in the web app never do).
 services:
   - type: web
     name: pixelcheck-api
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
-    numInstances: 1
+    plan: free
+    autoDeploy: false        # deploy on purpose; a deploy restarts the service and fails runs in flight
     healthCheckPath: /api/health
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: NEBIUS_API_KEY
         sync: false
@@ -20,7 +18,13 @@ services:
       - key: LIVE_PASSCODE
         sync: false
       - key: LIVE_ORIGINS
-        sync: false            # the web app's origin, e.g. https://pixelcheck.vercel.app
+        sync: false            # the web app's origin, e.g. https://pixelcheck.vercel.app (no trailing slash)
+      - key: STATE_GIST_ID
+        sync: false            # a private gist holding the caps + spend
+      - key: STATE_GIST_TOKEN
+        sync: false            # a GitHub token that can only edit gists
+      - key: SPEND_CAP_USD
+        sync: false            # what is left of the credit, minus headroom (see docs/DEPLOY.md)
       - key: LIVE_ENABLED
         value: "1"
       - key: LIVE_DAILY_RUNS
@@ -29,9 +33,17 @@ services:
         value: "40"
       - key: LIVE_PER_IP_DAILY
         value: "3"
+      - key: LIVE_DAILY_SPEND_USD
+        value: "4"
+      - key: JOB_SLOTS
+        value: "1"             # 512 MB: one heavy run at a time, the rest wait as "queued"
       - key: LIVE_TRUST_PROXY
-        value: "1"             # Render terminates TLS in front of the app: client IP from X-Forwarded-For
+        value: "1"
       - key: OWNED_HOSTS
         value: hafsausmani.com
-      - key: SPEND_CAP_USD
-        sync: false            # what is left of the credit, minus headroom
+      - key: LIVE_DIR
+        value: /tmp/pixelcheck/live
+      - key: LEDGER_PATH
+        value: /tmp/pixelcheck/spend.jsonl
+      - key: VISION_CACHE_DIR
+        value: /tmp/pixelcheck/cache/vision

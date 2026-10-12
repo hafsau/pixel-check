@@ -1,6 +1,7 @@
 # PixelCheck live API (FastAPI) — the image Render runs. Models run on Nebius Token Factory and renders in Token
 # Factory Sandboxes; this container orchestrates: perception (Tesseract OCR + measurement), the fluid compiler,
-# the repair agent's JSX tool (node + @babel/parser), capture scripts uploaded to the sandbox.
+# the repair agent's JSX tool (node + @babel/parser), capture scripts uploaded to the sandbox. Runs on Render free:
+# 512 MB, files wiped on sleep — state that must survive (caps, spend) lives in a gist (orchestrator/state.py).
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr nodejs npm \
@@ -18,7 +19,8 @@ COPY sandbox/fonts /app/sandbox/fonts
 COPY orchestrator /app/orchestrator
 COPY tools /app/tools
 
-ENV LIVE_DIR=/data/live LEDGER_PATH=/data/spend.jsonl VISION_CACHE_DIR=/data/cache/vision PYTHONUNBUFFERED=1
+ENV LIVE_DIR=/tmp/pixelcheck/live LEDGER_PATH=/tmp/pixelcheck/spend.jsonl VISION_CACHE_DIR=/tmp/pixelcheck/cache/vision \
+    PYTHONUNBUFFERED=1 JOB_SLOTS=1
 RUN cd /app && python -m orchestrator.preflight --static
 
-CMD ["sh", "-c", "cd /app && python -m orchestrator.preflight; exec uvicorn orchestrator.api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "cd /app && python -m orchestrator.preflight; exec uvicorn orchestrator.api:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

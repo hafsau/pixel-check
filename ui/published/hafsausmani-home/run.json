@@ -4,7 +4,7 @@
  "title": "hafsausmani.com \u2014 home",
  "label": "owned site \u00b7 live run",
  "page": "frames",
- "created": 1791405053.598,
+ "created": 1791413976.354,
  "models": {
   "coder": "nvidia/nemotron-3-super-120b-a12b",
   "critic": "nvidia/nemotron-3-super-120b-a12b",
@@ -48,27 +48,27 @@
  },
  "result": {
   "stop_reason": "max rounds",
-  "match": 86.97,
+  "match": 87.43,
   "per_bp": {
-   "mobile": 94.16,
+   "mobile": 94.64,
    "tablet": 92.9,
-   "desktop": 86.97
+   "desktop": 87.43
   },
-  "best": "65c5cbdd",
-  "wall_s": 16.4,
+  "best": "8e71f1f9",
+  "wall_s": 13.8,
   "history": [
-   86.97
+   87.43
   ],
-  "spend_usd": 0.0024,
-  "spend_model_usd": 0.0024,
-  "spend_sandbox_usd": 0.075
+  "spend_usd": 0.0022,
+  "spend_model_usd": 0.0022,
+  "spend_sandbox_usd": 0.0386
  },
  "pipeline": {
   "compiler": "fluid",
   "intent_plan": {
    "cards": [],
    "bands": {
-    "0": "full",
+    "0": "centred",
     "1": "centred",
     "2": "centred",
     "3": "centred",
@@ -77,17 +77,9 @@
     "6": "centred"
    },
    "dropped": [],
-   "usd": 0.0020469999999999998
+   "usd": 0.0020169999999999997
   },
   "structure_plans": [
-   {
-    "tags": {
-     "S1": "nav",
-     "S7": "header"
-    },
-    "applied": 2,
-    "segments": 7
-   },
    {
     "tags": {
      "S1": "nav",
@@ -98,174 +90,52 @@
    }
   ],
   "intent_adoption": {
-   "winner": "scaffold+bands",
-   "adopted": true,
-   "match": 86.97,
+   "winner": "scaffold",
+   "adopted": false,
+   "match": 87.43,
    "fluid_fails": 0
   }
  },
  "rounds": [
   {
    "round": 0,
-   "best": "65c5cbdd",
-   "match": 86.97,
-   "spend_usd": 0.0024235
+   "best": "8e71f1f9",
+   "match": 87.43,
+   "spend_usd": 0.0022264
   }
  ],
  "candidates": [
   {
-   "id": "65c5cbdd",
+   "id": "8e71f1f9",
    "parent": null,
    "round": 0,
-   "t": 1791405069.978,
-   "status": "scored",
-   "strategy": "scaffold+bands",
-   "match": 86.97,
-   "mean": 91.34,
-   "per_bp": {
-    "mobile": 94.16,
-    "tablet": 92.9,
-    "desktop": 86.97
-   },
-   "worst": "desktop",
-   "disqualified": false,
-   "reason": null,
-   "checkpoint": "be2d756a-0fd8-460d-ba4d-6eb22b672444",
-   "sandbox_cost": 0.037828690000000005,
-   "renders": {
-    "mobile": "c/65c5cbdd/mobile.webp",
-    "tablet": "c/65c5cbdd/tablet.webp",
-    "desktop": "c/65c5cbdd/desktop.webp"
-   },
-   "code": "c/65c5cbdd/App.jsx",
-   "components": {
-    "mobile": {
-     "structure": 0.9785,
-     "layout": 0.9604,
-     "color": 0.9758,
-     "content_color": 0.9515,
-     "bg_match": 1.0
-    },
-    "tablet": {
-     "structure": 0.9809,
-     "layout": 0.9725,
-     "color": 0.9814,
-     "content_color": 0.9628,
-     "bg_match": 1.0
-    },
-    "desktop": {
-     "structure": 0.8479,
-     "layout": 0.9554,
-     "color": 0.9793,
-     "content_color": 0.9586,
-     "bg_match": 1.0
-    }
-   },
-   "fluidity": {
-    "pass": true,
-    "fails": [],
-    "widths": {
-     "360": {
-      "overflow": 0,
-      "overlaps": 0,
-      "centre_drift": 0.027,
-      "max_gap": 112,
-      "bg_covers": true,
-      "ok": true
-     },
-     "375": {
-      "overflow": 0,
-      "overlaps": 0,
-      "centre_drift": 0.019,
-      "max_gap": 112,
-      "bg_covers": true,
-      "ok": true
-     },
-     "500": {
-      "overflow": 0,
-      "overlaps": 0,
-      "centre_drift": 0.05,
-      "max_gap": 112,
-      "bg_covers": true,
-      "ok": true
-     },
-     "1024": {
-      "overflow": 0,
-      "overlaps": 0,
-      "centre_drift": 0.0,
-      "max_gap": 40,
-      "bg_covers": true,
-      "ok": true
-     },
-     "1600": {
-      "overflow": 0,
-      "overlaps": 0,
-      "centre_drift": 0.001,
-      "max_gap": 65,
-      "bg_covers": true,
-      "ok": true
-     },
-     "mobile": {
-      "overflow": 0,
-      "max_gap": 112,
-      "bg_covers": true
-     },
-     "tablet": {
-      "overflow": 0,
-      "max_gap": 40,
-      "bg_covers": true
-     },
-     "desktop": {
-      "overflow": 0,
-      "max_gap": 65,
-      "bg_covers": true
-     }
-    }
-   },
-   "controls": {
-    "inputs": 0,
-    "inputs_typeable": 0,
-    "buttons": 1,
-    "buttons_focusable": 1,
-    "links": 3,
-    "links_with_href": 3,
-    "clickable_divs": 0,
-    "hamburger": {
-     "found": false
-    }
-   }
-  },
-  {
-   "id": "da0b138a",
-   "parent": null,
-   "round": 0,
-   "t": 1791405069.985,
+   "t": 1791413990.204,
    "status": "scored",
    "strategy": "scaffold",
-   "match": 86.97,
-   "mean": 91.34,
+   "match": 87.43,
+   "mean": 91.66,
    "per_bp": {
-    "mobile": 94.16,
+    "mobile": 94.64,
     "tablet": 92.9,
-    "desktop": 86.97
+    "desktop": 87.43
    },
    "worst": "desktop",
    "disqualified": false,
    "reason": null,
-   "checkpoint": "3b2c4979-f420-4288-a1be-680d6a63806f",
-   "sandbox_cost": 0.0372107,
+   "checkpoint": "4f93fd44-b533-4396-afff-0d71f1fe2d08",
+   "sandbox_cost": 0.03857244,
    "renders": {
-    "mobile": "c/da0b138a/mobile.webp",
-    "tablet": "c/da0b138a/tablet.webp",
-    "desktop": "c/da0b138a/desktop.webp"
+    "mobile": "c/8e71f1f9/mobile.webp",
+    "tablet": "c/8e71f1f9/tablet.webp",
+    "desktop": "c/8e71f1f9/desktop.webp"
    },
-   "code": "c/da0b138a/App.jsx",
+   "code": "c/8e71f1f9/App.jsx",
    "components": {
     "mobile": {
-     "structure": 0.9785,
-     "layout": 0.9604,
-     "color": 0.9758,
-     "content_color": 0.9515,
+     "structure": 0.9832,
+     "layout": 0.961,
+     "color": 0.9783,
+     "content_color": 0.9567,
      "bg_match": 1.0
     },
     "tablet": {
@@ -276,10 +146,10 @@
      "bg_match": 1.0
     },
     "desktop": {
-     "structure": 0.8479,
-     "layout": 0.9554,
-     "color": 0.9793,
-     "content_color": 0.9586,
+     "structure": 0.8532,
+     "layout": 0.9588,
+     "color": 0.9796,
+     "content_color": 0.9593,
      "bg_match": 1.0
     }
    },
@@ -323,7 +193,7 @@
       "overflow": 0,
       "overlaps": 0,
       "centre_drift": 0.001,
-      "max_gap": 65,
+      "max_gap": 36,
       "bg_covers": true,
       "ok": true
      },
@@ -339,7 +209,7 @@
      },
      "desktop": {
       "overflow": 0,
-      "max_gap": 65,
+      "max_gap": 36,
       "bg_covers": true
      }
     }
@@ -362,46 +232,36 @@
  "edits": [],
  "calls": [
   {
-   "t": 1791405056.448,
+   "t": 1791413978.334,
    "step": "intent plan",
    "model": "nvidia/Nemotron-3-Ultra-550b-a55b",
    "thinking": "off",
-   "in": 1837,
-   "out": 70,
-   "usd": 0.0020469999999999998,
-   "latency_s": 2.01,
+   "in": 1804,
+   "out": 71,
+   "usd": 0.0020169999999999997,
+   "latency_s": 1.26,
    "round": 0
   },
   {
-   "t": 1791405057.924,
+   "t": 1791413979.598,
    "step": "structure plan",
    "model": "nvidia/nemotron-3-super-120b-a12b",
    "thinking": "low",
    "in": 338,
-   "out": 96,
-   "usd": 0.0001878,
-   "latency_s": 1.41,
-   "round": 0
-  },
-  {
-   "t": 1791405058.137,
-   "step": "structure plan",
-   "model": "nvidia/nemotron-3-super-120b-a12b",
-   "thinking": "low",
-   "in": 338,
-   "out": 97,
-   "usd": 0.00018869999999999998,
-   "latency_s": 1.62,
+   "out": 120,
+   "usd": 0.0002094,
+   "latency_s": 1.2,
    "round": 0
   }
  ],
  "display": {
   "code": "display/App.jsx",
   "assets": [
-   "assets/64446c21d22240699b0360051c44c02ff63c2b08ad77c8d5612be9fcb638fd00.webp"
+   "assets/64446c21d22240699b0360051c44c02ff63c2b08ad77c8d5612be9fcb638fd00.webp",
+   "assets/666689185f619f63e8b5f64687827c346c4828710cd54b53c9c6c651b25a886b.svg"
   ],
-  "images": 2,
-  "candidate": "65c5cbdd"
+  "images": 3,
+  "candidate": "8e71f1f9"
  },
  "real": {
   "mobile": "real/mobile.webp",

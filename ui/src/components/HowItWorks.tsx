@@ -30,8 +30,8 @@ export function HowItWorks() {
         ))}
       </ol>
       <p className="mt-4 max-w-4xl text-xs leading-relaxed text-ink-muted">
-        <span className="font-semibold text-ink">Notes.</span> Every model call runs on Nebius Token Factory; NVIDIA Nemotron plans the page structure and
-        writes interaction code. Code-writing models get text measurements, never image bytes; every render, test and score runs in a Token Factory
+        <span className="font-semibold text-ink">Notes.</span> Every model call runs on Nebius Token Factory; NVIDIA Nemotron plans responsive intent, names
+        page regions and makes the experimental repair agent's edits. Code-writing models get text measurements, never image bytes; every render, test and score runs in a Token Factory
         Sandbox. Scope: static responsive layout with working basic controls; designed states only from a state frame. On some tasks a deterministic
         baseline matches the model — the runs say so.
       </p>

@@ -109,3 +109,10 @@ def test_check_code_returns_the_build_dom_and_reuses_a_given_design_reading():
                        read_design=lambda f: reads.append(1) or SPEC, emit=lambda *a, **k: None, spec=SPEC)
     assert out["dom"]["mobile"][0]["pc"] == "3" and out["dom"]["tablet"] == []
     assert reads == []                                   # the given reading is used, the frames are not read again
+
+
+def test_a_code_build_error_is_called_a_build_error():
+    sb = FakeSB(score={"mode": "check", "match": 0.0, "reason": "the page could not be captured", "disqualified": False})
+    out = C.check_code("export default function App(){return <main>}", FRAMES, sb=sb, read_design=lambda f: SPEC,
+                       emit=lambda *a, **k: None)
+    assert "could not be rendered" in out["report"]["reason"] and "captured" not in out["report"]["reason"]

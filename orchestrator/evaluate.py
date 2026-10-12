@@ -10,11 +10,12 @@ from dataclasses import dataclass, field
 
 from .sandbox import RunResult, Sandbox
 
+# hard limits inside the VM: a page that never settles (while(true){} in an App.jsx) must not bill the whole timeout
 RENDER_CMD = ("mkdir -p /work/out && cd /opt/pc && "
-              "node lint.mjs /work/App.jsx > /work/out/lint.json; "
-              "node render.mjs --in /work/App.jsx --out /work/out > /work/out/render.json; "
+              "timeout 60 node lint.mjs /work/App.jsx > /work/out/lint.json; "
+              "timeout 120 node render.mjs --in /work/App.jsx --out /work/out > /work/out/render.json; "
               "echo done")
-SCORE_CMD = "cd /opt/pc && python3 evaluate.py"
+SCORE_CMD = "cd /opt/pc && timeout 120 python3 evaluate.py"
 
 
 @dataclass

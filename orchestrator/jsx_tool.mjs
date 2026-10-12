@@ -89,7 +89,7 @@ function key(cls) {
   let base = i >= 0 ? cls.slice(i + 1) : cls;
   base = base.replace(/^!/, "").replace(/^-/, "");
   const groups = [
-    /^(m[trblxy]?)-/, /^(p[trblxy]?)-/, /^(w)-/, /^(h)-/, /^(min-w)-/, /^(min-h)-/, /^(max-w)-/, /^(max-h)-/,
+    /^(m[trblxy]?)-/, /^(p[trblxy]?)-/, /^(w)-/, /^(h)-/, /^(size)-/, /^(min-w)-/, /^(min-h)-/, /^(max-w)-/, /^(max-h)-/,
     /^(gap(-[xy])?)-/, /^(space-[xy])-/, /^(top|left|right|bottom|inset(-[xy])?)-/, /^(rounded(-[trbl]{1,2})?)(-|$)/,
     /^(leading)-/, /^(tracking)-/, /^(grid-cols)-/, /^(grid-rows)-/, /^(col-span)-/, /^(order)-/, /^(z)-/, /^(basis)-/,
     /^(opacity)-/, /^(font)-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black|\[)/,
@@ -101,6 +101,7 @@ function key(cls) {
   if (/^border(-[trblxy])?-(\[#|#|[a-z]+-\d|white|black|transparent)/.test(base)) return variant + "border-color";
   if (/^(block|inline|inline-block|flex|inline-flex|grid|inline-grid|hidden|contents|table)$/.test(base)) return variant + "display";
   if (/^flex-(row|col)(-reverse)?$/.test(base)) return variant + "flex-dir";
+  if (/^flex-(wrap|nowrap|wrap-reverse)$/.test(base)) return variant + "flex-wrap";
   if (/^(items|justify|self|content|place)-/.test(base)) return variant + base.split("-")[0];
   if (/^text-(left|center|right|justify)$/.test(base)) return variant + "text-align";
   if (/^(static|relative|absolute|fixed|sticky)$/.test(base)) return variant + "position";
@@ -118,9 +119,40 @@ const DEFAULTS = { m: "m-0", mt: "mt-0", mb: "mb-0", ml: "ml-0", mr: "mr-0", mx:
   "gap-y": "gap-y-0", w: "w-auto", h: "h-auto", "max-w": "max-w-none", "min-h": "min-h-0", "text-align": "text-left",
   "flex-dir": "flex-row", "grid-cols": "grid-cols-none", order: "order-none", rounded: "rounded-none",
   "text-size": "text-base", "space-y": "space-y-0", "space-x": "space-x-0", leading: "leading-normal", font: "font-normal",
-  tracking: "tracking-normal", "min-w": "min-w-0", "max-h": "max-h-none" };
+  tracking: "tracking-normal", "min-w": "min-w-0", "max-h": "max-h-none", items: "items-stretch",
+  justify: "justify-start", self: "self-auto", "flex-wrap": "flex-nowrap", position: "static", z: "z-auto",
+  basis: "basis-auto", bg: "bg-transparent", opacity: "opacity-100", "grid-rows": "grid-rows-none", "col-span": "col-auto" };
+// display without a class is the tag's own default
+const TAG_DISPLAY = { span: "inline", a: "inline", b: "inline", strong: "inline", em: "inline", i: "inline", label: "inline",
+  img: "inline-block", button: "inline-block", input: "inline-block", select: "inline-block", textarea: "inline-block" };
+// shorthand families: where a longhand's value can also come from (council, Oct 8: md:p-8 + a mobile pt edit pinned
+// md:pt-0 and zeroed tablet's top padding)
+const FAMILY = { pt: ["py", "p"], pb: ["py", "p"], pl: ["px", "p"], pr: ["px", "p"], px: ["p"], py: ["p"],
+  mt: ["my", "m"], mb: ["my", "m"], ml: ["mx", "m"], mr: ["mx", "m"], mx: ["m"], my: ["m"],
+  "gap-x": ["gap"], "gap-y": ["gap"], top: ["inset-y", "inset"], bottom: ["inset-y", "inset"], left: ["inset-x", "inset"],
+  right: ["inset-x", "inset"], "inset-x": ["inset"], "inset-y": ["inset"], w: ["size"], h: ["size"] };
+const LONGHANDS = {};
+for (const [l, ss] of Object.entries(FAMILY)) for (const sh of ss) (LONGHANDS[sh] ||= []).push(l);
 
 function bare(c) { return c.replace(RESP, ""); }   // keeps a leading "!" (important) — key() ignores it
+
+// a longhand's effective value at bp, also when a shorthand sets it (as that longhand: md:p-8 → "pt-8")
+function effectiveFam(classes, bp, k) {
+  const fam = [k, ...(FAMILY[k] || [])];
+  for (const pre of CHAIN[bp]) {
+    for (const f of fam) {      // within one prefix the longhand wins (Tailwind emits it after the shorthand)
+      const hit = classes.find((c) => (c.match(RESP)?.[0] ?? "") === pre && key(bare(c)) === f);
+      if (!hit) continue;
+      if (f === k) return bare(hit);
+      const b = bare(hit), imp = b.startsWith("!") ? "!" : "";
+      let rest = b.replace(/^!/, "");
+      const neg = rest.startsWith("-") ? "-" : "";
+      rest = rest.replace(/^-/, "");
+      return imp + neg + k + rest.slice(f.length);
+    }
+  }
+  return null;
+}
 
 function effective(classes, bp, k) {
   for (const pre of CHAIN[bp]) {
@@ -130,12 +162,17 @@ function effective(classes, bp, k) {
   return null;
 }
 
-function scopedEdit(classes, bp, addList, pins) {
+function scopedEdit(classes, bp, addList, pins, tagName) {
   const notes = [];
   let out = [...classes];
   for (const raw of addList) {
     const b = bare(raw), k = key(b), pre = PREFIX[bp];
-    const before = { tablet: effective(out, "tablet", k), desktop: effective(out, "desktop", k) };
+    if (LONGHANDS[k] && out.some((c) => LONGHANDS[k].includes(key(bare(c))))) {
+      notes.push(`could not pin: a shorthand ${k} edit on an element that sets its longhands`);
+      continue;
+    }
+    const fam = [k, ...(FAMILY[k] || [])];
+    const before = { tablet: effectiveFam(out, "tablet", k), desktop: effectiveFam(out, "desktop", k) };
     out = out.filter((c) => !((c.match(RESP)?.[0] ?? "") === pre && key(bare(c)) === k));
     if (b.startsWith("!")) {
       // an important class beats every non-important class of the property at ANY breakpoint: promote the
@@ -148,14 +185,15 @@ function scopedEdit(classes, bp, addList, pins) {
     out.push(pre + b);
     const pin = (level, lvlPre) => {
       const has = out.some((c) => CHAIN[level].slice(0, CHAIN[level].indexOf(pre) >= 0 ? CHAIN[level].indexOf(pre) : undefined)
-        .includes(c.match(RESP)?.[0] ?? "") && (c.match(RESP)?.[0] ?? "") !== pre && key(bare(c)) === k);
+        .includes(c.match(RESP)?.[0] ?? "") && (c.match(RESP)?.[0] ?? "") !== pre && fam.includes(key(bare(c))));
       if (has && !(pins || {})[level]) return;   // that breakpoint has its own, more specific value: unaffected
       // explicit pins (computed values from the render) beat class-derived guesses: inherited properties and
       // parent-set margins (space-y) don't appear in the element's own classes (a leak found in a live run)
       const explicit = (pins || {})[level];
       const pinned = explicit ? [].concat(explicit).find((c) => key(bare(c)) === k) : null;
       if (pinned) { out = out.filter((c) => !((c.match(RESP)?.[0] ?? "") === lvlPre && key(bare(c)) === k)); out.push(lvlPre + pinned); notes.push(`pinned ${lvlPre}${pinned} (computed)`); return; }
-      const old = before[level] ?? DEFAULTS[k.replace(/^.*:/, "")] ?? null;
+      const kk = k.replace(/^.*:/, "");
+      const old = before[level] ?? (kk === "display" ? TAG_DISPLAY[tagName] || "block" : DEFAULTS[kk]) ?? null;
       // an important (!) class beats non-important md:/xl: classes, so the pin must be important too
       const imp = b.startsWith("!") && old && !old.startsWith("!") ? "!" : "";
       if (old && old !== b) { out.push(lvlPre + imp + old); notes.push(`pinned ${lvlPre}${imp}${old}`); }
@@ -230,11 +268,12 @@ function apply(code, edits) {
         const addKeys = new Set(add.map((c) => key(bare(c))));
         const resets = [...remove].filter((c) => (c.match(RESP)?.[0] ?? "") === pre && !addKeys.has(key(bare(c))))
           .map((c) => DEFAULTS[key(bare(c)).replace(/^.*:/, "")]).filter(Boolean);
-        const r = scopedEdit(classes, e.bp, [...add, ...resets], e.pins);
+        const r = scopedEdit(classes, e.bp, [...add, ...resets], e.pins, op.name.name);
+        // an edit whose other sizes cannot be pinned would change them too: refused, not applied (council, Oct 8)
+        if (r.notes.some((n) => n.startsWith("could not"))) { skipped.push({ id, why: r.notes.join("; "), refused: true }); continue; }
         classes = r.classes;
-        if (r.notes.some((n) => n.startsWith("could not"))) skipped.push({ id, why: r.notes.join("; "), partial: true });
       } else {
-        classes = classes.filter((c) => !remove.has(c));
+        classes = classes.filter((c) => !remove.has(c) || RESP.test(c));   // "all" removes unprefixed classes only
         const addKeys = new Set(add.map(key));
         classes = classes.filter((c) => !addKeys.has(key(c)));
         for (const c of add) if (!classes.includes(c)) classes.push(c);

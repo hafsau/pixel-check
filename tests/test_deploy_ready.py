@@ -90,21 +90,26 @@ def _render_env() -> dict:
 
 
 def test_render_env_vars_are_ones_the_server_reads():
-    code = (ROOT / "orchestrator" / "config.py").read_text()
+    code = (ROOT / "orchestrator" / "config.py").read_text() + (ROOT / "orchestrator" / "state.py").read_text()
     for key in _render_env():
-        assert f'"{key}"' in code, f"{key} is not read by orchestrator/config.py"
+        assert f'"{key}"' in code, f"{key} is not read by orchestrator/config.py or state.py"
 
 
 def test_render_secrets_have_no_values():
     env = _render_env()
-    for key in ("NEBIUS_API_KEY", "NEBIUS_AI_PROJECT", "LIVE_PASSCODE"):
+    for key in ("NEBIUS_API_KEY", "NEBIUS_AI_PROJECT", "LIVE_PASSCODE", "STATE_GIST_ID", "STATE_GIST_TOKEN"):
         assert env[key] == {"sync": "false"}, key
     assert env["LIVE_ENABLED"]["value"] == "1" and env["OWNED_HOSTS"]["value"] == "hafsausmani.com"
 
 
-def test_render_keeps_one_instance_and_a_disk_for_state():
+def test_render_runs_on_the_free_plan_with_state_off_the_disk():
+    """Render free (Oct 8): no disk, the service sleeps and loses its files — caps and spend live in the gist."""
     y = (ROOT / "render.yaml").read_text()
-    assert "numInstances: 1" in y and "mountPath: /data" in y and "healthCheckPath: /api/health" in y
+    assert "plan: free" in y and "disk:" not in y and "healthCheckPath: /api/health" in y and "autoDeploy: false" in y
+    env = _render_env()
+    assert env["JOB_SLOTS"]["value"] == "1" and float(env["LIVE_DAILY_SPEND_USD"]["value"]) <= 5
+    for key in ("LIVE_DIR", "LEDGER_PATH", "VISION_CACHE_DIR"):
+        assert env[key]["value"].startswith("/tmp/"), key
 
 
 def test_dockerignore_keeps_secrets_and_third_party_captures_out():
@@ -116,8 +121,7 @@ def test_dockerignore_keeps_secrets_and_third_party_captures_out():
 def test_dockerfile_ships_what_the_server_loads_and_stores_state_on_the_disk():
     d = (ROOT / "Dockerfile").read_text()
     for need in ("tesseract-ocr", "nodejs", "@babel/parser", "COPY sandbox/fonts", "COPY orchestrator", "COPY tools",
-                 "LIVE_DIR=/data/live", "LEDGER_PATH=/data/spend.jsonl", "VISION_CACHE_DIR=/data/cache/vision",
-                 "orchestrator.preflight --static", "uvicorn orchestrator.api:app"):
+                 "orchestrator.preflight --static", "uvicorn orchestrator.api:app", "--workers 1"):
         assert need in d, need
     pin = re.search(r'"@babel/parser": "([\d.]+)"', (ROOT / "sandbox" / "package.json").read_text()).group(1)
     assert f"@babel/parser@{pin}" in d

@@ -12,6 +12,8 @@ height and 0.99 × its ink width (n = 198 strings, sizes 12–48, weights 400/60
 from __future__ import annotations
 
 import functools
+import os
+import threading
 import json
 from pathlib import Path
 
@@ -25,15 +27,28 @@ WEIGHTS = (400, 500, 600, 700)
 CAL = json.loads((HERE / "typo_calib.json").read_text())
 
 
+_FONT_LOCK = threading.Lock()
+
+
 def _ensure_fonts():
+    """Inter TTFs from the woff2 files, once: under a lock and written atomically (threads reading a half-written TTF
+    raised 'unknown file format'). The API image builds them at build time (orchestrator.preflight --static)."""
     if all((FONT_DIR / f"inter-{w}.ttf").exists() for w in WEIGHTS):
         return
-    from fontTools.ttLib import TTFont
-    FONT_DIR.mkdir(parents=True, exist_ok=True)
-    for w in WEIGHTS:
-        f = TTFont(HERE.parent / "sandbox" / "fonts" / f"inter-latin-{w}-normal.woff2")
-        f.flavor = None
-        f.save(FONT_DIR / f"inter-{w}.ttf")
+    with _FONT_LOCK:
+        if all((FONT_DIR / f"inter-{w}.ttf").exists() for w in WEIGHTS):
+            return
+        from fontTools.ttLib import TTFont
+        FONT_DIR.mkdir(parents=True, exist_ok=True)
+        for w in WEIGHTS:
+            dest = FONT_DIR / f"inter-{w}.ttf"
+            if dest.exists():
+                continue
+            f = TTFont(HERE.parent / "sandbox" / "fonts" / f"inter-latin-{w}-normal.woff2")
+            f.flavor = None
+            tmp = FONT_DIR / f".inter-{w}.{os.getpid()}.{threading.get_ident()}.tmp"
+            f.save(tmp)
+            os.replace(tmp, dest)
 
 
 @functools.lru_cache(maxsize=None)

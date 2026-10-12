@@ -29,6 +29,8 @@ export interface Repair {
   history: RepairRound[];
   linesKept: number | null;
   usd: number | null;
+  /** The repair stopped (sandbox / model error); the check result still stands. */
+  error: string | null;
 }
 
 type Obj = Record<string, unknown>;
@@ -69,6 +71,7 @@ export function parseRepair(x: unknown): Repair | null {
     history: [...rounds.values()].sort((a, b) => a.round - b.round),
     linesKept: kept == null ? null : Math.min(1, Math.max(0, kept)),
     usd: num(x.usd),
+    error: typeof x.error === 'string' && x.error.trim() ? x.error.trim().slice(0, 300) : null,
   };
 }
 

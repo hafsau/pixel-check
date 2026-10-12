@@ -18,6 +18,7 @@ from __future__ import annotations
 import hmac
 import io
 import json
+import os
 import re
 import threading
 import time
@@ -31,7 +32,9 @@ from fastapi.responses import FileResponse
 SIZES = {"mobile": (390, 844), "tablet": (768, 1024), "desktop": (1280, 800)}
 MAX_BYTES = 8 * 1024 * 1024
 _ID = re.compile(r"^[a-z0-9-]{8,40}$")
-_SECRET = re.compile(r"(?i)(bearer\s+\S+|sk-[\w-]+|api[_-]?key\S*|authorization\S*|token\S*)")
+_SECRET = re.compile(r"(?i)(bearer\s+\S+|sk-[\w-]+|api[_-]?key\s*[=:]?\s*\S+|authorization\s*:?\s*\S+(\s+\S+)?|"
+                     r"\btoken\s*[=:]\s*\S+|\b(access|auth|secret)[_-]?token\S*)")
+MAX_REQUEST = 26 * 1024 * 1024   # 3 frames × 8 MB + an App.jsx: refuse bigger bodies before parsing them
 
 
 class _Refused(Exception):
@@ -50,13 +53,28 @@ class _Caps:
         self.lock = threading.Lock()
 
     def _read(self) -> list:
+        """A missing file is no runs yet; a garbled one raises (fail closed: never 'all runs left')."""
         try:
-            return [r if isinstance(r, list) else [r, None] for r in json.loads(self.path.read_text())]
-        except (FileNotFoundError, json.JSONDecodeError):
+            text = self.path.read_text()
+        except FileNotFoundError:
             return []
+        return [r if isinstance(r, list) else [r, None] for r in json.loads(text)]
+
+    def _write(self, runs: list) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(runs))
+        os.replace(tmp, self.path)
+
+    def untake(self) -> None:
+        with self.lock:
+            self._write(self._read()[:-1])
 
     def left(self, ip: str | None = None) -> tuple[int, int]:
-        runs = self._read()
+        try:
+            runs = self._read()
+        except (json.JSONDecodeError, ValueError):
+            return 0, 0
         today = time.strftime("%Y-%m-%d")
         todays = [r for r in runs if time.strftime("%Y-%m-%d", time.localtime(r[0])) == today]
         d = self.daily - len(todays)
@@ -69,9 +87,7 @@ class _Caps:
             d, t = self.left(ip)
             if d <= 0 or t <= 0:
                 return False
-            runs = self._read() + [[time.time(), ip]]
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(runs))
+            self._write(self._read() + [[time.time(), ip]])
             return True
 
 
@@ -199,24 +215,103 @@ def _refuse_sensitive(meta: dict):
                        "rebuild login, checkout or wallet pages from a URL; upload your own design frames instead")
 
 
+def _ledger_entries(path: Path) -> list[dict]:
+    try:
+        return [json.loads(l) for l in Path(path).read_text().splitlines() if l.strip()]
+    except FileNotFoundError:
+        return []
+
+
 def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | None = None, capture=None,
-               resolver=None, checker=None, repairer=None) -> FastAPI:
+               resolver=None, checker=None, repairer=None, store=None) -> FastAPI:
     from . import config
+    from . import state as _state
+    from .tf_client import Ledger
     s = {"enabled": config.LIVE_ENABLED, "passcode": config.LIVE_PASSCODE, "daily": config.LIVE_DAILY_RUNS,
          "total": config.LIVE_TOTAL_RUNS, "origins": config.LIVE_ORIGINS, "per_ip": config.LIVE_PER_IP_DAILY,
-         "trust_proxy": config.LIVE_TRUST_PROXY, "url_allow": config.LIVE_URL_ALLOW, "owned_hosts": config.OWNED_HOSTS}
+         "trust_proxy": config.LIVE_TRUST_PROXY, "url_allow": config.LIVE_URL_ALLOW, "owned_hosts": config.OWNED_HOSTS,
+         "daily_spend": config.LIVE_DAILY_SPEND_USD, "ledger": config.LEDGER_PATH}
     s.update(settings or {})
     root = Path(live_dir or config.LIVE_DIR)
     root.mkdir(parents=True, exist_ok=True)
     caps = _Caps(root / "caps.json", s["daily"], s["total"], s.get("per_ip"))
+    ledger_path = Path(s["ledger"])
+    ledger = Ledger(ledger_path)
+    store = store or _state.from_env(dict(os.environ), root)
+    take_lock = threading.Lock()
+    jobs = threading.Semaphore(max(1, int(s.get("job_slots") or config.JOB_SLOTS)))   # heavy work, one at a time
+
+    def today() -> str:
+        return time.strftime("%Y-%m-%d")
+
+    def daily_spend() -> float:
+        """Today's spend: today's ledger entries; a restored entry carries the stored day's share."""
+        tot = 0.0
+        for e in _ledger_entries(ledger_path):
+            if time.strftime("%Y-%m-%d", time.localtime(e.get("ts", 0))) != today():
+                continue
+            tot += e.get("today_usd", 0.0) if e.get("kind") == "restored" else e.get("usd", 0.0)
+        return tot
+
+    def snapshot() -> dict:
+        return {"caps": caps._read(), "spend_usd": round(ledger.total(), 6), "spend_day": [today(), round(daily_spend(), 6)]}
+
+    # the host may have wiped the disk (Render free): restore caps and spend from the store — or keep live mode off
+    state_error = None
+    try:
+        st = store.load()
+        merged = sorted({tuple(r) for r in caps._read() + [list(x) for x in st["caps"]]}, key=lambda r: r[0])
+        caps._write([list(r) for r in merged])
+        missing = st["spend_usd"] - ledger.total()
+        if missing > 1e-9:
+            day, day_usd = (st["spend_day"] + [None, 0.0])[:2]
+            ledger.add({"ts": time.time(), "kind": "restored", "usd": missing,
+                        "today_usd": float(day_usd or 0.0) if day == today() else 0.0})
+    except (_state.StateError, json.JSONDecodeError, ValueError) as e:
+        state_error = str(e)
+
+    def live_ok() -> bool:
+        return bool(s["enabled"]) and state_error is None
+
+    def require_live():
+        if not s["enabled"]:
+            raise HTTPException(503, "live mode is switched off; replays still work")
+        if state_error is not None:
+            raise HTTPException(503, "live mode is unavailable: the run counter could not be read; replays still work")
+
+    def persist():
+        store.save(snapshot())
+
+    def take_run(request: Request, weight: int = 1):
+        """A run slot (a repair weighs 3): daily spend under its cap, caps not reached, and the store has recorded
+        it — or no run."""
+        if daily_spend() >= float(s["daily_spend"]):
+            raise HTTPException(429, "today's live-run budget is used up; replays still work")
+        with take_lock:
+            taken = 0
+            for _ in range(weight):
+                if not caps.take(visitor(request)):
+                    for _ in range(taken):
+                        caps.untake()
+                    raise HTTPException(429, "the live-run limit is reached; replays still work")
+                taken += 1
+            try:
+                persist()
+            except _state.StateError:
+                for _ in range(taken):
+                    caps.untake()
+                raise HTTPException(503, "PixelCheck could not record the run in its run counter; please try again later") from None
 
     def visitor(request: Request) -> str:
-        """The client address; X-Forwarded-For only behind a trusted proxy (else anyone could pick an address)."""
+        """The client address; X-Forwarded-For only behind a trusted proxy (else anyone could pick an address).
+        Kept only as a keyed hash: the caps live in a gist that anyone with its URL can read."""
+        addr = request.client.host if request.client else "unknown"
         if s.get("trust_proxy"):
             fwd = request.headers.get("x-forwarded-for", "")
-            if fwd.strip():
-                return fwd.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+            if fwd.strip():           # Render appends the address it saw: the LAST entry (earlier ones are client-made)
+                addr = fwd.split(",")[-1].strip()
+        key = (s.get("passcode") or "pixelcheck").encode()
+        return hmac.new(key, addr.encode(), "sha256").hexdigest()[:16]
     for st_p in root.glob("*/status.json"):     # runs live in threads: a restart orphans unfinished ones
         try:
             st = json.loads(st_p.read_text())
@@ -231,6 +326,17 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     run_repair = repairer or default_repairer
     resolve = resolver or _resolve
     app = FastAPI(title="PixelCheck live", docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def limit_body(request: Request, call_next):
+        from fastapi.responses import JSONResponse
+        try:
+            size = int(request.headers.get("content-length") or 0)
+        except ValueError:
+            size = 0
+        if size > MAX_REQUEST:
+            return JSONResponse({"detail": "the request is too large"}, status_code=413)
+        return await call_next(request)
     app.add_middleware(CORSMiddleware, allow_origins=list(s["origins"] or []), allow_methods=["GET", "POST"],
                        allow_headers=["*"])
 
@@ -251,6 +357,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             stages.append({"stage": stage, "t": round(time.time(), 1), **info})
             write_status(rid, state="running", stages=stages)
         owned = False
+        jobs.acquire()                     # waits as "queued" while another run uses the slot
         try:
             write_status(rid, state="running")
             if url is not None:          # capture the page at the three breakpoints first (sandbox, network on)
@@ -280,17 +387,22 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             write_status(rid, state="failed", stages=stages, error=str(e))
         except Exception as e:     # the API must report, never leak credentials from upstream errors
             write_status(rid, state="failed", stages=stages, error=_scrub(f"{type(e).__name__}: {e}"))
+        finally:
+            jobs.release()
+            try:
+                persist()                  # the spend of this run survives a wiped disk
+            except Exception:
+                pass
 
     @app.get("/api/health")
     def health():
         d, t = caps.left()
-        return {"live": bool(s["enabled"]), "runs_left_today": d, "runs_left_total": t}
+        return {"live": live_ok(), "runs_left_today": d, "runs_left_total": t}
 
     @app.post("/api/runs", status_code=202)
     async def start(request: Request, mobile: UploadFile = File(...), tablet: UploadFile = File(...),
                     desktop: UploadFile = File(...), passcode: str = Form("")):
-        if not s["enabled"]:
-            raise HTTPException(503, "live mode is switched off; replays still work")
+        require_live()
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
             raise HTTPException(403, "wrong passcode")
         frames = {}
@@ -300,8 +412,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 raise HTTPException(413, f"{bp}: the frame is larger than {MAX_BYTES // (1024 * 1024)} MB")
             _check_png(bp, data)
             frames[bp] = data
-        if not caps.take(visitor(request)):
-            raise HTTPException(429, "the live-run limit is reached; replays still work")
+        take_run(request)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         run_dir = root / rid
         (run_dir / "frames").mkdir(parents=True)
@@ -313,8 +424,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
 
     @app.post("/api/runs/url", status_code=202)
     def start_url(request: Request, url: str = Form(""), owns: str = Form(""), passcode: str = Form("")):
-        if not s["enabled"]:
-            raise HTTPException(503, "live mode is switched off; replays still work")
+        require_live()
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
             raise HTTPException(403, "wrong passcode")
         if owns.strip().lower() not in ("true", "1", "yes", "on"):
@@ -327,8 +437,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             host = (urlsplit(url).hostname or "").lower()
             if not any(host == h or host.endswith("." + h) for h in allow):
                 raise HTTPException(422, f"this demo only rebuilds pages from: {', '.join(allow)}")
-        if not caps.take(visitor(request)):
-            raise HTTPException(429, "the live-run limit is reached; replays still work")
+        take_run(request)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         (root / rid).mkdir(parents=True)
         write_status(rid, id=rid, state="queued", stages=[], created=time.time(), source={"url": _bare(url)})
@@ -348,6 +457,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         def verify(meta):
             _verify_capture(meta or {}, resolve)
             _refuse_sensitive(meta)
+        jobs.acquire()
         try:
             write_status(rid, state="running")
             out = run_check(kind, build, frames, run_dir, emit, verify)
@@ -364,16 +474,22 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                                            if isinstance(v, dict)}
             repaired, summary = None, None
             if repair and kind == "code":   # Nemotron repair loop on the same frames (orchestrator/repair.py)
-                fix = run_repair(build, frames, run_dir, emit)
-                (bundle / "repair").mkdir(parents=True, exist_ok=True)
-                (bundle / "original").mkdir(parents=True, exist_ok=True)
-                (bundle / "repair" / "App.jsx").write_text(fix["code"])
-                (bundle / "original" / "App.jsx").write_text(build)
-                repaired = {"code": "repair/App.jsx", "original": "original/App.jsx", "start": fix.get("start"),
-                            "best": fix.get("best"), "history": fix.get("history"), "lines_kept": fix.get("lines_kept"),
-                            "usd": fix.get("usd")}
-                summary = {"before": (fix.get("start") or {}).get("worst"), "after": (fix.get("best") or {}).get("worst"),
-                           "lines_kept": fix.get("lines_kept")}
+                try:
+                    fix = run_repair(build, frames, run_dir, emit)
+                except Exception as e:      # the check result stands; the repair reports what stopped it
+                    fix = {"error": _scrub(f"the repair could not finish: {type(e).__name__}: {e}")}
+                if "error" in fix:
+                    repaired, summary = {"error": fix["error"]}, {"error": fix["error"]}
+                else:
+                    (bundle / "repair").mkdir(parents=True, exist_ok=True)
+                    (bundle / "original").mkdir(parents=True, exist_ok=True)
+                    (bundle / "repair" / "App.jsx").write_text(fix["code"])
+                    (bundle / "original" / "App.jsx").write_text(build)
+                    repaired = {"code": "repair/App.jsx", "original": "original/App.jsx", "start": fix.get("start"),
+                                "best": fix.get("best"), "history": fix.get("history"),
+                                "lines_kept": fix.get("lines_kept"), "usd": fix.get("usd")}
+                    summary = {"before": (fix.get("start") or {}).get("worst"),
+                               "after": (fix.get("best") or {}).get("worst"), "lines_kept": fix.get("lines_kept")}
             (bundle / "check.json").write_text(json.dumps({
                 "type": "check", "id": rid, "source": json.loads(status_path(rid).read_text()).get("source"),
                 "report": rep, "design": paths["design"], "build": paths["build"],
@@ -389,13 +505,18 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             write_status(rid, state="failed", stages=stages, error=_scrub(str(e)))
         except Exception as e:
             write_status(rid, state="failed", stages=stages, error=_scrub(f"{type(e).__name__}: {e}"))
+        finally:
+            jobs.release()
+            try:
+                persist()
+            except Exception:
+                pass
 
     @app.post("/api/checks", status_code=202)
     async def start_check(request: Request, mobile: UploadFile = File(...), tablet: UploadFile = File(...),
                           desktop: UploadFile = File(...), url: str = Form(""), code: str = Form(""),
                           owns: str = Form(""), passcode: str = Form(""), repair: str = Form("")):
-        if not s["enabled"]:
-            raise HTTPException(503, "live mode is switched off; replays still work")
+        require_live()
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
             raise HTTPException(403, "wrong passcode")
         if owns.strip().lower() not in ("true", "1", "yes", "on"):
@@ -424,8 +545,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 host = (urlsplit(url).hostname or "").lower()
                 if not any(host == h or host.endswith("." + h) for h in allow):
                     raise HTTPException(422, f"this demo only checks pages from: {', '.join(allow)}")
-        if not caps.take(visitor(request)):
-            raise HTTPException(429, "the live-run limit is reached; replays still work")
+        take_run(request, weight=3 if want_repair else 1)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         (root / rid / "frames").mkdir(parents=True)
         for bp, data in frames.items():
@@ -571,7 +691,7 @@ def default_capture(url: str, run_dir: Path, emit, owned: bool = False) -> tuple
     import shlex
     from .sandbox import Sandbox
     emit("capture")
-    cmd = (f"cd /opt/pc && node /opt/pc/capture.mjs page {shlex.quote(url)} --out /work/cap --fonts /opt/pc/fonts "
+    cmd = (f"cd /opt/pc && timeout 150 node /opt/pc/capture.mjs page {shlex.quote(url)} --out /work/cap --fonts /opt/pc/fonts "
            f"--wait 2000 --block-private" + (" --real --assets" if owned else ""))
     sb = Sandbox()
     r = sb.run(cmd, files=capture_files(), timeout_s=300, networking=True)

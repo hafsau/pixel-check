@@ -169,3 +169,14 @@ def test_merge_keeps_the_vision_models_box_on_unplaced_texts():
     m = meas([line("Hello", [10, 10, 50, 14])])
     out = merge({"texts": [{"text": "Elsewhere", "role": "body", "size_px": 14, "box": [30, 600, 120, 20]}]}, m)
     assert out["texts"][0]["vlm_box"] == [30, 600, 120, 20]
+
+
+def test_blocks_inside_an_extended_label_are_its_unread_letters():
+    """'SEE MY' read, 'WORK' not: the light strokes of WORK were measured as a block that pushed the icon aside."""
+    m = meas([line("SEE MY", [126, 684, 58, 10])],
+             blocks=[{"box": [193, 684, 30, 10], "fill": "#f7ecdc", "contains_text": []},     # the letters W O R K
+                     {"box": [249, 681, 16, 16], "fill": "#d4d4d8", "contains_text": []},     # the icon: stays
+                     {"box": [93, 662, 203, 54], "fill": "#1a1a1a", "contains_text": []}])    # the button: stays
+    out = merge(vlm("SEE MY WORK"), m)
+    boxes = [b["box"] for b in out["blocks"]]
+    assert [193, 684, 30, 10] not in boxes and [249, 681, 16, 16] in boxes and [93, 662, 203, 54] in boxes

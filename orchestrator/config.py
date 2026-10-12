@@ -72,11 +72,13 @@ LIVE_PASSCODE = os.environ.get("LIVE_PASSCODE", "")
 LIVE_DAILY_RUNS = int(os.environ.get("LIVE_DAILY_RUNS", "10"))
 LIVE_TOTAL_RUNS = int(os.environ.get("LIVE_TOTAL_RUNS", "40"))
 LIVE_RUN_BUDGET_USD = float(os.environ.get("LIVE_RUN_BUDGET_USD", "0.30"))
-LIVE_ORIGINS = [o for o in os.environ.get("LIVE_ORIGINS", "http://localhost:5173").split(",") if o]
+LIVE_ORIGINS = [o.strip().rstrip("/") for o in os.environ.get("LIVE_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 LIVE_DIR = os.environ.get("LIVE_DIR", "var/live")
 # owned sites (Phase 2): URL runs on these hosts (and their subdomains) keep a real screenshot and the page's own images
 OWNED_HOSTS = [h.strip().lower() for h in os.environ.get("OWNED_HOSTS", "").split(",") if h.strip()]
 LIVE_PER_IP_DAILY = int(os.environ.get("LIVE_PER_IP_DAILY", "3"))
+JOB_SLOTS = int(os.environ.get("JOB_SLOTS", "1"))   # heavy runs at once (Render free: 512 MB → 1)
+LIVE_DAILY_SPEND_USD = float(os.environ.get("LIVE_DAILY_SPEND_USD", "4"))   # models + sandboxes, per UTC day
 LIVE_TRUST_PROXY = os.environ.get("LIVE_TRUST_PROXY", "0") == "1"     # set behind Render / a reverse proxy
 LIVE_URL_ALLOW = [h for h in os.environ.get("LIVE_URL_ALLOW", "").split(",") if h]   # empty = any allowed public page
 

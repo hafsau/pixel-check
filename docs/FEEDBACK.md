@@ -13,7 +13,7 @@ _Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Haf
 
 ## 1. Nebius Token Factory — account, billing, inference API
 
-**Used for:** all model calls (planning, code generation, critique, design reading) via the OpenAI-compatible endpoint `https://api.tokenfactory.nebius.com/v1/`.
+**Used for:** all model calls (design reading, responsive-intent planning, region naming, the repair agent; earlier also code generation and critique) via the OpenAI-compatible endpoint `https://api.tokenfactory.nebius.com/v1/`. Note: check mode without repair calls only the vision model (Gemma) plus Sandboxes.
 
 **Worked well**
 - 2026-09-25 [confirmed] Hackathon promo code `NEBIUS-DEVPOST-GLOBAL26` applied; $50 credit showed in the balance.
@@ -62,7 +62,7 @@ _Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Haf
 - 2026-10-02 [confirmed] Positive: the network switch per run is exactly what an agent product needs — renders and scoring run with `networking: {"enabled": false}`; only the page-capture runs switch it on. Combined with checkpoints, the design frames enter only a disposable scoring fork, which makes our anti-cheat story simple to explain.
 - 2026-10-07 [confirmed] Positive: deterministic across image rebuilds — the same render selftest produced byte-identical PNG hashes on our runtime images v13 through v17 (built over three days), so scores stay comparable as the image evolves.
 - 2026-10-07 [confirmed] Positive: `contree build` built our API's Dockerfile from a Docker Hub base (`python:3.12-slim` + apt packages + pip + npm) and ran our preflight inside it — a usable stand-in for Docker on a laptop without it. Multistage builds are supported (`--help`, CLI 0.9.4), contrary to an older doc page.
-- 2026-10-07 [confirmed] Positive: concurrency was never a problem — the repair agent checks 3 candidates in parallel per round (318 check runs in one day) without rate-limit errors.
+- 2026-10-07 [confirmed] Positive: concurrency was never a problem — the repair agent checks 3 candidates in parallel per round (306 sandbox runs = 153 render + score checks on Oct 7) without rate-limit errors.
 - 2026-10-05 [confirmed] Useful for URL capture: a run with networking on can reach the public internet, and Playwright's request routing inside the sandbox let us block private / metadata addresses per request. We deliberately did not probe Nebius-internal addresses from inside a sandbox (not authorised); docs stating what a networking-on sandbox can reach would help builders reason about SSRF.
 
 **Onboarding (zero → hello world)**
@@ -75,7 +75,7 @@ _Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Haf
 
 ## 3. NVIDIA Nemotron 3 Super (via Token Factory)
 
-**Used for:** critique (fix strategies from measured diffs), class-edit proposals (JSON), early code generation; reasoning modes chosen per step.
+**Used for:** now (Oct 5+): naming page regions in every rebuild, and the experimental repair agent's class edits (JSON). Earlier (Sep 29 – Oct 2, development only): critique (fix strategies from measured diffs), class edits in the rebuild loop and early code generation — these loop branches added nothing over the compiler and are off in the demo.
 
 **Worked well**
 - 2026-09-29 [confirmed] Structured output is reliable with reasoning off: 10/10 schema-valid JSON (G2), 0.7–1.2 s on short prompts; also valid in `low_effort` (3/3) and `reasoning_budget` 2048 (3/3) modes.
@@ -97,7 +97,7 @@ _Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Haf
 
 ## 3b. NVIDIA Nemotron 3 Ultra (via Token Factory)
 
-**Used for:** writing the initial responsive App.jsx and from-scratch rewrites.
+**Used for:** now (Oct 1+): the responsive-intent plan in every rebuild (one call; adopted only when the sandbox shows it is no worse). Earlier (Sep 29 – Oct 2, development only): writing initial App.jsx drafts and rewrites, and interaction wiring from state frames (not in the demo).
 
 **Worked well**
 - 2026-09-29 [confirmed] Clearly better layout reasoning than Super on the same spec: single-shot match 39.2 / 44.1 vs Super's median ~15; best first draft 47.1 (mobile 72, desktop 80). ~$0.024 and ~23 s per code call ($1/$3 per M tokens) — affordable for a 3-branch loop.

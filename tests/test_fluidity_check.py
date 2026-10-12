@@ -29,3 +29,10 @@ def test_new_overlaps_between_sizes_still_fail():
 def test_our_renders_unchanged_any_overlap_fails():
     r = fluidity.report(checks(0, 1))
     assert not r["pass"] and r["widths"][1600]["overlaps"] == 1
+
+
+def test_clipped_overflow_fails_the_width_like_real_overflow():
+    c = checks(0, 0)
+    c["between"]["360"]["clipped_overflow_px"] = 230
+    r = fluidity.report(c)
+    assert not r["pass"] and 360 in r["fails"] and r["widths"][360]["overflow"] == 230

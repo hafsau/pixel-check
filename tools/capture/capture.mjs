@@ -52,7 +52,7 @@ const FONT_CSS = [400, 500, 600, 700].map((w) => face("Inter", "inter", w)).join
   [400, 500].map((w) => face("IBM Plex Mono", "ibm-plex-mono", w)).join("");
 
 const NORMALISE_CSS = `${FONT_CSS}
-*,*::before,*::after{font-family:'Inter',sans-serif!important;animation:none!important;
+*,*::before,*::after{font-family:'Inter',sans-serif!important;animation-duration:0s!important;animation-delay:0s!important;animation-iteration-count:1!important;
   transition:none!important;caret-color:transparent!important;background-image:none!important;
   -webkit-font-smoothing:antialiased!important}
 code,pre,kbd,samp,code *,pre *{font-family:'IBM Plex Mono',monospace!important}
@@ -232,7 +232,7 @@ function oracleDom([vw, vh]) {
     if (el.closest("label")) return "label";
     return "body";
   };
-  const texts = [];
+  const texts = [], owners = [];
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const raw = n.textContent.replace(/\s+/g, " ").trim(); const el = n.parentElement;
@@ -250,6 +250,43 @@ function oracleDom([vw, vh]) {
       letter_spacing_px: cs.letterSpacing === "normal" ? 0 : parseFloat(cs.letterSpacing) || 0,
       underline: (cs.textDecorationLine || "").includes("underline"), role: role(el), tag: el.tagName.toLowerCase(),
       align: cs.textAlign, path: dpath(el) + "#" + [...el.childNodes].indexOf(n), code: code(el, "pct") });
+    owners.push(el);
+  }
+  // split-text words (one element per letter, as in the target text): one oracle text, letters joined as seen
+  const splitParent = new Map();
+  for (const e of document.body.querySelectorAll("*")) {
+    const kids = [...e.children];
+    if (kids.length < 3 || [...e.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())) continue;
+    const lens = kids.map((k) => k.textContent.trim().length);
+    if (lens.every((l) => l <= 2) && lens.filter((l) => l > 0).length >= 3 && kids.every((k) => !k.children.length))
+      for (const k of kids) splitParent.set(k, e);
+  }
+  if (splitParent.size) {
+    const merged = [], byParent = new Map();
+    texts.forEach((t, i) => {
+      const P = splitParent.get(owners[i]);
+      if (!P) { merged.push(t); return; }
+      if (!byParent.has(P)) { byParent.set(P, []); merged.push({ __split: P }); }
+      byParent.get(P).push([t, owners[i]]);
+    });
+    for (let i = 0; i < merged.length; i++) {
+      const P = merged[i].__split;
+      if (!P) continue;
+      const items = byParent.get(P);
+      const fs = items[0][0].size_px || 16;
+      let text = "", prev = null;
+      for (const [t, el] of items) {
+        const r = el.getBoundingClientRect();
+        if (prev && r.left - prev.right > 0.15 * fs) text += " ";
+        text += t.text; prev = r;
+      }
+      const ls = items.flatMap(([t]) => t.lines);
+      const x0 = Math.min(...ls.map((l) => l[0])), y0 = Math.min(...ls.map((l) => l[1]));
+      const x1 = Math.max(...ls.map((l) => l[0] + l[2])), y1 = Math.max(...ls.map((l) => l[1] + l[3]));
+      merged[i] = { ...items[0][0], text, lines: [[x0, y0, x1 - x0, y1 - y0]], path: dpath(P), split: true };
+    }
+    texts.length = 0;
+    texts.push(...merged);
   }
   for (const el of document.querySelectorAll("input,textarea")) {
     if (!visible(el) || el.value || !el.placeholder) continue;
@@ -351,7 +388,7 @@ const navs = {};                         // per size: where it went (a page may 
 try {
   // the three sizes in parallel, one browser context each
   await Promise.all(Object.entries(BPS).filter(([bp]) => !ONLY.length || ONLY.includes(bp)).map(async ([bp, [w, h]]) => {
-    const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await ctx.newPage();
     if (BLOCK_PRIVATE) await guard.route(ctx);
     const bodies = new Map(), pending = [];
