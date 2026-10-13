@@ -709,6 +709,24 @@ def unify_fonts(meas: dict[str, dict], pngs: dict[str, bytes]) -> dict:
                 l["typo"] = infer(l["text"], l["box"], img) if fam == DEFAULT else infer(l["text"], l["box"], img, family=fam)
                 l["font"] = fam
         m["fonts"] = fonts
+    # display lines share one face: a page rarely mixes two headline faces, and look-alike stand-ins for one face
+    # we cannot ship (hafsausmani.com's Moche) split it into two (Roboto for HAFSA, Manrope for USMANI)
+    from .typography import CATALOG
+    disp = [l for m in meas.values() for l in m["text_lines"]
+            if l.get("font") and l["font"] != fonts["body"] and not (CATALOG.get(l["font"]) or {}).get("mono")]
+    faces = {l["font"] for l in disp}
+    if len(faces) > 1:
+        tot = {f: sum(((l.get("font_vote") or {}).get("scores") or {}).get(f, 0.0) for l in disp) for f in faces}
+        face = max(tot, key=tot.get)
+        for bp, m in meas.items():
+            img = None
+            for l in m["text_lines"]:
+                if l in disp and l["font"] != face:
+                    if img is None:
+                        img = np.asarray(Image.open(io.BytesIO(pngs[bp])).convert("RGB"), dtype=np.float32)
+                    l["typo"] = infer(l["text"], l["box"], img, family=face)
+                    l["font"] = face
+        fonts["kept"] = [f for f in fonts["kept"] if f not in faces or f == face]
     return fonts
 
 

@@ -1,5 +1,7 @@
 // Builds the iframe document that renders a generated App.jsx in the browser.
-// React 18 UMD + Babel standalone from cdnjs, Tailwind Play CDN, Inter from Google Fonts.
+// React 18 UMD + Babel standalone from cdnjs, Tailwind Play CDN, fonts from Google Fonts (Inter + the families the code names).
+
+import { googleFontsUrl } from './fonts';
 
 export const PREVIEW_CDN = {
   react: 'https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js',
@@ -66,7 +68,7 @@ export function buildPreviewDoc(source: string, opts: { assetUrl?: (rel: string)
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="${PREVIEW_CDN.fonts}" />
+<link rel="stylesheet" href="${googleFontsUrl(source)}" />
 <script src="${PREVIEW_CDN.tailwind}"></script>
 <script>tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'], mono: ['IBM Plex Mono', 'ui-monospace', 'monospace'] } } } };</script>
 <script src="${PREVIEW_CDN.react}"></script>

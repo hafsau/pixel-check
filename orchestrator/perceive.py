@@ -304,6 +304,9 @@ def merge(vlm: dict, meas: dict) -> dict:
         alnum = sum(ch.isalnum() for ch in tx)
         if alnum < 2 or alnum < 0.7 * len(tx.replace(" ", "")) or l["box"][3] < 7:
             continue
+        wl = [len(w) for w in tx.split()]
+        if float(l.get("conf", 100)) < 80 or sum(wl) / len(wl) < 2.5:     # cut-off letter tops read as "A AK"
+            continue
         if any(b.get("media") and _inside_box(l["box"], b["box"]) for b in meas.get("blocks", [])):
             continue
         item = {"text": tx, "role": "other", "size_px": None, "weight": None, "box": list(l["box"]), "color": l["color"],
@@ -427,6 +430,38 @@ def fold_headings(frame: dict, loose: list | None = None) -> dict:
         if not pending:
             break
     return frame
+
+
+def clipped_from_frames(breakpoints: dict) -> dict:
+    """A headline cut by the fold takes the text the other frames show right after the same predecessor, when they
+    disagree with it and this frame has no such text yet (Oct 12, hafsausmani.com desktop: the vision model listed
+    "UI/UX AND UI DESIGN", not visible there; mobile shows HAFSA → USMANI). The frames show the same copy in order."""
+    order = {bp: [t["text"] for t in sorted([t for t in f["texts"] if t.get("box")], key=lambda t: t["box"][1])]
+             for bp, f in breakpoints.items()}
+    for bp, f in breakpoints.items():
+        here = {t["text"] for t in f["texts"]}
+        for t in f["texts"]:
+            if not t.get("clipped"):
+                continue
+            seq = order[bp]
+            prev = seq[seq.index(t["text"]) - 1] if t["text"] in seq and seq.index(t["text"]) > 0 else None
+            follows = [o_seq[o_seq.index(prev) + 1] for o, o_seq in order.items()
+                       if o != bp and prev in o_seq and o_seq.index(prev) + 1 < len(o_seq)]
+            nxt = next((x for x in follows if x != t["text"] and x not in here), None)
+            if t["text"] in follows:         # another frame agrees on the order: keep it
+                nxt = None
+            if nxt:
+                t["text"] = nxt
+            # its face: the same text measured whole in another frame (a clipped headline's glyph tops cannot say)
+            same = next((s for o, of in breakpoints.items() if o != bp for s in of["texts"]
+                         if s["text"] == t["text"] and s.get("measured") and not s.get("clipped")), None)
+            if same:
+                for k in ("font", "weight"):
+                    if same.get(k):
+                        t[k] = same[k]
+            if nxt or same:
+                t["size_px"] = _clip_size(f, t)
+    return breakpoints
 
 
 def cross_frame_spelling(breakpoints: dict) -> dict:
@@ -553,7 +588,8 @@ def perceive(client: TFClient, frames: dict[str, bytes], cache=_DEFAULT, hedge_a
     for bp in frames:   # a frame the vision model couldn't read still gets a spec (OCR-only, flagged)
         if vlm[bp] is None:
             vlm[bp] = ocr_fallback(meas[bp])
-    return {"breakpoints": cross_frame_spelling({bp: merge(vlm[bp], meas[bp]) for bp in frames}), "raw_vlm": vlm}
+    merged = clipped_from_frames({bp: merge(vlm[bp], meas[bp]) for bp in frames})
+    return {"breakpoints": cross_frame_spelling(merged), "raw_vlm": vlm}
 
 
 def spec_for_prompt(spec: dict) -> str:

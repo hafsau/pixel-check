@@ -138,3 +138,10 @@ def test_a_failing_price_list_still_records_the_cost(tmp_path, monkeypatch):
         raise httpx.ConnectError("catalogue down")
     monkeypatch.setattr(tf_client, "prices", boom)
     assert tf_client._price("nvidia/x") == config.FALLBACK_PRICE
+
+
+def test_owned_sites_are_captured_with_their_own_fonts():
+    import inspect
+    from orchestrator import api
+    src = inspect.getsource(api.default_capture)
+    assert '" --real --assets --own-fonts" if owned' in src

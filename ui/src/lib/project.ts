@@ -1,7 +1,7 @@
 // A runnable Vite + React + Tailwind project around one generated App.jsx (zipped in the browser, lib/zip.ts).
 // The Tailwind setup mirrors how the sandbox renderer built and scored the code (sandbox/render.mjs): the same
 // content scope, fontFamily sans = Inter, mono = IBM Plex Mono, nothing else; fonts as in the in-app preview.
-import { PREVIEW_CDN } from './previewDoc';
+import { fontFamiliesIn, googleFontsUrl } from './fonts';
 import { fmtScore } from './score';
 import { ASSET_RE } from './owned';
 import type { ZipEntry } from './zip';
@@ -95,7 +95,8 @@ export function projectFiles(code: string, meta: ProjectMeta, images: ImagesMode
     '## Notes',
     '',
     IMAGES_NOTE[images],
-    '- Fonts are Inter and IBM Plex Mono from Google Fonts: the fonts the code was verified with.',
+    `- Fonts from Google Fonts — the ones the code was verified with: ${['Inter', 'IBM Plex Mono', ...fontFamiliesIn(code)].join(', ')}` +
+      ' (open licences, SIL OFL).',
     '- `tailwind.config.js` matches the PixelCheck sandbox renderer (same content scope and font families), so the',
     '  page builds the same way it was scored. Small differences in font rasterisation between browsers are normal.',
     '',
@@ -122,7 +123,7 @@ export function projectFiles(code: string, meta: ProjectMeta, images: ImagesMode
         `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
         `    <title>${esc(meta.title)}</title>\n` +
         `    <link rel="preconnect" href="https://fonts.googleapis.com" />\n    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />\n` +
-        `    <link rel="stylesheet" href="${PREVIEW_CDN.fonts}" />\n  </head>\n  <body>\n    <div id="root"></div>\n` +
+        `    <link rel="stylesheet" href="${googleFontsUrl(code)}" />\n  </head>\n  <body>\n    <div id="root"></div>\n` +
         `    <script type="module" src="/src/main.jsx"></script>\n  </body>\n</html>\n`,
     },
     {

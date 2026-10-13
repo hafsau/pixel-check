@@ -51,11 +51,14 @@ const face = (family, pkg, w) =>
 const FONT_CSS = [400, 500, 600, 700].map((w) => face("Inter", "inter", w)).join("") +
   [400, 500].map((w) => face("IBM Plex Mono", "ibm-plex-mono", w)).join("");
 
-const NORMALISE_CSS = `${FONT_CSS}
-*,*::before,*::after{font-family:'Inter',sans-serif!important;animation-duration:0s!important;animation-delay:0s!important;animation-iteration-count:1!important;
+// --own-fonts (owned sites, Oct 12): the page keeps its own fonts — PixelCheck rebuilds it in the same families
+// (catalogue) instead of against an Inter-forced copy. Everything else is normalised the same way.
+const OWN_FONTS = process.argv.includes("--own-fonts");
+const NORMALISE_CSS = `${OWN_FONTS ? "" : FONT_CSS}
+*,*::before,*::after{${OWN_FONTS ? "" : "font-family:'Inter',sans-serif!important;"}animation-duration:0s!important;animation-delay:0s!important;animation-iteration-count:1!important;
   transition:none!important;caret-color:transparent!important;background-image:none!important;
   -webkit-font-smoothing:antialiased!important}
-code,pre,kbd,samp,code *,pre *{font-family:'IBM Plex Mono',monospace!important}
+${OWN_FONTS ? "" : "code,pre,kbd,samp,code *,pre *{font-family:'IBM Plex Mono',monospace!important}"}
 ::-webkit-scrollbar{display:none!important} html{scrollbar-width:none!important}`;
 
 // Replace media with solid blocks of the same box so the target is reproducible without images.

@@ -716,7 +716,7 @@ def default_capture(url: str, run_dir: Path, emit, owned: bool = False) -> tuple
     from .sandbox import Sandbox
     emit("capture")
     cmd = (f"cd /opt/pc && timeout 150 node /opt/pc/capture.mjs page {shlex.quote(url)} --out /work/cap --fonts /opt/pc/fonts "
-           f"--wait 2000 --block-private" + (" --real --assets" if owned else ""))
+           f"--wait 2000 --block-private" + (" --real --assets --own-fonts" if owned else ""))
     sb = Sandbox()
     r = sb.run(cmd, files=capture_files(), timeout_s=300, networking=True)
     if r.exit_code != 0 or not r.result_image:

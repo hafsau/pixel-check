@@ -223,3 +223,32 @@ def test_oracle_dump_merges_split_letter_words(tmp_path):
     name = next(t for t in o["texts"] if t["text"] == "NAME")
     x0 = min(l[0] for l in name["lines"]); x1 = max(l[0] + l[2] for l in name["lines"])
     assert x1 - x0 > 120 and len(name["lines"]) == 1
+
+
+def _mono_page(tmp_path):
+    import base64
+    font = base64.b64encode((ROOT / "sandbox" / "fonts" / "jetbrains-mono-latin-400-normal.woff2").read_bytes()).decode()
+    html = ("<!doctype html><html><head><style>@font-face{font-family:'JB';src:url(data:font/woff2;base64," + font +
+            ") format('woff2')}body{margin:0;font-family:'JB',monospace;font-size:20px}</style></head><body>"
+            "<p id=a>iiiiiiiiii</p><p id=b>MMMMMMMMMM</p></body></html>")
+    p = tmp_path / "mono.html"
+    p.write_text(html)
+    return p.as_uri()
+
+
+def _widths(d):
+    t = {x["text"]: x["box"][2] for x in json.loads((d / "mobile.text.json").read_text())}
+    return t["iiiiiiiiii"], t["MMMMMMMMMM"]
+
+
+def test_owned_sites_are_captured_with_their_own_fonts(tmp_path):
+    """Oct 12 (accurate fonts): an owned site is rebuilt against the page as it looks — its own fonts — not an
+    Inter-forced copy. A monospace page: with --own-fonts its 'i' line and 'M' line are equally wide."""
+    url = _mono_page(tmp_path)
+    r, _ = cap(url, tmp_path / "own", "--bps", "mobile", "--wait", "300", "--own-fonts")
+    assert r.returncode == 0, r.stderr[-400:]
+    wi, wm = _widths(tmp_path / "own" / "fx")
+    assert abs(wi - wm) <= 3, (wi, wm)
+    r, _ = cap(url, tmp_path / "norm", "--bps", "mobile", "--wait", "300")
+    wi, wm = _widths(tmp_path / "norm" / "fx")
+    assert wm > 2 * wi, (wi, wm)                      # forced Inter: proportional widths
