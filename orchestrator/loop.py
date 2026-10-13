@@ -125,7 +125,7 @@ def run_loop(targets: dict[str, bytes], spec: dict, target_texts: dict | None, *
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     trace = Trace(out_root / run_id)
     client = TFClient(run_id=run_id, run_budget_usd=cfg.run_budget_usd, trace=trace)
-    sb = Sandbox()
+    sb = Sandbox(meter=client)                    # sandbox time counts in the run's budget, not only the global cap
     trace({"kind": "run_start", "run": run_id, "cfg": cfg.__dict__, "models": {
         "coder": config.MODEL_CODER, "critic": config.MODEL_CRITIC, "vision": config.MODEL_VISION}})
     (trace.dir / "spec.json").write_text(json.dumps(spec, indent=1))

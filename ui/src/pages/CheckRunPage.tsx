@@ -123,6 +123,104 @@ function CheckResultLoader({ id, status }: { id: string; status: LiveStatus | nu
 }
 
 export function CheckResult({ id, check }: { id: string; check: CheckBundle }) {
+  if (check.report.mode === 'audit') return <AuditResult id={id} check={check} />;
+  return <DesignCheckResult id={id} check={check} />;
+}
+
+/** No design frames (Oct 13): the build measured on its own — no score, what broke, what a phone loses. */
+function AuditResult({ id, check }: { id: string; check: CheckBundle }) {
+  const { report } = check;
+  const base = useMemo(() => liveFilesBase(apiBase(), id), [id]);
+  const asset = (rel: string | undefined) => (rel ? resolveAsset(base, rel) : null);
+  const cells = useMemo(() => checkCells(report), [report]);
+  const fails = report.fluidity.fails.length;
+  const lost = (['mobile', 'tablet'] as LiveBp[]).filter((b) => (report.vanished[b] ?? []).length);
+  return (
+    <div className="page pt-6">
+      <BackLink />
+      <p className="eyebrow mt-3">Build audit · no designs</p>
+      <h1 className="display mt-1 break-words text-2xl sm:text-3xl">{title(check.source)}</h1>
+      {check.source && 'url' in check.source && <p className="mt-1 break-all font-mono text-[12px] text-ink-muted">{check.source.url}</p>}
+      <p className="mt-3 max-w-2xl text-sm text-ink-muted">
+        Measured on its own: there is no design to compare with, so there is no match score. Add your frames for a full check.
+      </p>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2 lg:items-start">
+        <section aria-labelledby="audit-widths" className="card card-pad">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="audit-widths" className="eyebrow">
+              Every width · {fails ? `${fails} break${fails === 1 ? 's' : ''}` : 'no breaks'}
+            </h2>
+            <StripLegend designSizes={false} />
+          </div>
+          <WidthStrip className="mt-6" cells={cells} showSummary={false} />
+        </section>
+
+        <section aria-labelledby="audit-warnings" className="card card-pad">
+          <h2 id="audit-warnings" className="eyebrow">
+            Warnings
+          </h2>
+          {report.warnings.length ? (
+            <ul className="mt-3 flex flex-col gap-2 text-sm">
+              {report.warnings.map((w) => (
+                <li key={w} className="flex items-start gap-1.5">
+                  <IconAlert /> <span>{w}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-ink-muted">None.</p>
+          )}
+        </section>
+
+        <section aria-labelledby="audit-lost" className="card card-pad lg:col-span-2">
+          <h2 id="audit-lost" className="eyebrow">
+            Lost on smaller screens
+          </h2>
+          {lost.length ? (
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              {lost.map((b) => (
+                <div key={b}>
+                  <p className="text-sm font-semibold">{cap(b)} hides {report.vanished[b]!.length}</p>
+                  <ul className="mt-1 flex flex-wrap gap-1.5">
+                    {report.vanished[b]!.map((t) => (
+                      <li key={t} className="chip text-xs">
+                        {t}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-ink-muted">Nothing: every text shown on a larger screen is also shown on smaller ones.</p>
+          )}
+          <p className="mt-3 text-xs text-ink-muted">Text visible on a larger size but not on this one — it may sit behind a menu; check that it is meant to.</p>
+        </section>
+
+        <section aria-labelledby="audit-shots" className="card card-pad lg:col-span-2">
+          <h2 id="audit-shots" className="eyebrow">
+            As captured
+          </h2>
+          <div className="mt-3 grid grid-cols-3 items-start gap-3">
+            {LIVE_BPS.map((b) => {
+              const src = asset(check.build[b]);
+              return (
+                <figure key={b} className="min-w-0">
+                  {src && <img src={src} alt={`${cap(b)} capture`} className="w-full rounded-md border border-line" />}
+                  <figcaption className="mt-1 text-xs text-ink-muted">{cap(b)}</figcaption>
+                </figure>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+      <p className="mt-6 text-xs text-ink-muted">Captured and measured in a Token Factory Sandbox. Your page was not changed.</p>
+    </div>
+  );
+}
+
+function DesignCheckResult({ id, check }: { id: string; check: CheckBundle }) {
   const { report } = check;
   const base = useMemo(() => liveFilesBase(apiBase(), id), [id]);
   const asset = (rel: string | undefined) => (rel ? resolveAsset(base, rel) : null);
@@ -213,7 +311,7 @@ export function CheckResult({ id, check }: { id: string; check: CheckBundle }) {
   );
 }
 
-function StripLegend() {
+function StripLegend({ designSizes = true }: { designSizes?: boolean }) {
   return (
     <p className="flex items-center gap-3 text-[11px] text-ink-muted" aria-hidden="true">
       <span className="inline-flex items-center gap-1">
@@ -222,9 +320,11 @@ function StripLegend() {
       <span className="inline-flex items-center gap-1">
         <span className="pc-hatch inline-block h-2.5 w-2.5 rounded-[2px] bg-bad" /> fails
       </span>
-      <span className="inline-flex items-center gap-1">
-        <span className="pixel rounded-[2px] border border-line px-0.5 text-[10px] leading-none">90</span> design size
-      </span>
+      {designSizes && (
+        <span className="inline-flex items-center gap-1">
+          <span className="pixel rounded-[2px] border border-line px-0.5 text-[10px] leading-none">90</span> design size
+        </span>
+      )}
     </p>
   );
 }

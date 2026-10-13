@@ -93,6 +93,8 @@ export interface LiveStatus {
   created?: number;
   source?: { url?: string; code?: boolean } | null;
   kind?: string;
+  /** a check without design frames: measured on its own */
+  audit?: boolean;
 }
 
 export interface PollState {

@@ -41,12 +41,15 @@ export interface CheckDraft {
   passcode: string;
   /** "Also repair it" (App.jsx only). */
   repair?: boolean;
+  /** No design frames: the URL is measured on its own (width breaks, warnings, what vanishes) — no match score. */
+  audit?: boolean;
 }
 
 /** What still stops the form from being sent, in words ("Still needed: …"). Only the active source counts. */
 export function checkMissing(d: CheckDraft): string[] {
-  const out = LIVE_BPS.filter((bp) => d.frames[bp] !== 'ok').map((bp) => `a valid ${bp} frame`);
-  if (d.source === 'url') {
+  const out = d.audit ? [] : LIVE_BPS.filter((bp) => d.frames[bp] !== 'ok').map((bp) => `a valid ${bp} frame`);
+  if (d.audit && d.source !== 'url') out.push('a build address (an audit needs a URL)');
+  else if (d.source === 'url') {
     if (validatePageUrl(d.url)) out.push('a valid build address');
   } else if (!d.code.trim()) out.push('your App.jsx');
   else if (d.code.length > MAX_CODE_CHARS) out.push(`an App.jsx under ${fmtN(MAX_CODE_CHARS)} characters`);
@@ -69,9 +72,9 @@ export function wantsRepair(source: CheckSource, repair: boolean | undefined): b
   return source === 'code' && !!repair;
 }
 
-export function checkFormData(frames: Record<LiveBp, Blob>, d: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode' | 'repair'>): FormData {
+export function checkFormData(frames: Record<LiveBp, Blob> | null, d: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode' | 'repair' | 'audit'>): FormData {
   const fd = new FormData();
-  LIVE_BPS.forEach((bp) => fd.append(bp, frames[bp], `${bp}.png`));
+  if (!d.audit && frames) LIVE_BPS.forEach((bp) => fd.append(bp, frames[bp], `${bp}.png`));   // an audit sends none
   Object.entries(checkFields(d.source, d.url, d.code)).forEach(([k, v]) => fd.append(k, v));
   fd.append('owns', d.owns ? 'true' : 'false');
   fd.append('passcode', d.passcode);
@@ -124,6 +127,11 @@ export interface CheckWidthRow {
   ok: boolean | null;
 }
 export interface CheckReport {
+  /** 'audit': no design frames — measured on its own, no score */
+  mode: 'check' | 'audit';
+  warnings: string[];
+  /** text visible on a larger size but not on this one (audit) */
+  vanished: Partial<Record<LiveBp, string[]>>;
   match: number | null;
   mean: number | null;
   worst: LiveBp | null;
@@ -212,7 +220,13 @@ function parseReport(x: unknown, fallbackPerBp?: Partial<Record<LiveBp, number |
   const fl = obj(r.fluidity);
   const widths: Record<string, CheckWidthRow> = {};
   for (const [k, v] of Object.entries(obj(fl.widths))) if (isObj(v)) widths[k] = parseRow(v);
+  const vanishedRaw = obj(r.vanished);
+  const vanished: Partial<Record<LiveBp, string[]>> = {};
+  for (const bp of LIVE_BPS) if (Array.isArray(vanishedRaw[bp])) vanished[bp] = arr(vanishedRaw[bp]).filter((t): t is string => typeof t === 'string');
   return {
+    mode: r.mode === 'audit' ? 'audit' : 'check',
+    warnings: arr(r.warnings).filter((w): w is string => typeof w === 'string'),
+    vanished,
     match: num(r.match) ?? (lowest ? perBp[lowest] : null),
     mean: num(r.mean),
     worst: isBp(r.worst) ? r.worst : lowest,
@@ -387,7 +401,10 @@ const CHECK_REST = [
 const CHECK_REPAIR = { id: 'repair', label: `Repairing (≤ ${REPAIR_ROUNDS} rounds)` };
 
 /** The check's stages; App.jsx checks add "repair" when it was asked for or the server already reports it. */
-export function checkStages(st: Pick<LiveStatus, 'state' | 'stages' | 'source'>, opts: { repair?: boolean } = {}) {
+const AUDIT_STAGE = { id: 'audit', label: 'Measuring every width (no designs)' };
+
+export function checkStages(st: Pick<LiveStatus, 'state' | 'stages' | 'source'> & { audit?: boolean }, opts: { repair?: boolean } = {}) {
+  if (st.audit) return progressOf([CHECK_CAPTURE, AUDIT_STAGE], st);
   const isUrl = !!st.source?.url;
   const repair = !isUrl && (!!opts.repair || st.stages.some((s) => s.stage === 'repair'));
   return progressOf([isUrl ? CHECK_CAPTURE : CHECK_RENDER, ...CHECK_REST, ...(repair ? [CHECK_REPAIR] : [])], st);

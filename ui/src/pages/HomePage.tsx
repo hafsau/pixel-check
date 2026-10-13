@@ -8,10 +8,10 @@ export function HomePage() {
   return (
     <div className="page">
       <HeroSweep />
-      <HowItWorks />
-      <RunList />
-      <LiveRunPanel />
       <CheckTeaser />
+      <HowItWorks />
+      <LiveRunPanel />
+      <RunList />
     </div>
   );
 }

@@ -58,5 +58,29 @@ def main():
     json.dump(res, sys.stdout)
 
 
+def audit():
+    """No design to compare with (Oct 13): the capture measured on its own — width breaks, warnings, and the text a
+    smaller size loses (visible on a larger size, not on this one: a menu may hold it — the UI says so)."""
+    checks_path = OUT / "checks.json"
+    if not checks_path.exists():
+        json.dump({"mode": "audit", "reason": "the page could not be captured"}, sys.stdout)
+        return
+    checks = json.loads(checks_path.read_text())
+    norm = lambda t: " ".join((t or "").split())
+    shown = {}
+    for bp in ("mobile", "tablet", "desktop"):
+        p = OUT / f"{bp}.dom.json"
+        shown[bp] = {norm(e.get("text")) for e in (json.loads(p.read_text()) if p.exists() else [])
+                     if e.get("inked") and len(norm(e.get("text"))) >= 2}
+    larger = {"mobile": ("tablet", "desktop"), "tablet": ("desktop",)}
+    vanished = {bp: sorted(set().union(*(shown[b] for b in big)) - shown[bp]) for bp, big in larger.items()}
+    json.dump({"mode": "audit", "between": checks.get("between", {}), "fluidity": fluidity.report(checks),
+               "breakpoints": {bp: {k: v for k, v in (checks.get("breakpoints") or {}).get(bp, {}).items()
+                                    if k in ("width", "height", "overflow_px", "text_overlaps", "fonts_ok")}
+                               for bp in ("mobile", "tablet", "desktop")},
+               "warnings": checks.get("warnings", [])[:10], "runtime_errors": checks.get("runtime_errors", [])[:10],
+               "vanished": vanished}, sys.stdout)
+
+
 if __name__ == "__main__":
-    check() if "--check" in sys.argv else main()
+    check() if "--check" in sys.argv else audit() if "--audit" in sys.argv else main()

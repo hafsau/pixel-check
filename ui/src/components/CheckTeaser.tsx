@@ -11,11 +11,13 @@ export function CheckTeaser() {
         className="card card-pad group flex flex-col gap-4 transition-shadow hover:shadow-lift sm:flex-row sm:items-center sm:justify-between"
       >
         <div className="min-w-0">
-          <p className="eyebrow">Check mode</p>
+          <p className="eyebrow">Check a build</p>
           <h2 id="check-teaser-title" className="h2 mt-1">
-            Already built it? Check a build
+            Does the build match the design — at every size?
           </h2>
-          <p className="mt-1 text-sm text-ink-muted">Your URL or App.jsx against your frames, 360–1600 px.</p>
+          <p className="mt-1 text-sm text-ink-muted">
+            A deployed URL or an App.jsx — from v0, Lovable, a teammate or you — measured against your frames at their sizes and 360–1600 px.
+          </p>
         </div>
         <div className="flex items-end gap-4">
           <div className="flex w-48 items-end gap-[3px]" aria-hidden="true">

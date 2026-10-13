@@ -65,12 +65,32 @@ NESTED = (b'<!doctype html><html><head><title>Nested</title><style>body{margin:0
           b'@media (min-width: 1071px){@media (max-width: 1072px){h1{color:red}}}</style></head>'
           b'<body><h1>Hi there</h1></body></html>')
 
+# Oct 13 (Hafsa's own apps): a full-page background picture with real text on top is a design, not a screenshot
+# build; a platform's floating badge ("Edit with Lovable") overlapping content is the platform, not the layout
+BGHERO = (b'<!doctype html><html><head><title>Hero</title><style>body{margin:0}.hero{min-height:100vh;'
+          b'background:#203040 url("data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7") '
+          b'center/cover;color:#fff;padding:40px}</style></head><body><div class="hero"><h1>Stories that change beliefs</h1>'
+          b'<p>Type the stereotype your child has expressed.</p><p>We create a personalised story.</p>'
+          b'<a href="#">Try it now</a></div></body></html>')
+BADGE = (b'<!doctype html><html><head><title>Badge</title><style>body{margin:0;font:16px sans-serif}'
+         b'main{padding:20px}.out{position:fixed;right:8px;bottom:8px;background:#111;color:#fff;padding:6px 10px;'
+         b'font-size:13px}.result{position:fixed;right:8px;bottom:10px;font-size:14px}</style></head><body>'
+         b'<main><h1>Headshots</h1><p>Upload a photo.</p></main><div class="result">Your headshot will appear here</div>'
+         b'<a class="out" href="https://lovable.dev">Edit with Lovable</a></body></html>')
+
+SHADOWBADGE = (b'<!doctype html><html><head><title>Pill</title><style>body{margin:0;font:16px sans-serif}main{padding:20px}'
+               b'.go{position:fixed;left:20px;bottom:16px;width:240px;padding:12px;background:#7c3aed;color:#fff}</style></head>'
+               b'<body><main><h1>Interview questions</h1></main><button class="go">Generate Questions</button>'
+               b'<div id="replit-pill-host"></div><script>const h=document.getElementById("replit-pill-host").attachShadow('
+               b'{mode:"closed"});h.innerHTML=\'<a href="https://replit.com" style="position:fixed;right:24px;bottom:20px;'
+               b'padding:8px 14px;background:#222;color:#fff;font:13px sans-serif">Made with Replit</a>\';</script></body></html>')
+
 
 class _H(http.server.BaseHTTPRequestHandler):
     routes = {"/fluid": FLUID, "/wide": WIDE, "/login": LOGIN, "/hidden": HIDDEN, "/split": SPLIT, "/fade": FADE,
               "/clip": CLIP, "/shot": SHOT, "/exact": EXACT,
               "/marquee": MARQUEE, "/carousel": CAROUSEL, "/bleed": BLEED,
-              "/nested": NESTED}
+              "/nested": NESTED, "/bghero": BGHERO, "/badge": BADGE, "/shadowbadge": SHADOWBADGE}
 
     def do_GET(self):
         body = self.routes.get(self.path)
@@ -290,3 +310,28 @@ def test_a_nested_media_window_at_a_runs_own_width_is_flagged(tmp_path, server):
     assert r.returncode == 0, r.stderr[-400:]
     w = json.loads((tmp_path / "out" / "checks.json").read_text())["warnings"]
     assert any("exactly 1071" in x for x in w), w
+
+
+def test_a_background_picture_with_real_text_on_top_is_not_called_a_screenshot(tmp_path, server):
+    r = run(f"{server}/bghero", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    w = json.loads((tmp_path / "checks.json").read_text())["warnings"]
+    assert not any("picture covers" in x for x in w), w
+
+
+def test_a_platform_badge_is_reported_apart_from_the_layout(tmp_path, server):
+    r = run(f"{server}/badge", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    checks = json.loads((tmp_path / "checks.json").read_text())
+    assert all(v["text_overlaps"] == 0 for v in checks["between"].values()), checks["between"]
+    assert all(v["text_overlaps"] == 0 for v in checks["breakpoints"].values())
+    assert any("Edit with Lovable" in x and "badge" in x and "Your headshot" in x for x in checks["warnings"]), checks["warnings"]
+
+
+def test_a_badge_inside_a_closed_shadow_root_is_found_by_its_host(tmp_path, server):
+    """interview-sage (Replit): "Made with Replit" lives in a closed shadow root on #replit-pill-host and sits over the
+    Generate button on phones — no text or link matching can see it."""
+    r = run(f"{server}/shadowbadge", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    w = json.loads((tmp_path / "checks.json").read_text())["warnings"]
+    assert any("Replit" in x and "Generate Questions" in x for x in w), w

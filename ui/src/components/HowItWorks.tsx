@@ -2,9 +2,9 @@ import type { ReactNode } from 'react';
 
 /** Three visual steps (≤ 8 words each); the scope and honesty notes sit in a compact footnote. */
 const STEPS: { name: string; line: string; art: ReactNode }[] = [
-  { name: 'Capture', line: 'Three frames — or a page you own.', art: <CaptureArt /> },
-  { name: 'Compile', line: 'One fluid React + Tailwind codebase.', art: <CompileArt /> },
-  { name: 'Prove', line: 'Rendered, measured and scored at every width.', art: <ProveArt /> },
+  { name: 'Spec', line: 'Your design frames, as you export them.', art: <CaptureArt /> },
+  { name: 'Measure', line: 'Any build, every size, in a sandbox.', art: <CompileArt /> },
+  { name: 'Prove', line: 'Scores, width strip, what broke, why.', art: <ProveArt /> },
 ];
 
 export function HowItWorks() {
@@ -30,7 +30,9 @@ export function HowItWorks() {
         ))}
       </ol>
       <p className="mt-4 max-w-4xl text-xs leading-relaxed text-ink-muted">
-        <span className="font-semibold text-ink">Notes.</span> Every model call runs on Nebius Token Factory; NVIDIA Nemotron plans responsive intent, names
+        <span className="font-semibold text-ink">Notes.</span> The build never grades itself: scoring runs in a separate disposable Token Factory
+        Sandbox, the only place the design frames enter. PixelCheck can also rebuild a screen from its frames — the reference that passes the same
+        checks. Every model call runs on Nebius Token Factory; NVIDIA Nemotron plans responsive intent, names
         page regions and makes the experimental repair agent's edits. Code-writing models get text measurements, never image bytes; every render, test and score runs in a Token Factory
         Sandbox. Scope: static responsive layout with working basic controls; designed states only from a state frame. On some tasks a deterministic
         baseline matches the model — the runs say so.

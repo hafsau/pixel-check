@@ -48,7 +48,13 @@ function warningsScan([name, widths]) {
     const a = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
     cover = Math.max(cover, a / (vw * vh));
   }
-  if (cover > 0.3) out.push(`${name}: a picture covers ${Math.round(cover * 100)} % of the screen — the build may be a screenshot`);
+  // a screenshot build has a picture and (almost) no real text; a background picture under real text is a design
+  const texts = [...document.querySelectorAll("body *")].filter((el) => {
+    if (el.closest("[data-pc-badge]") || ![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) return false;
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && r.top < vh && r.bottom > 0 && cs.visibility !== "hidden" && Number(cs.opacity) > 0;
+  }).length;
+  if (cover > 0.3 && texts < 3) out.push(`${name}: a picture covers ${Math.round(cover * 100)} % of the screen with almost no real text — the build may be a screenshot`);
   // a width window ≤ 2 px wide at a measured width — also built from nested @media rules (red team, Oct 12)
   const walk = (rules, mn, mx) => {
     for (const rule of rules || []) {
@@ -72,6 +78,62 @@ function warningsScan([name, widths]) {
     let rules;
     try { rules = sh.cssRules; } catch (e) { continue; }       // cross-origin sheets
     walk(rules, 0, Infinity);
+  }
+  return out;
+}
+
+// platform badges (Oct 13): a hosting / builder platform's floating badge is not the author's layout — marked, left
+// out of the overlap count, and reported apart when it covers content
+const BADGE_TEXT = /\b(edit|made|built|created|powered)\s+(with|in|on|by)\s+(lovable|replit|bolt|framer|webflow|v0|vercel|wix|squarespace|carrd|bubble|softr)\b/i;
+const BADGE_HREF = /(lovable\.dev|replit\.com|bolt\.new|framer\.com|webflow\.com|v0\.dev|wix\.com|squarespace\.com|carrd\.co|bubble\.io|softr\.io)/i;
+// badges drawn inside a closed shadow root are found by their host (Replit's "Made with Replit": #replit-pill-host)
+const BADGE_HOST = /(replit|lovable|bolt|framer|webflow|wix|softr|bubble)[-_]?(pill|badge|banner|watermark)/i;
+function markBadges([textRe, hrefRe, hostRe]) {
+  const tre = new RegExp(textRe, "i"), hre = new RegExp(hrefRe, "i"), hst = new RegExp(hostRe, "i");
+  const name = (s) => { const m = (s || "").match(/(lovable|replit|bolt|framer|webflow|v0|vercel|wix|squarespace|carrd|bubble|softr)/i);
+    return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : ""; };
+  for (const el of document.querySelectorAll("[id], [class]")) {
+    const key = `${el.id} ${typeof el.className === "string" ? el.className : ""}`;
+    if (hst.test(key)) el.setAttribute("data-pc-badge", `${name(key)} badge`);
+  }
+  const fixedOf = (el) => { for (let a = el; a && a !== document.body; a = a.parentElement) {
+    const p = getComputedStyle(a).position; if (p === "fixed" || p === "sticky") return a; } return null; };
+  for (const el of document.querySelectorAll("a, div, span, button, iframe")) {
+    const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+    const href = el.getAttribute("href") || el.getAttribute("src") || "";
+    if (!(tre.test(t) && t.length < 60) && !hre.test(href)) continue;
+    const host = fixedOf(el);
+    if (!host) continue;
+    const r = host.getBoundingClientRect();
+    if (r.width * r.height > 0.4 * innerWidth * innerHeight) continue;          // a small floating badge, not a page
+    const plat = name(href) || name(t);
+    const label = t && plat && !t.toLowerCase().includes(plat.toLowerCase()) ? `${t} ${plat}` : (t || `${plat} badge`);
+    host.setAttribute("data-pc-badge", label.slice(0, 40) || "platform badge");
+  }
+}
+function badgeCover(where) {
+  const out = [];
+  for (const b of document.querySelectorAll("[data-pc-badge]")) {
+    if (b.parentElement && b.parentElement.closest("[data-pc-badge]")) continue;    // one badge, marked twice
+    const label = b.getAttribute("data-pc-badge");
+    const what = /badge$/i.test(label) ? `the ${label}` : `the "${label}" badge`;
+    let br = b.getBoundingClientRect();
+    if (br.width * br.height < 4) {                // a shadow-root host has no box of its own: where is it on top?
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let y = 2; y < innerHeight; y += 6) for (let x = 2; x < innerWidth; x += 6) {
+        const top = document.elementFromPoint(x, y);
+        if (top && (top === b || b.contains(top))) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      }
+      if (x1 < x0) continue;
+      br = { left: x0 - 3, top: y0 - 3, right: x1 + 3, bottom: y1 + 3 };
+    }
+    for (const el of document.querySelectorAll("body *")) {
+      if (el.closest("[data-pc-badge]") || ![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+      const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      if (r.width <= 0 || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+      const ix = Math.min(r.right, br.right) - Math.max(r.left, br.left), iy = Math.min(r.bottom, br.bottom) - Math.max(r.top, br.top);
+      if (ix > 2 && iy > 2) out.push(`${where}: ${what} covers "${el.textContent.trim().slice(0, 40)}" (a platform badge, not your layout)`);
+    }
   }
   return out;
 }
@@ -107,6 +169,7 @@ async function open(w, h) {
   // fade-ins end visible (an animation frozen at its start state hid an honest page's text — council, Oct 8)
   await page.evaluate(() => { for (const a of document.getAnimations()) { try { a.finish(); } catch (e) { /* infinite */ } } });
   await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(markBadges, [BADGE_TEXT.source, BADGE_HREF.source, BADGE_HOST.source]);
   await page.addScriptTag({ content: `window.__inkInfo = ${R.inkInfo.toString()};` });
   const addr = resp ? await resp.serverAddr().catch(() => null) : null;
   if (addr) meta.ips.push(addr.ipAddress);
@@ -125,7 +188,7 @@ try {
       site_name: (document.querySelector('meta[property="og:site_name"]') || {}).content || "" })));
     const measured = [...new Set([360, 375, 390, 500, 768, 1024, 1280, 1600, ...R.BETWEEN_WIDTHS,
       ...Object.values(R.BREAKPOINTS).map(([fw]) => fw)])];
-    const warn = await page.evaluate(warningsScan, [bp, measured]);
+    const warn = [...(await page.evaluate(warningsScan, [bp, measured])), ...(await page.evaluate(badgeCover, bp))];
     const { dom, health, fontsOk, dump } = await R.captureFrame(page, out, bp);
     result.breakpoints[bp] = { width: w, height: h, elements: dom.length, fonts_ok: fontsOk, ...health };
     const texts = (dump || []).filter((e) => e.v && e.t);
@@ -137,6 +200,7 @@ try {
   for (const w of R.BETWEEN_WIDTHS) {
     const { ctx, page } = await open(w, w < 768 ? 844 : w < 1280 ? 1024 : 900);
     result.between[w] = { ...(await page.evaluate(R.layoutHealth)), ...(await page.evaluate(R.fluidity)) };
+    warnings.push(...(await page.evaluate(badgeCover, `${w} px`)));
     await ctx.close();
   }
 } finally {

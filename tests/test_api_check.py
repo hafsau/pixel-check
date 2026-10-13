@@ -162,3 +162,74 @@ def test_a_failing_repair_keeps_the_check_result(tmp_path):
     assert st["state"] == "done" and st["result"]["match"] == 64.2
     rep = c.get(st["bundle"]).json()
     assert rep["report"]["match"] == 64.2 and "could not finish" in rep["repair"]["error"] and "503" in rep["repair"]["error"]
+
+
+# audits without designs (Oct 13): a URL and no frames
+def audit_checker(kind, build, frames, run_dir, emit, verify):
+    assert kind == "audit" and frames == {}
+    verify({"sensitive": {"password": 0}, "navigation": {"final_url": build, "final_urls": [build], "hops": [build],
+                                                        "server_ip": "93.184.216.34"}, "page": {"title": "App"}})
+    return {"report": {"mode": "audit", "fluidity": {"pass": True, "fails": []}, "vanished": {"mobile": ["Dashboard"]},
+                       "warnings": []},
+            "build": {bp: png(*wh, (200, 200, 200)) for bp, wh in SIZES.items()}, "meta": {}, "design_texts": {}}
+
+
+def test_a_url_without_frames_is_audited(tmp_path):
+    c = client(tmp_path, checker=audit_checker)
+    r = c.post("/api/checks", data={"url": "https://example.com/app", "owns": "true", "passcode": "letmein"})
+    assert r.status_code == 202, r.text
+    st = wait_done(c, r.json()["id"])
+    assert st["state"] == "done" and st["audit"] is True and st["result"]["match"] is None
+    bundle = c.get(st["bundle"]).json()
+    assert bundle["report"]["mode"] == "audit" and bundle["report"]["vanished"]["mobile"] == ["Dashboard"]
+    assert bundle["design"] == {}
+
+
+def test_an_audit_needs_a_url_all_or_no_frames_and_no_repair(tmp_path):
+    c = client(tmp_path, checker=audit_checker)
+    base = {"owns": "true", "passcode": "letmein"}
+    r = c.post("/api/checks", data={**base, "code": "export default function App(){return null}"})
+    assert r.status_code == 422 and "address" in r.text
+    one = {"mobile": ("f.png", png(390, 844), "image/png")}
+    r = c.post("/api/checks", files=one, data={**base, "url": "https://example.com/app"})
+    assert r.status_code == 422 and "all three frames" in r.text
+    r = c.post("/api/checks", data={**base, "url": "https://example.com/app", "repair": "true"})
+    assert r.status_code == 422
+
+
+class _Stop(Exception):
+    pass
+
+
+def _meter_spy(monkeypatch):
+    """Sandbox() replaced by a spy that records its meter, then stops the run."""
+    from orchestrator import sandbox
+    seen = {}
+
+    def spy(*a, meter=None, **k):
+        seen["meter"] = meter
+        raise _Stop
+    monkeypatch.setattr(sandbox, "Sandbox", spy)
+    return seen
+
+
+def test_check_and_audit_sandbox_cost_counts_in_the_run_budget(tmp_path, monkeypatch):
+    from orchestrator import api, tf_client
+    for kind in ("audit", "url", "code"):
+        seen = _meter_spy(monkeypatch)
+        try:
+            api.default_checker(kind, "https://example.com/", {}, tmp_path / "r1", lambda *a, **k: None, lambda m: None)
+        except _Stop:
+            pass
+        assert isinstance(seen.get("meter"), tf_client.TFClient), kind
+
+
+def test_repair_sandbox_cost_counts_in_its_three_run_budget(tmp_path, monkeypatch):
+    from orchestrator import api, config, tf_client
+    seen = _meter_spy(monkeypatch)
+    try:
+        api.default_repairer("export default function App(){return null}", {}, tmp_path / "r1", lambda *a, **k: None)
+    except _Stop:
+        pass
+    assert isinstance(seen.get("meter"), tf_client.TFClient)
+    assert seen["meter"].run_budget == 3 * config.LIVE_RUN_BUDGET_USD    # a repair weighs 3 runs

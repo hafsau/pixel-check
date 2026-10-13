@@ -62,10 +62,16 @@ export function HeroSweep() {
         <span className="block">Designed once.</span> <span className="block text-ink-muted">Verified everywhere.</span>
       </h1>
       <div className="mt-5 flex flex-col gap-5 sm:mt-6 md:flex-row md:items-end md:justify-between">
-        <p className="max-w-lg text-base text-ink-muted sm:text-lg">Three frames in, one responsive React + Tailwind codebase out — rendered, measured and scored at every width.</p>
+        <p className="max-w-lg text-base text-ink-muted sm:text-lg">
+          AI tools write UI that looks right at one size. PixelCheck takes your design as the spec and measures any build — AI-made or
+          hand-written — at every size and every width in between, in an isolated sandbox.
+        </p>
         <div className="flex shrink-0 flex-wrap gap-2.5">
-          <a href="/#live" className="btn-primary btn-lg" onClick={(e) => (e.preventDefault(), navigate('/#live'))}>
-            Try it live <IconArrowRight />
+          <Link to="/check" className="btn-primary btn-lg">
+            Check a build <IconArrowRight />
+          </Link>
+          <a href="/#live" className="btn btn-lg" onClick={(e) => (e.preventDefault(), navigate('/#live'))}>
+            Rebuild from frames
           </a>
           <Link to={seeRun} className="btn btn-lg">
             See a run

@@ -503,3 +503,34 @@ describe('parseCheck repair', () => {
     expect(c.repair?.linesKept).toBe(0.9);
   });
 });
+
+// Oct 13: audits without designs — a URL measured on its own
+describe('audit without designs', () => {
+  it('needs no frames, only a URL', () => {
+    const d = draft({ frames: { mobile: 'empty', tablet: 'empty', desktop: 'empty' }, audit: true });
+    expect(checkMissing(d)).toEqual([]);
+    expect(checkMissing({ ...d, source: 'code', code: 'export default function App(){}' })).toEqual(['a build address (an audit needs a URL)']);
+  });
+  it('sends no frames', () => {
+    const fd = checkFormData(null, { source: 'url', url: 'https://x.app', code: '', owns: true, passcode: 'p', audit: true });
+    expect(fd.has('mobile')).toBe(false);
+    expect(fd.get('url')).toBe('https://x.app');
+  });
+  it('reads an audit report: mode, warnings, what vanishes on smaller screens, no score', () => {
+    const b = parseCheck({
+      type: 'check', report: { mode: 'audit', fluidity: { pass: true, fails: [], widths: {} }, warnings: ['mobile: the Replit badge covers "Go"'],
+        vanished: { mobile: ['Dashboard', 'Question Bank'], tablet: [] } },
+    });
+    expect(b.report.mode).toBe('audit');
+    expect(b.report.match).toBeNull();
+    expect(b.report.warnings).toEqual(['mobile: the Replit badge covers "Go"']);
+    expect(b.report.vanished.mobile).toEqual(['Dashboard', 'Question Bank']);
+  });
+});
+
+describe('audit progress', () => {
+  it('lists capture and audit only — no frames to read', () => {
+    const st = { state: 'running', stages: [{ stage: 'capture', t: 1 }], source: { url: 'https://x.app' }, audit: true } as never;
+    expect(checkStages(st).map((s: { id: string }) => s.id)).toEqual(['capture', 'audit']);
+  });
+});

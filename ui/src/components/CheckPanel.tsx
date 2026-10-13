@@ -20,6 +20,7 @@ export function CheckPanel() {
   const [code, setCode] = useState('');
   const [codeTouched, setCodeTouched] = useState(false);
   const [repair, setRepair] = useState(false);
+  const [noDesigns, setNoDesigns] = useState(false);
   const [owns, setOwns] = useState(false);
   const [passcode, setPasscode] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -35,9 +36,10 @@ export function CheckPanel() {
   }, []);
 
   const statuses = Object.fromEntries(LIVE_BPS.map((bp) => [bp, frames[bp]?.status === 'ok' ? 'ok' : frames[bp]?.status === 'error' ? 'error' : 'empty'])) as Record<LiveBp, 'ok' | 'error' | 'empty'>;
-  const draft = { frames: statuses, source, url, code, owns, passcode, repair };
+  const audit = noDesigns && source === 'url';
+  const draft = { frames: statuses, source, url, code, owns, passcode, repair: audit ? false : repair, audit };
   const inferred = inferPicked(frames);
-  const ready = checkReady(draft) && !!inferred?.ok;
+  const ready = checkReady(draft) && (audit || !!inferred?.ok);
   const missing = checkMissing(draft);
   const h = health.status === 'ok' ? health.health : null;
   const open = !!h?.live && h.runs_left_today > 0 && h.runs_left_total > 0;
@@ -50,7 +52,7 @@ export function CheckPanel() {
     if (!ready || !open || submitting) return;
     setSubmitting(true);
     setError(null);
-    const files = Object.fromEntries(LIVE_BPS.map((bp) => [bp, (frames[bp] as Extract<FrameState, { status: 'ok' }>).file])) as Record<LiveBp, File>;
+    const files = audit ? null : (Object.fromEntries(LIVE_BPS.map((bp) => [bp, (frames[bp] as Extract<FrameState, { status: 'ok' }>).file])) as Record<LiveBp, File>);
     const r = await startCheck(files, draft);
     setSubmitting(false);
     if (r.ok) {
@@ -83,12 +85,22 @@ export function CheckPanel() {
             <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
               <Step n={1} /> Your frames
             </h2>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <label className="mb-3 inline-flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={noDesigns} onChange={(e) => {
+                  setNoDesigns(e.target.checked);
+                  if (e.target.checked) setSource('url'); // an audit captures a public address
+                }} className="mt-1" />
+              <span>
+                No designs? <span className="text-ink-muted">Audit a page on its own — width breaks, platform badges over your content, text that vanishes on
+                phones. No match score without a design to compare with. URL only.</span>
+              </span>
+            </label>
+            <div className={audit ? 'hidden' : 'grid grid-cols-1 gap-4 sm:grid-cols-3'}>
               {LIVE_BPS.map((bp) => (
                 <FramePicker key={bp} bp={bp} width={FRAME_SIZES[bp][0]} height={FRAME_SIZES[bp][1]} onChange={(st) => setFrames((f) => ({ ...f, [bp]: st }))} />
               ))}
             </div>
-            <div className="mt-3">
+            <div className={audit ? 'hidden' : 'mt-3'}>
               <FramesSummary inferred={inferred} />
             </div>
           </div>
@@ -105,10 +117,7 @@ export function CheckPanel() {
                 setSource(s);
                 setError(null);
               }}
-              tabs={[
-                { key: 'url', label: 'Build URL' },
-                { key: 'code', label: 'App.jsx' },
-              ]}
+              tabs={[{ key: 'url', label: 'Build URL' }, ...(noDesigns ? [] : [{ key: 'code' as const, label: 'App.jsx' }])]}
             >
               {/* both stay mounted so a typed URL / pasted code survive switching; only the active one is sent */}
               <>

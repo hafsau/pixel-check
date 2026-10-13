@@ -68,11 +68,11 @@ export function LiveRunPanel() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
             <h2 id="live-title" className="h2">
-              Live run
+              Rebuild from your frames
             </h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Upload the three frames of one screen, or point at a page you own. PixelCheck reads the frames, compiles one React + Tailwind codebase,
-              renders and scores it in a Token Factory Sandbox — with real models.
+              No build yet? PixelCheck writes the reference: it reads your frames (or a page you own), compiles one React + Tailwind codebase and
+              scores it with the same checks, in a Token Factory Sandbox — with real models.
             </p>
           </div>
           <Availability health={health} />

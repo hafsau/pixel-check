@@ -488,7 +488,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         jobs.acquire()
         try:
             write_status(rid, state="running")
-            with _frames.use(_frames.sizes_of(frames)):        # the run's own frame sizes; defaults restored
+            from contextlib import nullcontext
+            with _frames.use(_frames.sizes_of(frames)) if frames else nullcontext():   # the run's own frame sizes
                 out = run_check(kind, build, frames, run_dir, emit, verify)
             rep = out.get("report") or {}
             bundle = run_dir / "bundle"
@@ -542,8 +543,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 pass
 
     @app.post("/api/checks", status_code=202)
-    async def start_check(request: Request, mobile: UploadFile = File(...), tablet: UploadFile = File(...),
-                          desktop: UploadFile = File(...), url: str = Form(""), code: str = Form(""),
+    async def start_check(request: Request, mobile: UploadFile | None = File(None), tablet: UploadFile | None = File(None),
+                          desktop: UploadFile | None = File(None), url: str = Form(""), code: str = Form(""),
                           owns: str = Form(""), passcode: str = Form(""), repair: str = Form("")):
         require_live()
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
@@ -558,7 +559,18 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         want_repair = repair.strip().lower() in ("true", "1", "yes", "on")
         if want_repair and not has_code:
             raise HTTPException(422, "repair works on code: give the build's App.jsx")
-        frames, info, full = await _read_frames((("mobile", mobile), ("tablet", tablet), ("desktop", desktop)))
+        given = [up for up in (mobile, tablet, desktop) if up is not None]
+        audit = not given                 # no design frames (Oct 13): the build measured on its own, no match score
+        if given and len(given) != 3:
+            raise HTTPException(422, "give all three frames (phone, tablet, desktop), or none for an audit without designs")
+        if audit and not url:
+            raise HTTPException(422, "an audit without design frames needs the build's address (a public URL)")
+        if audit and want_repair:
+            raise HTTPException(422, "repair needs design frames to aim at")
+        if audit:
+            frames, info, full = {}, None, {}
+        else:
+            frames, info, full = await _read_frames((("mobile", mobile), ("tablet", tablet), ("desktop", desktop)))
         if want_repair and any(info["sizes"][bp] != list(v) for bp, v in SIZES.items()):
             raise HTTPException(422, "repair works on the standard frame sizes (390 × 844, 768 × 1024, 1280 × 800) "
                                      "for now — check mode itself accepts these frames")
@@ -575,8 +587,9 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         _save_frames(root / rid, frames, full)
         write_status(rid, id=rid, kind="check", state="queued", stages=[], created=time.time(),
-                     source={"url": _bare(url)} if url else {"code": True}, repair=want_repair, frames=info)
-        threading.Thread(target=check_worker, args=(rid, "url" if url else "code", url or code, frames, want_repair),
+                     source={"url": _bare(url)} if url else {"code": True}, repair=want_repair, frames=info, audit=audit)
+        threading.Thread(target=check_worker, args=(rid, "audit" if audit else "url" if url else "code", url or code,
+                                                    frames, want_repair),
                          daemon=True).start()
         return {"id": rid}
 
@@ -679,8 +692,13 @@ def default_checker(kind: str, build: str, frames: dict[str, bytes], run_dir: Pa
     from .sandbox import Sandbox
     from .tf_client import TFClient
     client = TFClient(run_id=run_dir.name, run_budget_usd=config.LIVE_RUN_BUDGET_USD)
-    sb = Sandbox()
+    sb = Sandbox(meter=client)                    # sandbox time counts in the run's budget and its reported cost
     read = lambda fr: perceive(client, fr)          # noqa: E731
+    if kind == "audit":                    # no design frames: measured on its own (orchestrator/check.audit_url)
+        from .check import audit_url
+        out = audit_url(build, sb=sb, verify=verify, emit=emit)
+        out["usd"] = round(client.run_spend, 4)
+        return out
     out = (check_url(build, frames, sb=sb, read_design=read, verify=verify, emit=emit) if kind == "url"
            else check_code(build, frames, sb=sb, read_design=read, emit=emit))
     out["usd"] = round(client.run_spend, 4)
@@ -696,8 +714,9 @@ def default_repairer(code: str, frames: dict[str, bytes], run_dir: Path, emit) -
     from .repair import _propose_default, repair
     from .sandbox import Sandbox
     from .tf_client import TFClient
-    client = TFClient(run_id=run_dir.name + "-repair", run_budget_usd=config.LIVE_RUN_BUDGET_USD)
-    sb = Sandbox()
+    # a repair weighs 3 runs against the caps, so it gets 3 runs' budget (mostly sandbox time, ~$0.55)
+    client = TFClient(run_id=run_dir.name + "-repair", run_budget_usd=3 * config.LIVE_RUN_BUDGET_USD)
+    sb = Sandbox(meter=client)
     spec = perceive(client, frames)               # cached vision reads: the check already read these frames
     emit("repair")
     check = lambda c: check_code(c, frames, sb=sb, read_design=None, emit=lambda *a, **k: None, spec=spec)  # noqa: E731

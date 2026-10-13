@@ -32,7 +32,7 @@ class FakeSB:
 
     def run(self, cmd, **kw):
         self.runs.append((cmd, kw))
-        if "evaluate.py --check" in cmd:
+        if "evaluate.py --check" in cmd or "evaluate.py --audit" in cmd:
             return R(stdout=json.dumps(self.score), result_image=None)
         return R(exit_code=0 if self.capture_ok else 1, result_image="img-capture" if self.capture_ok else None)
 

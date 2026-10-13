@@ -99,7 +99,7 @@ export async function startUrlRun(url: string, owns: boolean, passcode: string):
 }
 
 /** Check mode: POST /api/checks (three frames + exactly one of url / code + owns + passcode). Same errors as live runs. */
-export async function startCheck(frames: Record<LiveBp, File>, draft: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode' | 'repair'>): Promise<{ ok: true; id: string } | { ok: false; status: number; message: string }> {
+export async function startCheck(frames: Record<LiveBp, File> | null, draft: Pick<CheckDraft, 'source' | 'url' | 'code' | 'owns' | 'passcode' | 'repair' | 'audit'>): Promise<{ ok: true; id: string } | { ok: false; status: number; message: string }> {
   try {
     const res = await fetch(joinUrl(apiBase(), '/api/checks'), { method: 'POST', body: checkFormData(frames, draft) });
     const b = await body(res);

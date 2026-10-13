@@ -65,6 +65,31 @@ def check_url(url: str, frames: dict[str, bytes], *, sb, read_design, verify, em
             "design_texts": design_texts(spec), "dom": _doms(got), "nodes": _doms(got, "nodes")}
 
 
+AUDIT_CMD = "cd /opt/pc && timeout 120 python3 evaluate.py --audit"
+
+
+def audit_url(url: str, *, sb, verify, emit) -> dict:
+    """No design frames (Oct 13): capture the page as it looks (guards as in check mode), verify where it went, then
+    measure it on its own in a disposable run, network off — width breaks, warnings, text lost on smaller screens."""
+    from .api import capture_files
+    emit("capture")
+    cmd = f"cd /opt/pc && timeout 150 node /opt/pc/check_page.mjs {shlex.quote(url)} --out /work/out --wait 2000 --block-private"
+    r = sb.run(cmd, files=capture_files("check_page.mjs"), timeout_s=180, networking=True, step="audit capture")
+    if r.exit_code != 0 or not r.result_image:
+        raise CheckError("the build could not be captured — is the address public and reachable?")
+    got = sb.download_dir(r.result_image, "/work/out")
+    meta = json.loads(got.get("meta.json") or b"{}")
+    verify(meta)
+    emit("audit")
+    a = sb.run(AUDIT_CMD, image=r.result_image, disposable=True, step="audit")
+    try:
+        report = json.loads(a.stdout)
+    except (json.JSONDecodeError, TypeError):
+        raise CheckError(f"the audit run failed ({a.status})") from None
+    return {"report": report, "build": {bp: got[f"{bp}.png"] for bp in BPS if f"{bp}.png" in got}, "meta": meta,
+            "design_texts": {}, "dom": _doms(got), "nodes": _doms(got, "nodes")}
+
+
 def _doms(got: dict, kind: str = "dom") -> dict[str, list]:
     out = {}
     for bp in BPS:

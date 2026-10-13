@@ -198,6 +198,7 @@ export function layoutHealth() {
     const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
     const r = el.getBoundingClientRect();
     if (!own || r.width <= 0 || r.height <= 0) continue;
+    if (el.closest("[data-pc-badge]")) continue;          // a platform's floating badge (check mode), not the layout
     // text nobody can see (opacity 0, hidden, clipped — a real page's closed modal) cannot overlap anything
     if (window.__inkInfo && !window.__inkInfo(el, getComputedStyle(el), r, innerWidth, innerHeight).inked) continue;
     boxes.push({ r, el });

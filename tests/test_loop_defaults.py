@@ -17,3 +17,21 @@ def test_default_run_budget_covers_one_run():
 
 def test_rounds_still_configurable():
     assert LoopConfig(max_rounds=2, initial_samples=1).max_rounds == 2
+
+
+def test_rebuild_sandbox_cost_counts_in_the_run_budget(tmp_path, monkeypatch):
+    from orchestrator import loop, tf_client
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def spy(*a, meter=None, **k):
+        seen["meter"] = meter
+        raise Stop
+    monkeypatch.setattr(loop, "Sandbox", spy)
+    try:
+        loop.run_loop({}, {}, None, run_id="t", out_root=tmp_path)
+    except Stop:
+        pass
+    assert isinstance(seen.get("meter"), tf_client.TFClient)
