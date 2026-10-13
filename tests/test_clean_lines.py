@@ -71,3 +71,31 @@ def test_overlapping_word_boxes_are_an_ocr_mess_not_a_size_change():
     img = page([((219, 22, 40, 14), (20, 20, 20))])
     out = clean_lines(img, [line([word("Log", [219, 22, 40, 14]), word("in", [246, 10, 14, 32])])])
     assert len(out) == 1
+
+
+def test_a_button_label_read_between_its_edges_loses_both_bars():
+    """Dashboard "Start Workout": per-button OCR read "| Start Workout |" — the button's edges as bars."""
+    img = page([((479, 20, 38, 13), (255, 255, 255)), ((522, 20, 71, 14), (255, 255, 255))])
+    out = clean_lines(img, [line([word("|", [400, 0, 3, 56]), word("Start", [479, 20, 38, 13]), word("Workout", [522, 20, 71, 14]),
+                                  word("|", [668, 0, 3, 56])])])
+    assert out[0]["text"] == "Start Workout" and out[0]["box"] == [479, 20, 114, 14]
+
+
+def test_a_light_label_on_a_coloured_button_is_light():
+    from orchestrator.measure import label_ink
+    img = np.full((80, 300, 3), (51, 102, 255), np.float32)
+    img[30:44, 40:200] = (255, 255, 255)
+    img[34:40, 40:200] = (51, 102, 255)                     # strokes: white with blue gaps
+    assert label_ink(img, [40, 30, 160, 14], "#3366ff") == "#ffffff"
+
+
+def test_a_progress_bar_is_a_track_holding_its_fill():
+    """Dashboard "Time Logged": the purple fill [49, 786, 182, 12] covers the left of its grey track, so the track was
+    measured as only its visible rest [228, 786, 96, 12]; partly overlapping, the compiler dropped both."""
+    from orchestrator.measure import progress_bars
+    blocks = [{"box": [49, 786, 182, 12], "fill": "#8a2be2", "radius": 6}, {"box": [228, 786, 96, 12], "fill": "#ebecf9"},
+              {"box": [24, 633, 325, 190], "fill": "#ffffff"}]
+    out = progress_bars(blocks)
+    track = [b for b in out if b["fill"] == "#ebecf9"][0]
+    assert track["box"] == [49, 786, 275, 12] and track.get("radius") == 6
+    assert [b for b in out if b["fill"] == "#8a2be2"][0]["box"] == [49, 786, 182, 12]

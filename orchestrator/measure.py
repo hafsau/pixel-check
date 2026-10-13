@@ -118,6 +118,8 @@ def clean_lines(img: np.ndarray, lines: list[dict]) -> list[dict]:
             else:
                 groups[-1].append(w)
         for g in groups:
+            while len(g) >= 2 and not any(ch.isalnum() for ch in g[-1]["text"]):   # a trailing edge read as "|"
+                g = g[:-1]
             if len(g) >= 2 and len(g[0]["text"]) <= 2:
                 f, rest = g[0], g[1:]
                 rs = float(np.median([size(w) for w in rest]))
@@ -129,6 +131,43 @@ def clean_lines(img: np.ndarray, lines: list[dict]) -> list[dict]:
                     g = rest
             out.append(l if len(g) == len(ws) else _line_of(g, l))      # untouched lines keep OCR's own box
     return out
+
+
+def progress_bars(blocks: list[dict]) -> list[dict]:
+    """A thin bar beside / over a lighter one on the same row (a fill and the visible rest of its track): the track
+    becomes the whole bar, holding the fill — measured, the two partly overlapped and the compiler dropped both as
+    decoration (Oct 12, the dashboard's "Time Logged" bar)."""
+    rgb = lambda h: np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], float)
+    lum = lambda b: float(rgb(b["fill"]).mean()) if b.get("fill") else 0.0
+    for a in blocks:
+        for t in blocks:
+            if a is t or not a.get("fill") or not t.get("fill") or a.get("rule") or t.get("rule"):
+                continue
+            (ax, ay, aw, ah), (tx, ty, tw, th) = a["box"], t["box"]
+            if not (abs(ay - ty) <= 2 and abs(ah - th) <= 2 and 4 <= ah <= 24 and aw >= 20 and tw >= 10):
+                continue
+            if lum(t) <= lum(a) + 30 or abs(tx - (ax + aw)) > 6:      # the track is lighter and starts where the fill ends
+                continue
+            t["box"] = [ax, min(ay, ty), tx + tw - ax, max(ah, th)]
+            if a.get("radius") and not t.get("radius"):
+                t["radius"] = a["radius"]
+    return blocks
+
+
+def label_ink(img: np.ndarray, box, fill: str | None) -> str:
+    """A label's text colour inside a filled block: of the box's two dominant colours, the one farther from the
+    fill (ink_and_backdrop takes the darker one — white on blue came out blue, invisible)."""
+    ink, back = ink_and_backdrop(img, box)
+    if not fill:
+        return ink
+    rgb = lambda h: np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], float)
+    f = rgb(fill)
+    if np.linalg.norm(rgb(ink) - f) >= 40:
+        return ink
+    x, y, w, h = [int(v) for v in box]
+    px = img[y:y + h, x:x + w].reshape(-1, 3)
+    far = px[np.linalg.norm(px - f, axis=1) > 0.6 * np.linalg.norm(px - f, axis=1).max()] if len(px) else px
+    return _hex(np.median(far, axis=0)) if len(far) else back
 
 
 def _iou(a, b) -> float:
@@ -192,7 +231,7 @@ def solid_blocks(img: np.ndarray, text_boxes: list, min_area: int = 600) -> list
     return kept
 
 
-def gradient_blocks(img: np.ndarray, text_boxes: list, min_area: int = 3000) -> list[dict]:
+def gradient_blocks(img: np.ndarray, text_boxes: list, min_area: int = 200) -> list[dict]:
     """Smooth regions whose colour runs from one side to the other (a blue→purple banner): ONE block with a linear
     gradient, instead of the dozen colour-quantised strips solid_blocks finds in it (Oct 12). A region = pixels that
     stand out from the page (> 30) and change by ≤ 6 per channel to every neighbour; text and icons inside it are holes.
@@ -200,8 +239,10 @@ def gradient_blocks(img: np.ndarray, text_boxes: list, min_area: int = 3000) -> 
     H, W, _ = img.shape
     bg = background(img)
     strong = np.linalg.norm(img - bg, axis=2) > 30
-    dx = np.abs(np.diff(img, axis=1)).max(axis=2) <= 6
-    dy = np.abs(np.diff(img, axis=0)).max(axis=2) <= 6
+    # ≤ 10 per step: a steep small gradient (an avatar) steps 4–8 / px; an element's edge against its own soft shadow
+    # jumps ≥ 15 and keeps them apart (a blur merged a photo placeholder with its shadow)
+    dx = np.abs(np.diff(img, axis=1)).max(axis=2) <= 10
+    dy = np.abs(np.diff(img, axis=0)).max(axis=2) <= 10
     smooth = np.ones((H, W), bool)
     smooth[:, :-1] &= dx
     smooth[:, 1:] &= dx
@@ -211,15 +252,18 @@ def gradient_blocks(img: np.ndarray, text_boxes: list, min_area: int = 3000) -> 
     # no closing: it glued a banner to its own soft glow / shadow (both smooth) across the 1–2 px edge between them
     lab, n = ndimage.label(m)
     out = []
-    for i, sl in enumerate(ndimage.find_objects(lab), 1):
+    for i, sl0 in enumerate(ndimage.find_objects(lab), 1):
+        if sl0 is None:
+            continue
+        sl = sl0
         ys, xs = sl
         bw, bh = xs.stop - xs.start, ys.stop - ys.start
-        if bw * bh < min_area or min(bw, bh) < 24:
+        if bw * bh < min_area or min(bw, bh) < 14:          # small tiles (53 px), thin chart bars (18 px)
             continue
         if xs.start <= 2 and xs.stop >= W - 2:      # edge to edge: a section background band, not an element
             continue
         own = lab[sl] == i
-        if ndimage.binary_fill_holes(own).mean() < 0.85:     # text / icons inside are holes; the outline is a box
+        if ndimage.binary_fill_holes(own).mean() < 0.75:     # text / icons are holes; a box, or a circle (0.785)
             continue
         sub = img[sl]
         cnt_x, cnt_y = own.sum(axis=0), own.sum(axis=1)
@@ -230,12 +274,44 @@ def gradient_blocks(img: np.ndarray, text_boxes: list, min_area: int = 3000) -> 
         # how far the colour travels across the region (end to end, or out and back: blue → purple → blue)
         span_h = np.linalg.norm(prof_h - prof_h[: max(2, len(prof_h) // 20)].mean(axis=0), axis=1).max()
         span_v = np.linalg.norm(prof_v - prof_v[: max(2, len(prof_v) // 20)].mean(axis=0), axis=1).max()
-        if max(span_h, span_v) < 24:
+        if max(span_h, span_v) < 24:     # smooth but (nearly) one colour: a solid block, if no one else finds it
+            box = [xs.start, ys.start, bw, bh]
+            # a filled box with no text in or around it (a chart bar) — not a glyph of a big solid headline
+            boxy = ndimage.binary_fill_holes(own).mean() >= 0.75          # a box, or a circle (0.785)
+            texty = any(_iou(box, t["box"]) > 0 or _frac_inside(box, t["box"]) > 0 or _frac_inside(t["box"], box) > 0
+                        for t in text_boxes)
+            if boxy and not texty:
+                out.append({"box": box, "fill": _hex(sub[own].mean(axis=0)), "smooth": True, "contains_text": []})
+            continue
+        if bw * bh < 500:                 # gradients: at least a small tile; smaller smooth regions are solid blocks
             continue
         d, prof = ("r", prof_h) if span_h >= span_v else ("b", prof_v)
         # one colour profile along the direction must explain the region (a photo's sky varies both ways)
         model = col[None, :, :] if d == "r" else row[:, None, :]
         if np.abs(sub - model)[own].max(axis=-1).mean() > 6:
+            # or a plane across x and y: a corner-to-corner gradient (the dashboard's tiles, its avatar)
+            yy, xx = np.nonzero(own)
+            A = np.stack([np.ones_like(xx), xx, yy], axis=1).astype(np.float64)
+            coef, *_ = np.linalg.lstsq(A, sub[own].astype(np.float64), rcond=None)
+            if np.abs(A @ coef - sub[own]).max(axis=-1).mean() > 6:
+                continue
+            gx, gy = coef[1], coef[2]                      # per-pixel colour change along x and y (3 channels)
+            if np.linalg.norm(gx) * bw < 12 or np.linalg.norm(gy) * bh < 12:
+                continue                                   # really one-directional: leave it to the profile check
+            corner = lambda x, y: coef[0] + coef[1] * x + coef[2] * y
+            # the direction the colour travels away from the corner it starts in
+            lum = lambda c: float(np.mean(c))
+            dx = 1 if lum(corner(bw, 0)) - lum(corner(0, 0)) >= 0 else -1
+            dy = 1 if lum(corner(0, bh)) - lum(corner(0, 0)) >= 0 else -1
+            if dy < 0:                                     # same picture, described from the top: to-br / to-bl
+                dx, dy = -dx, 1
+            start = corner(0 if dx > 0 else bw, 0)
+            end = corner(bw if dx > 0 else 0, bh)
+            # Tailwind names where the gradient goes: start at top-left → to-br, etc.
+            d = {(1, 1): "br", (-1, 1): "bl", (1, -1): "tr", (-1, -1): "tl"}[(dx, dy)]
+            out.append({"box": [xs.start, ys.start, bw, bh], "fill": _hex(sub[own].mean(axis=0)),
+                        "gradient": {"dir": d, "from": _hex(np.clip(start, 0, 255)), "to": _hex(np.clip(end, 0, 255))},
+                        "contains_text": [t["text"] for t in text_boxes if _inside(t["box"], [xs.start, ys.start, bw, bh])][:4]})
             continue
         k = max(2, len(prof) // 20)
         a0, a1 = prof[:k].mean(axis=0), prof[-k:].mean(axis=0)
@@ -652,7 +728,14 @@ def measure(png: bytes) -> dict:
     blocks = [b for b in solid_blocks(img, lines, min_area=100)
               if not any(_frac_inside(b["box"], tb) >= 0.6 and b["box"][2] * b["box"][3] < 0.5 * tb[2] * tb[3]
                          for tb in text_boxes)]
-    grads = gradient_blocks(img, lines)
+    found = gradient_blocks(img, lines)
+    grads = [g for g in found if g.get("gradient")]
+    # smooth one-colour regions the quantised pass missed (thin chart bars with a faint shade): only where nothing is
+    smooth = [g for g in found if g.get("smooth") and all(_iou(g["box"], b["box"]) < 0.5 for b in blocks)]   # not a duplicate
+    for g in smooth:
+        g.pop("smooth", None)
+    blocks += smooth
+
     def strip(b, g):                  # a slice of the gradient: inside it, on its colours, thin along its direction
         (x, y, w, h), (gx, gy, gw, gh) = b["box"], g["box"]       # (a card inside a gradient band is not thin)
         along = w / gw if g["gradient"]["dir"] == "r" else h / gh
@@ -673,6 +756,7 @@ def measure(png: bytes) -> dict:
               if not any(_iou(ph["box"], g["box"]) > 0.3 or _frac_inside(ph["box"], g["box"]) >= 0.6 for g in grads)]
     if photos:                        # a photo's colour pieces go; the photo is one placeholder block
         blocks = [b for b in blocks if not any(_frac_inside(b["box"], ph["box"]) >= 0.8 for ph in photos)] + photos
+    blocks = progress_bars(blocks)
     haze = _haze_runs(blocks, bg_c)
     blocks = [b for k, b in enumerate(blocks) if b.get("gradient") or (k not in haze and not _glow(img, b, bg_c))]
     from .shadow import fit_shadow
@@ -711,8 +795,11 @@ def measure(png: bytes) -> dict:
             b["contains_text"] = [t for t in (b.get("contains_text") or []) if t != l["text"]]
     for r in crosses(img, [l["box"] for l in lines]):   # small "+" icons (a pair of crossing rules each)
         blocks.append({"box": r["box"], "fill": r["fill"], "rule": True, "contains_text": []})
-    for l in block_labels(img, blocks, lines):   # light-on-dark button labels
+    for l in clean_lines(img, block_labels(img, blocks, lines)):   # light-on-dark button labels
+        host = min((b for b in blocks if _inside(l["box"], b["box"]) and not b.get("rule")),
+                   key=lambda b: b["box"][2] * b["box"][3], default=None)        # the button, not its card
         l["color"], l["backdrop"] = ink_and_backdrop(img, l["box"])
+        l["color"] = label_ink(img, l["box"], host and host.get("fill"))
         l["typo"] = infer(l["text"], l["box"], img)
         lines.append(l)
         for b in blocks:

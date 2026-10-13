@@ -174,3 +174,62 @@ def test_haze_strips_of_slightly_different_heights_are_one_run():
     blocks = [{"box": [10, 133, 139, 27], "fill": "#d7e0fb"}, {"box": [134, 133, 63, 24], "fill": "#dddff9"},
               {"box": [190, 133, 57, 24], "fill": "#e0e6fa"}, {"box": [241, 133, 44, 24], "fill": "#ebecf9"}]
     assert _haze_runs(blocks, bg) == {0, 1, 2, 3}
+
+
+def test_small_steep_gradient_tiles_round_avatars_and_thin_bars_are_found():
+    """Dashboard: 53 px gradient achievement tiles, a 56 px gradient avatar circle and 16 px chart bars whose colour
+    barely changes were all missing."""
+    a = np.full((300, 600, 3), 255, np.float32)
+    t = (np.arange(53) / 52)[None, :, None]
+    a[40:93, 40:93] = np.array([254, 112, 17]) + (np.array([253, 70, 40]) - np.array([254, 112, 17])) * t   # tile
+    yy, xx = np.mgrid[0:56, 0:56]
+    circ = ((xx - 27.5) ** 2 + (yy - 27.5) ** 2) <= 28 ** 2
+    grad = np.array([80, 110, 250]) + (np.array([140, 60, 230]) - np.array([80, 110, 250])) * (xx / 55)[..., None]
+    a[40:96, 200:256][circ] = grad[circ]                                                                  # avatar
+    tb = (np.arange(42) / 41)[:, None, None]
+    a[200:242, 400:416] = np.array([112, 148, 255]) + (np.array([100, 136, 250]) - np.array([112, 148, 255])) * tb  # bar
+    buf = io.BytesIO()
+    Image.fromarray(a.astype(np.uint8)).save(buf, "PNG")
+    blocks = measure.measure(buf.getvalue())["blocks"]
+    found = lambda box: [b for b in blocks if _iou(b["box"], box) >= 0.7]
+    assert found([40, 40, 53, 53]), [b["box"] for b in blocks]
+    av = found([200, 40, 56, 56])
+    assert av and (av[0].get("radius") or 0) >= 20, av
+    assert found([400, 200, 16, 42]), [b["box"] for b in blocks]
+
+
+def test_a_diagonal_gradient_is_one_block_with_a_diagonal_direction():
+    """Dashboard: the achievement tiles and the avatar run corner to corner; the one-direction check rejected them."""
+    a = np.full((200, 300, 3), 255, np.float32)
+    yy, xx = np.mgrid[0:60, 0:60]
+    t = ((xx + yy) / 118)[..., None]
+    a[50:110, 50:110] = np.array([254, 120, 20]) + (np.array([230, 40, 60]) - np.array([254, 120, 20])) * t
+    buf = io.BytesIO()
+    Image.fromarray(a.astype(np.uint8)).save(buf, "PNG")
+    g = [b for b in measure.measure(buf.getvalue())["blocks"] if b.get("gradient")]
+    assert g and _iou(g[0]["box"], [50, 50, 60, 60]) >= 0.8 and g[0]["gradient"]["dir"] == "br", g
+    from orchestrator.fluid import _fill
+    assert "bg-gradient-to-br" in _fill({bp: g[0] for bp in ("mobile", "tablet", "desktop")}).split()
+
+
+def test_chart_bars_and_check_circles_inside_a_card_are_found():
+    """Dashboard: bars inside the Weekly Activity card and the streak's check circles were dropped — a smooth block
+    inside any existing block (the card) was taken for a duplicate."""
+    a = np.full((300, 400, 3), (244, 246, 250), np.float32)
+    a[20:280, 20:380] = 255                                                       # the card
+    a[19, 20:380] = a[280, 20:380] = a[20:280, 19] = a[20:280, 380] = (226, 230, 238)
+    tb = (np.arange(30) / 29)[:, None, None]
+    for x, h in ((60, 30), (100, 18), (140, 52)):                                 # short faint-shaded bars
+        a[240 - h:240, x:x + 16] = np.array([112, 148, 255]) + (np.array([104, 140, 252]) - np.array([112, 148, 255])) * (np.arange(h) / max(h - 1, 1))[:, None, None]
+    yy, xx = np.mgrid[0:34, 0:34]
+    circ = ((xx - 16.5) ** 2 + (yy - 16.5) ** 2) <= 17 ** 2
+    for x in (60, 96, 132):                                                       # check circles with a white tick
+        patch = a[60:94, x:x + 34]
+        patch[circ] = (52, 102, 255)
+        patch[15:19, 9:25] = 255
+    buf = io.BytesIO()
+    Image.fromarray(a.astype(np.uint8)).save(buf, "PNG")
+    blocks = measure.measure(buf.getvalue())["blocks"]
+    found = lambda box: [b for b in blocks if _iou(b["box"], box) >= 0.6]
+    for box in ([60, 210, 16, 30], [100, 222, 16, 18], [140, 188, 16, 52], [60, 60, 34, 34], [96, 60, 34, 34], [132, 60, 34, 34]):
+        assert found(box), (box, [b["box"] for b in blocks])
