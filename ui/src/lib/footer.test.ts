@@ -10,5 +10,6 @@ describe('footerNote', () => {
     expect(footerNote('/')).toMatch(/^Replay mode/);
     expect(footerNote('/run/netflix')).toMatch(/^Replay mode/);
     expect(footerNote('/check')).toMatch(/^Replay mode/);
+    expect(footerNote('/check/interview-sage-audit/replay')).toMatch(/^Replay mode/);
   });
 });

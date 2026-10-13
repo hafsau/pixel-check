@@ -5,6 +5,7 @@ import { splitIndex } from '../lib/bundle';
 import { RunCard } from './RunCard';
 import { InteractionCard } from './InteractionCard';
 import { GroupCard } from './GroupCard';
+import { CheckCard } from './CheckCard';
 
 export function RunList() {
   const idx = useRunIndex();
@@ -30,7 +31,14 @@ export function RunList() {
           Could not load runs: {idx.error}
         </p>
       )}
-      {s && s.static.length + s.interaction.length + s.group.length === 0 && <p className="mt-4 text-sm text-ink-muted">No runs exported yet.</p>}
+      {s && s.static.length + s.interaction.length + s.group.length + s.check.length === 0 && <p className="mt-4 text-sm text-ink-muted">No runs exported yet.</p>}
+      {s && s.check.length > 0 && (
+        <Group id="checks" title="Build checks" intro="Real builds measured as they are deployed — every width from 360 to 1600 px, platform badges over content, text a phone loses. Audits have no designs, so no match score.">
+          {s.check.map((e) => (
+            <CheckCard key={e.id} e={e} />
+          ))}
+        </Group>
+      )}
       {s && s.static.length > 0 && (
         <Group id="static" title="Static layout" intro="Three frames in, one responsive codebase out — rendered and scored at 390, 768 and 1280 px, plus fluidity checks between them.">
           {s.static.map((r) => (

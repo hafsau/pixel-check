@@ -10,14 +10,16 @@ import { GroupPage } from './pages/GroupPage';
 import { LiveRunPage } from './pages/LiveRunPage';
 import { BrandPage } from './pages/BrandPage';
 import { CheckPage } from './pages/CheckPage';
-import { CheckRunPage } from './pages/CheckRunPage';
+import { CheckReplayPage, CheckRunPage } from './pages/CheckRunPage';
 
 function Routes() {
   const path = usePath();
   if (path === '/' || path === '') return <HomePage />;
   if (path === '/brand') return <BrandPage />;
   if (path === '/check' || path === '/check/') return <CheckPage />;
-  let m = matchPath('/check/:id', path);
+  let m = matchPath('/check/:id/replay', path);
+  if (m) return <CheckReplayPage key={`${m.id}-replay`} id={m.id} />;
+  m = matchPath('/check/:id', path);
   if (m) return <CheckRunPage key={m.id} id={m.id} />;
   m = matchPath('/run/:id/result', path);
   if (m) return <ResultPage key={m.id} id={m.id} />;

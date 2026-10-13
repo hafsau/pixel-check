@@ -75,3 +75,21 @@ describe('splitTitle', () => {
     expect(splitTitle('A (b) c')).toEqual({ title: 'A (b) c', note: null });
   });
 });
+
+describe('published checks (Oct 13)', () => {
+  const raw = { id: 'heatshot-audit', type: 'check', mode: 'audit', title: 'HeatShot AI', url: 'https://heatshot-ai.lovable.app/', created: 4, fluid_pass: true, warnings: 1, vanished: 0, thumb: 'build/mobile.webp', source: 'owned:heatshot-ai.lovable.app' };
+
+  it('keeps check entries with safe defaults', () => {
+    const [e] = normalizeIndex([raw, { id: 'bare', type: 'check', created: 1 }]);
+    expect(e).toMatchObject({ type: 'check', mode: 'audit', warnings: 1, vanished: 0, fluid_pass: true, url: 'https://heatshot-ai.lovable.app/' });
+    const bare = normalizeIndex([{ id: 'bare', type: 'check', created: 1 }])[0];
+    expect(bare).toMatchObject({ type: 'check', mode: 'check', warnings: 0, vanished: 0, fluid_pass: null, url: null, match: null });
+  });
+
+  it('groups checks on their own and routes them to the check replay', () => {
+    const s = splitIndex(normalizeIndex([raw, { id: 'a', type: 'static', created: 3, title: '', match: 1, per_bp: {} }]));
+    expect(s.check.map((e) => e.id)).toEqual(['heatshot-audit']);
+    expect(s.static.map((e) => e.id)).toEqual(['a']);
+    expect(entryHref({ type: 'check', id: 'heatshot-audit' })).toBe('/check/heatshot-audit/replay');
+  });
+});

@@ -1,0 +1,240 @@
+{
+ "type": "check",
+ "id": "interview-sage-audit",
+ "source": {
+  "url": "https://interview-sage--hafsausmani.replit.app/"
+ },
+ "report": {
+  "mode": "audit",
+  "between": {
+   "360": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 1,
+    "examples": [
+     [
+      "Senior Software Engineer - Full Stack\n\nW",
+      "650 chars"
+     ]
+    ],
+    "overflowers": [],
+    "content": [
+     16,
+     344
+    ],
+    "centre_ratio": 0.5,
+    "left_ratio": 0.044,
+    "right_gap_ratio": 0.044,
+    "page_height": 995,
+    "max_vertical_gap": 112,
+    "viewport_h": 844,
+    "background_covers": true
+   },
+   "375": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 1,
+    "examples": [
+     [
+      "Senior Software Engineer - Full Stack\n\nW",
+      "650 chars"
+     ]
+    ],
+    "overflowers": [],
+    "content": [
+     16,
+     359
+    ],
+    "centre_ratio": 0.5,
+    "left_ratio": 0.043,
+    "right_gap_ratio": 0.043,
+    "page_height": 995,
+    "max_vertical_gap": 112,
+    "viewport_h": 844,
+    "background_covers": true
+   },
+   "500": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 1,
+    "examples": [
+     [
+      "Senior Software Engineer - Full Stack\n\nW",
+      "650 chars"
+     ]
+    ],
+    "overflowers": [],
+    "content": [
+     16,
+     484
+    ],
+    "centre_ratio": 0.5,
+    "left_ratio": 0.032,
+    "right_gap_ratio": 0.032,
+    "page_height": 911,
+    "max_vertical_gap": 112,
+    "viewport_h": 844,
+    "background_covers": true
+   },
+   "1024": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 1,
+    "examples": [
+     [
+      "Senior Software Engineer - Full Stack\n\nW",
+      "650 chars"
+     ]
+    ],
+    "overflowers": [],
+    "content": [
+     60,
+     992
+    ],
+    "centre_ratio": 0.514,
+    "left_ratio": 0.059,
+    "right_gap_ratio": 0.031,
+    "page_height": 1081,
+    "max_vertical_gap": 128,
+    "viewport_h": 1024,
+    "background_covers": true
+   },
+   "1600": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 1,
+    "examples": [
+     [
+      "Senior Software Engineer - Full Stack\n\nW",
+      "650 chars"
+     ]
+    ],
+    "overflowers": [],
+    "content": [
+     220,
+     1408
+    ],
+    "centre_ratio": 0.509,
+    "left_ratio": 0.138,
+    "right_gap_ratio": 0.12,
+    "page_height": 957,
+    "max_vertical_gap": 128,
+    "viewport_h": 900,
+    "background_covers": true
+   }
+  },
+  "fluidity": {
+   "pass": true,
+   "fails": [],
+   "widths": {
+    "360": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.0,
+     "max_gap": 112,
+     "bg_covers": true,
+     "ok": true
+    },
+    "375": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.0,
+     "max_gap": 112,
+     "bg_covers": true,
+     "ok": true
+    },
+    "500": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.0,
+     "max_gap": 112,
+     "bg_covers": true,
+     "ok": true
+    },
+    "1024": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.014,
+     "max_gap": 128,
+     "bg_covers": true,
+     "ok": true
+    },
+    "1600": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.002,
+     "max_gap": 128,
+     "bg_covers": true,
+     "ok": true
+    },
+    "desktop": {
+     "overflow": 0,
+     "max_gap": 128,
+     "bg_covers": true
+    },
+    "mobile": {
+     "overflow": 0,
+     "max_gap": 112,
+     "bg_covers": true
+    },
+    "tablet": {
+     "overflow": 0,
+     "max_gap": 128,
+     "bg_covers": true
+    }
+   }
+  },
+  "breakpoints": {
+   "mobile": {
+    "width": 390,
+    "height": 844,
+    "fonts_ok": true,
+    "overflow_px": 0,
+    "text_overlaps": 1
+   },
+   "tablet": {
+    "width": 768,
+    "height": 1024,
+    "fonts_ok": true,
+    "overflow_px": 0,
+    "text_overlaps": 1
+   },
+   "desktop": {
+    "width": 1280,
+    "height": 800,
+    "fonts_ok": true,
+    "overflow_px": 0,
+    "text_overlaps": 1
+   }
+  },
+  "warnings": [
+   "mobile: the Replit badge covers \"Generate Questions\" (a platform badge, not your layout)"
+  ],
+  "runtime_errors": [],
+  "vanished": {
+   "mobile": [
+    "Add required skills and qualifications",
+    "Dashboard",
+    "Generator",
+    "Include the job title and level",
+    "Interview Sage",
+    "List key responsibilities",
+    "Question Bank"
+   ],
+   "tablet": []
+  }
+ },
+ "design": {},
+ "build": {
+  "mobile": "build/mobile.webp",
+  "tablet": "build/tablet.webp",
+  "desktop": "build/desktop.webp"
+ },
+ "design_texts": {},
+ "usd": 0.0303,
+ "repair": null,
+ "title": "Interview Sage",
+ "label": "owned app \u00b7 audit",
+ "publish_source": "owned:interview-sage--hafsausmani.replit.app",
+ "created": 1791926841.043199
+}

@@ -16,5 +16,68 @@
   "fluid_pass": true,
   "thumb": "display/mobile.webp",
   "source": "owned:hafsausmani.com"
+ },
+ {
+  "id": "equaltales-audit",
+  "type": "check",
+  "mode": "audit",
+  "title": "EqualTales",
+  "label": "owned app \u00b7 audit",
+  "url": "https://equaltales.vercel.app/",
+  "match": null,
+  "per_bp": {
+   "mobile": null,
+   "tablet": null,
+   "desktop": null
+  },
+  "created": 1791926840.963773,
+  "usd": 0.041,
+  "fluid_pass": true,
+  "warnings": 0,
+  "vanished": 0,
+  "thumb": "build/mobile.webp",
+  "source": "owned:equaltales.vercel.app"
+ },
+ {
+  "id": "headshotai-audit",
+  "type": "check",
+  "mode": "audit",
+  "title": "HeadshotAI",
+  "label": "owned app \u00b7 audit",
+  "url": "https://heatshot-ai.lovable.app/",
+  "match": null,
+  "per_bp": {
+   "mobile": null,
+   "tablet": null,
+   "desktop": null
+  },
+  "created": 1791926841.0145102,
+  "usd": 0.0344,
+  "fluid_pass": true,
+  "warnings": 1,
+  "vanished": 0,
+  "thumb": "build/mobile.webp",
+  "source": "owned:heatshot-ai.lovable.app"
+ },
+ {
+  "id": "interview-sage-audit",
+  "type": "check",
+  "mode": "audit",
+  "title": "Interview Sage",
+  "label": "owned app \u00b7 audit",
+  "url": "https://interview-sage--hafsausmani.replit.app/",
+  "match": null,
+  "per_bp": {
+   "mobile": null,
+   "tablet": null,
+   "desktop": null
+  },
+  "created": 1791926841.043199,
+  "usd": 0.0303,
+  "fluid_pass": true,
+  "warnings": 1,
+  "vanished": 7,
+  "thumb": "build/mobile.webp",
+  "source": "owned:interview-sage--hafsausmani.replit.app"
  }
 ]

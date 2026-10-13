@@ -118,3 +118,50 @@ def test_display_thumbnail_renders_the_page_with_its_images(tmp_path):
     im = Image.open(out / "red-site" / "display" / "mobile.webp").convert("RGB")
     r, g, b = im.getpixel((100, 100))
     assert r > 180 and g < 80 and b < 80          # the image is painted, not a grey block
+
+
+# ---- check / audit bundles (Oct 13): a check of a build the owner published (check.json + build captures)
+
+def check_bundle(d: Path, url="https://heatshot-ai.lovable.app/", mode="audit") -> Path:
+    (d / "bundle" / "build").mkdir(parents=True)
+    rep = {"mode": mode, "fluidity": {"pass": True, "fails": []},
+           "warnings": ['1024 px: the "Edit with Lovable" badge covers "Your headshot will appear here"'],
+           "vanished": {"mobile": ["Dashboard", "Generator"], "tablet": []}}
+    (d / "bundle" / "check.json").write_text(json.dumps({
+        "type": "check", "id": "20261013-141035-e238b7", "source": {"url": url}, "report": rep, "design": {},
+        "build": {bp: f"build/{bp}.webp" for bp in ("mobile", "tablet", "desktop")}, "design_texts": {},
+        "usd": 0.031, "repair": None}))
+    for bp in ("mobile", "tablet", "desktop"):
+        (d / "bundle" / "build" / f"{bp}.webp").write_bytes(b"RIFF....WEBP")
+    (d / "status.json").write_text(json.dumps({"created": 1791925835.0, "state": "done"}))
+    return d / "bundle"
+
+
+def test_an_audit_bundle_is_published_with_a_check_entry(tmp_path):
+    out = tmp_path / "published"
+    P.publish(check_bundle(tmp_path / "r"), out, run_id="heatshot-audit", title="HeatShot AI — audit",
+              label="owned app · audit", source="owned:heatshot-ai.lovable.app")
+    d = out / "heatshot-audit"
+    assert (d / "check.json").exists() and (d / "build" / "mobile.webp").exists() and not (d / "run.json").exists()
+    chk = json.loads((d / "check.json").read_text())
+    assert chk["id"] == "heatshot-audit" and chk["title"] == "HeatShot AI — audit"
+    assert json.loads((out / "index.json").read_text()) == [{
+        "id": "heatshot-audit", "type": "check", "mode": "audit", "title": "HeatShot AI — audit",
+        "label": "owned app · audit", "url": "https://heatshot-ai.lovable.app/", "match": None, "per_bp": {},
+        "created": 1791925835.0, "usd": 0.031, "fluid_pass": True, "warnings": 1, "vanished": 2,
+        "thumb": "build/mobile.webp", "source": "owned:heatshot-ai.lovable.app"}]
+
+
+@pytest.mark.parametrize("source", ["original", "owned:hafsausmani.com", "owned:lovable.app"])
+def test_a_check_is_published_only_as_the_checked_hosts_own(tmp_path, source):
+    """The declared owner must be the host that was checked: a third-party page cannot be relabelled as owned."""
+    with pytest.raises(ValueError, match="host"):
+        P.publish(check_bundle(tmp_path / "r"), tmp_path / "out", run_id="x", title="t", label="l", source=source)
+
+
+def test_a_check_url_is_published_without_query_or_fragment(tmp_path):
+    out = tmp_path / "published"
+    P.publish(check_bundle(tmp_path / "r", url="https://heatshot-ai.lovable.app/app?x=1#y"), out, run_id="x",
+              title="t", label="l", source="owned:heatshot-ai.lovable.app")
+    assert json.loads((out / "index.json").read_text())[0]["url"] == "https://heatshot-ai.lovable.app/app"
+    assert json.loads((out / "x" / "check.json").read_text())["source"] == {"url": "https://heatshot-ai.lovable.app/app"}

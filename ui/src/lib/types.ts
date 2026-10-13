@@ -165,7 +165,7 @@ export interface Pipeline {
 // ---------------------------------------------------------------------------------------------
 // Replay index (ui/public/runs/index.json). Entries without "type" come from the Oct 1 exporter.
 
-export type BundleType = 'static' | 'interaction' | 'group';
+export type BundleType = 'static' | 'interaction' | 'group' | 'check';
 
 export interface StaticEntry {
   type: 'static';
@@ -218,7 +218,26 @@ export interface GroupEntry {
   dev?: boolean; // npm run dev only: a dev replay of a third-party capture (never in production)
 }
 
-export type IndexEntry = StaticEntry | InteractionEntry | GroupEntry;
+/** A published check or audit of a build its owner published (tools/publish_run.py → check.json + captures). */
+export interface CheckEntry {
+  type: 'check';
+  id: string;
+  title: string;
+  label?: string;
+  mode: 'audit' | 'check';
+  url: string | null;
+  match: number | null;
+  created: number;
+  fluid_pass: boolean | null;
+  warnings: number;
+  vanished: number;
+  usd?: number;
+  thumb?: string | null;
+  source?: string;
+  dev?: boolean;
+}
+
+export type IndexEntry = StaticEntry | InteractionEntry | GroupEntry | CheckEntry;
 
 // ---------------------------------------------------------------------------------------------
 // Interaction bundle (tools/export_interaction.py → interaction.json)

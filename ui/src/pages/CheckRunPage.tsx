@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link } from '../lib/router';
-import { useLoad } from '../lib/data';
+import { runAsset, useLoad } from '../lib/data';
 import { apiBase, failureNotice, FRAME_SIZES, LIVE_BPS, liveFilesBase, resolveAsset, sourceHost, type LiveBp, type LiveStatus, type PollState } from '../lib/live';
 import { useLivePoll, getCheck } from '../lib/liveApi';
-import { boxPct, checkCells, checkStages, checkSummary, hurtList, missingBoxes, repairRequested, type Box, type CheckBundle, type Hurt } from '../lib/check';
+import { boxPct, checkCells, checkStages, checkSummary, hurtList, missingBoxes, parseCheck, repairRequested, type Box, type CheckBundle, type Hurt } from '../lib/check';
 import { REPAIR_ROUNDS, repairOutcome } from '../lib/repair';
 import { bandLabel, fmtScore } from '../lib/score';
 import { cap, fmtSecs, fmtUsd } from '../lib/format';
@@ -122,15 +122,28 @@ function CheckResultLoader({ id, status }: { id: string; status: LiveStatus | nu
   return <CheckResult id={id} check={check.data} />;
 }
 
-export function CheckResult({ id, check }: { id: string; check: CheckBundle }) {
-  if (check.report.mode === 'audit') return <AuditResult id={id} check={check} />;
-  return <DesignCheckResult id={id} check={check} />;
+/** /check/<id>/replay: a check its owner published (ui/published, tools/publish_run.py) — no API, no sandbox. */
+export function CheckReplayPage({ id }: { id: string }) {
+  const check = useLoad<CheckBundle>(async () => {
+    const res = await fetch(runAsset(id, 'check.json'));
+    if (!res.ok) throw new Error(`The recorded check could not be loaded (${res.status}).`);
+    return parseCheck(await res.json());
+  }, [id]);
+  if (check.status === 'loading') return <Loading label="Loading the check…" />;
+  if (check.status === 'error') return <ErrorView title="Could not load this check" detail={check.error} />;
+  return <CheckResult id={id} check={check.data} filesBase={runAsset(id, '')} />;
+}
+
+/** filesBase: where the bundle's files live — the live API's run folder by default, /runs/<id>/ for a replay. */
+export function CheckResult({ id, check, filesBase }: { id: string; check: CheckBundle; filesBase?: string }) {
+  const base = filesBase ?? liveFilesBase(apiBase(), id);
+  if (check.report.mode === 'audit') return <AuditResult check={check} base={base} replay={!!filesBase} />;
+  return <DesignCheckResult id={id} check={check} base={base} />;
 }
 
 /** No design frames (Oct 13): the build measured on its own — no score, what broke, what a phone loses. */
-function AuditResult({ id, check }: { id: string; check: CheckBundle }) {
+function AuditResult({ check, base, replay }: { check: CheckBundle; base: string; replay: boolean }) {
   const { report } = check;
-  const base = useMemo(() => liveFilesBase(apiBase(), id), [id]);
   const asset = (rel: string | undefined) => (rel ? resolveAsset(base, rel) : null);
   const cells = useMemo(() => checkCells(report), [report]);
   const fails = report.fluidity.fails.length;
@@ -215,14 +228,16 @@ function AuditResult({ id, check }: { id: string; check: CheckBundle }) {
           </div>
         </section>
       </div>
-      <p className="mt-6 text-xs text-ink-muted">Captured and measured in a Token Factory Sandbox. Your page was not changed.</p>
+      <p className="mt-6 text-xs text-ink-muted">
+        {replay ? 'A recorded audit, played back: no models or sandboxes are called. ' : ''}Captured and measured in a Token Factory Sandbox
+        {check.usd ? ` for ${fmtUsd(check.usd, 3)}` : ''}. The page was not changed.
+      </p>
     </div>
   );
 }
 
-function DesignCheckResult({ id, check }: { id: string; check: CheckBundle }) {
+function DesignCheckResult({ id, check, base }: { id: string; check: CheckBundle; base: string }) {
   const { report } = check;
-  const base = useMemo(() => liveFilesBase(apiBase(), id), [id]);
   const asset = (rel: string | undefined) => (rel ? resolveAsset(base, rel) : null);
   const cells = useMemo(() => checkCells(report), [report]);
   const hurts = useMemo(() => hurtList(report), [report]);

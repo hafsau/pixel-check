@@ -1,7 +1,7 @@
 // Parsing of ui/public/runs/index.json. Tolerates entries from older exporters (no "type" = static run).
 import type { BundleType, IndexEntry } from './types';
 
-const TYPES: BundleType[] = ['static', 'interaction', 'group'];
+const TYPES: BundleType[] = ['static', 'interaction', 'group', 'check'];
 
 type Raw = Record<string, unknown>;
 
@@ -20,6 +20,17 @@ export function normalizeIndex(raw: unknown): IndexEntry[] {
     if (type === 'static') out.push({ ...base, type, match: Number(r.match) || 0, per_bp: isObj(r.per_bp) ? r.per_bp : {} } as IndexEntry);
     else if (type === 'interaction')
       out.push({ ...base, type, variants: Array.isArray(r.variants) ? r.variants : [], bps: Array.isArray(r.bps) ? r.bps : [], page: String(r.page ?? ''), state: String(r.state ?? ''), kind: (r.kind as string) ?? null } as IndexEntry);
+    else if (type === 'check')
+      out.push({
+        ...base,
+        type,
+        mode: r.mode === 'audit' ? 'audit' : 'check',
+        url: typeof r.url === 'string' ? r.url : null,
+        match: typeof r.match === 'number' ? r.match : null,
+        fluid_pass: typeof r.fluid_pass === 'boolean' ? r.fluid_pass : null,
+        warnings: Number(r.warnings) || 0,
+        vanished: Number(r.vanished) || 0,
+      } as IndexEntry);
     else out.push({ ...base, type, variants: Array.isArray(r.variants) ? r.variants : [], held: Array.isArray(r.held) ? r.held : [], given: (r.given as string) ?? null, page: String(r.page ?? '') } as IndexEntry);
   }
   return out.sort((a, b) => b.created - a.created);
@@ -30,10 +41,12 @@ export function splitIndex(entries: IndexEntry[]) {
     static: entries.filter((e) => e.type === 'static'),
     interaction: entries.filter((e) => e.type === 'interaction'),
     group: entries.filter((e) => e.type === 'group'),
+    check: entries.filter((e) => e.type === 'check'),
   } as {
     static: Extract<IndexEntry, { type: 'static' }>[];
     interaction: Extract<IndexEntry, { type: 'interaction' }>[];
     group: Extract<IndexEntry, { type: 'group' }>[];
+    check: Extract<IndexEntry, { type: 'check' }>[];
   };
 }
 
@@ -41,6 +54,7 @@ export function entryHref(e: { type: BundleType; id: string }): string {
   const id = encodeURIComponent(e.id);
   if (e.type === 'interaction') return `/interaction/${id}`;
   if (e.type === 'group') return `/group/${id}`;
+  if (e.type === 'check') return `/check/${id}/replay`;
   return `/run/${id}`;
 }
 
