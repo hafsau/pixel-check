@@ -792,7 +792,7 @@ def _split(children: list[Item], bp: str):
         if not left or not right:
             continue
         s1 = min(boxes[id(d)][0] for d in right)
-        if any(boxes[id(d)][0] < s0 for d in right) or s1 - s0 < 16:
+        if any(boxes[id(d)][0] < s0 for d in right) or s1 - s0 < 8:     # an icon beside its text: 13 px
             continue
         ly0, ly1 = min(boxes[id(d)][1] for d in left), max(boxes[id(d)][1] + boxes[id(d)][3] for d in left)
         ry0, ry1 = min(boxes[id(d)][1] for d in right), max(boxes[id(d)][1] + boxes[id(d)][3] for d in right)

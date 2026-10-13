@@ -234,3 +234,11 @@ def test_the_pipeline_runs_inside_the_runs_sizes_and_they_are_restored(tmp_path)
     wait_done(c, c.post("/api/runs", files=up, data={"passcode": "letmein"}).json()["id"])
     assert seen["bps"]["desktop"] == (1071, 1177) and seen["prefix"]["desktop"] == "lg:"
     assert config.BREAKPOINTS["desktop"] == (1280, 800) and scaffold.PREFIX["desktop"] == "xl:"
+
+
+def test_a_runs_result_reports_the_fonts_it_detected():
+    from orchestrator.api import spec_fonts
+    spec = {"breakpoints": {"mobile": {"fonts": {"body": "Space Grotesk", "kept": ["Space Grotesk", "JetBrains Mono"]}},
+                            "tablet": {}}}
+    assert spec_fonts(spec) == {"body": "Space Grotesk", "kept": ["Space Grotesk", "JetBrains Mono"]}
+    assert spec_fonts({"breakpoints": {"mobile": {}}}) is None

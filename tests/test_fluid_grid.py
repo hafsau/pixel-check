@@ -33,3 +33,11 @@ def test_unequal_lines_are_not_a_grid():
     p = items([(24, 100, 200, 40), (240, 100, 200, 40), (456, 100, 200, 40), (24, 160, 200, 40)])
     mode, _ = _row_mode(p, "tablet", (0, 0, 768, 1024))
     assert mode["disp"] != "grid"
+
+
+def test_an_icon_beside_a_number_and_label_is_two_columns():
+    """Dashboard stat card: a 44 px icon, then "12" over "Workouts" 13 px to its right — the gutter rule wanted 16."""
+    from orchestrator.fluid import _split
+    p = items([(41, 301, 44, 44), (98, 307, 21, 15), (98, 332, 50, 9)])
+    s = _split(p, "tablet")
+    assert s is not None and [c.key for c in s[2]] == ["c0"] and [c.key for c in s[3]] == ["c1", "c2"]

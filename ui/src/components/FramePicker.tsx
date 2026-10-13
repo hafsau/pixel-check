@@ -1,15 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { cap } from '../lib/format';
-import { frameFacts, validateFrame, type LiveBp } from '../lib/live';
+import { frameFacts, validateFrame, type FrameFacts, type LiveBp } from '../lib/live';
 import { IconAlert, IconCheck } from './Icons';
 
 export type FrameState =
   | { status: 'empty' }
   | { status: 'checking'; url: string }
-  | { status: 'ok'; file: File; url: string }
+  | { status: 'ok'; file: File; url: string; facts: FrameFacts }
   | { status: 'error'; message: string; url?: string };
 
-/** One PNG input, checked in the browser like the server checks it (type, ≤ 8 MB, exact pixel size), with a preview. */
+/** One frame input, checked in the browser like the server checks it (PNG / JPEG / WebP, ≤ 8 MB, 320–1600 px wide,
+ *  any height), with a preview. width / height: the typical export, for the empty slot's shape only. */
 export function FramePicker({ bp, width, height, onChange }: { bp: LiveBp; width: number; height: number; onChange?: (s: FrameState) => void }) {
   const id = useId();
   const [state, setState] = useState<FrameState>({ status: 'empty' });
@@ -36,29 +37,31 @@ export function FramePicker({ bp, width, height, onChange }: { bp: LiveBp; width
     const facts = await frameFacts(file);
     if (n !== seq.current) return; // a newer pick replaced this one
     const msg = validateFrame(bp, facts);
-    set(msg ? { status: 'error', message: msg, url: facts.width ? url : undefined } : { status: 'ok', file, url });
+    set(msg ? { status: 'error', message: msg, url: facts.width ? url : undefined } : { status: 'ok', file, url, facts });
   };
 
   const msgId = `${id}-msg`;
   const url = state.status !== 'empty' ? state.url : undefined;
+  // the slot takes the picked frame's own shape (a full-page export is tall), capped so a page stays a thumbnail
+  const [sw, sh] = state.status === 'ok' ? [state.facts.width, Math.min(state.facts.height, state.facts.width * 2.4)] : [width, height];
   return (
     <div className="flex flex-col gap-2">
       <label htmlFor={id} className="flex items-baseline justify-between text-sm font-medium">
         <span>{cap(bp)}</span>
         <span className="font-mono text-[11px] text-ink-faint">
-          {width}×{height} PNG
+          PNG · JPG · WebP, any size
         </span>
       </label>
       <div
         className={`inset relative mx-auto flex items-center justify-center overflow-hidden border ${state.status === 'error' ? 'border-bad/50' : state.status === 'ok' ? 'border-good/40' : 'border-dashed border-line'}`}
-        style={{ aspectRatio: `${width} / ${height}`, width: `min(100%, calc(9rem * ${width / height}))` }}
+        style={{ aspectRatio: `${sw} / ${sh}`, width: `min(100%, calc(9rem * ${sw / sh}))` }}
       >
-        {url ? <img src={url} alt={`${cap(bp)} frame preview`} className="h-full w-full object-contain" /> : <span className="text-[11px] text-ink-faint">No frame yet</span>}
+        {url ? <img src={url} alt={`${cap(bp)} frame preview`} className="h-full w-full object-cover object-top" /> : <span className="text-[11px] text-ink-faint">No frame yet</span>}
       </div>
       <input
         id={id}
         type="file"
-        accept="image/png"
+        accept="image/png,image/jpeg,image/webp"
         aria-describedby={msgId}
         aria-invalid={state.status === 'error'}
         onChange={(e) => void pick(e.target.files?.[0])}
@@ -68,7 +71,7 @@ export function FramePicker({ bp, width, height, onChange }: { bp: LiveBp; width
         {state.status === 'checking' && <span className="text-ink-muted">Checking…</span>}
         {state.status === 'ok' && (
           <span className="inline-flex items-center gap-1 text-good">
-            <IconCheck /> PNG, {width}×{height}
+            <IconCheck /> {state.facts.width}×{state.facts.height}
           </span>
         )}
         {state.status === 'error' && (

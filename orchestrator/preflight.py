@@ -46,9 +46,14 @@ def _static() -> list[dict]:
             from . import typography
             typography._ensure_fonts()
             missing = [f"inter-{w}.ttf" for w in (400, 500, 600, 700) if not (typography.FONT_DIR / f"inter-{w}.ttf").exists()]
+            for fam, v in typography.CATALOG.items():      # the whole catalogue, at image build (not the first run)
+                for w in v["weights"]:
+                    if not typography._ttf(fam, w).exists():
+                        missing.append(f"{v['slug']}-{w}.ttf")
         except Exception as e:
             missing = [f"TTF build failed: {type(e).__name__}"]
-    out.append(_check("fonts", not missing, "missing: " + ", ".join(missing) if missing else "Inter 400–700 (TTFs built)"))
+    faces = sum(len(v["weights"]) for v in __import__("orchestrator.typography", fromlist=["CATALOG"]).CATALOG.values())
+    out.append(_check("fonts", not missing, "missing: " + ", ".join(missing) if missing else f"catalogue: {faces} faces (TTFs built)"))
     try:
         from .api import capture_files
         files = capture_files("check_page.mjs")

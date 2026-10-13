@@ -2,9 +2,9 @@
 
 **One codebase. Every breakpoint. Verified.**
 
-PixelCheck turns a screen's three design frames — mobile 390 × 844, tablet 768 × 1024, desktop 1280 × 800 — or
-your own live page into **one responsive React + Tailwind codebase**, then **proves** it: every candidate is
-rendered and scored at all three sizes and at 360 / 375 / 500 / 1024 / 1600 px inside **Nebius Token Factory
+PixelCheck turns a screen's three design frames — your own exports, phone / tablet / desktop widths, any height —
+or your own live page into **one responsive React + Tailwind codebase**, then **proves** it: every candidate is
+rendered and scored at the frames' own sizes and at the widths in between inside **Nebius Token Factory
 Sandboxes**, with models served by **Nebius Token Factory** — **NVIDIA Nemotron 3 Ultra** plans responsive intent,
 **NVIDIA Nemotron 3 Super** names page regions and makes the repair agent's edits, and Gemma 3 27B reads the design
 frames.
@@ -22,8 +22,8 @@ someone else made and try to repair it (repair is experimental: its benchmark is
 
 | Mode | Input | Output |
 |---|---|---|
-| **Rebuild** | 3 design frames (PNG), or a URL of a page you own | One responsive React + Tailwind `App.jsx` (or a runnable Vite project), scored per size, with a width sweep. For your own site: your real images back in the delivered code |
-| **Check** | 3 design frames + any build (a public URL or an `App.jsx`) | How close the build is at 390 / 768 / 1280, whether it breaks at 360 / 375 / 500 / 1024 / 1600 px and why, which text is missing. Your code is not changed (a URL is captured as it looks, with animations stopped and scrollbars hidden; an `App.jsx` must be one React + Tailwind file and is rendered offline with Inter / IBM Plex Mono and the default Tailwind theme — remote images and fonts don't load) |
+| **Rebuild** | 3 design frames as you export them (PNG / JPEG / WebP, 320–1600 px wide, any height; labelled by width, full pages scored on their first screen), or a URL of a page you own | One responsive React + Tailwind `App.jsx` (or a runnable Vite project), scored per size, with a width sweep. For your own site: your real images back in the delivered code |
+| **Check** | 3 design frames + any build (a public URL or an `App.jsx`) | How close the build is at the frames' own widths, whether it breaks in between (360 / 375 / midpoints / 1600 px) and why, which text is missing. Your code is not changed (a URL is captured as it looks, with animations stopped and scrollbars hidden; an `App.jsx` must be one React + Tailwind file and is rendered offline with the default Tailwind theme and the fonts it names from PixelCheck's catalogue — remote images and fonts don't load) |
 | **Repair** _(experimental)_ | A check of an `App.jsx` | Nemotron edits Tailwind classes size by size (it cannot add, move or delete elements, but it can restyle, hide or reorder them), the sandbox re-checks, the best round is kept — or your code comes back unchanged. Benchmark pending: [`docs/REPAIR.md`](docs/REPAIR.md) |
 
 Every run can be replayed in the web app: the design, each candidate's renders, the score per size, the width
@@ -36,13 +36,15 @@ design frames ─┐
   (or a URL ──── capture in a sandbox, network on, behind URL guards)
                ▼
   perception: Gemma 3 27B reads the text and roles  +  Tesseract OCR and pixel measurement
-               (boxes ±1–6 px, colours, fonts from glyph metrics, borders, radius, soft shadows)
+               (boxes ±1–6 px, colours, borders, radius, soft shadows, gradients, photos → placeholder blocks,
+                the font of each text line from 16 open families, size / weight / spacing in that font's metrics)
                ▼
-  fluid compiler: bands, rows, columns, layers → one responsive App.jsx (md: / xl: classes, no per-size copies)
+  fluid compiler: bands, rows, grids, columns, layers → one responsive App.jsx (standard Tailwind screens for the
+     frames' widths — e.g. 402 / 768 / 1071 → base / md: / lg: — no per-size copies)
      + Nemotron 3 Ultra: responsive intent (repeated cards, centred vs full-bleed) — adopted only if verified no worse
      + Nemotron 3 Super: semantic regions (header / nav / main / section / footer)
                ▼
-  Token Factory Sandbox (network off): esbuild + Tailwind → Chromium at 390 / 768 / 1280 and 360–1600
+  Token Factory Sandbox (network off): esbuild + Tailwind → Chromium at the frames' sizes and 360–1600
                ▼
   disposable scoring fork (the only place the design frames enter): score per size → worst size = Match
 ```
@@ -50,7 +52,7 @@ design frames ─┐
 - **Code-writing models never see the design images** — only text measurements. The frames enter only the
   disposable scoring run.
 - **Anti-cheat**: a static lint (no `<img>`, `url(`, `data:`, canvas, iframes, per-breakpoint copies of the same
-  text) and runtime integrity checks (same DOM at every size, ≤ 30 % positioned elements, no traced layouts, no
+  text, no arbitrary breakpoints such as `min-[402px]:max-[403px]:` that would pin a layout to one measured width) and runtime integrity checks (same DOM at every size, ≤ 30 % positioned elements, no traced layouts, no
   hidden-text stuffing). A cheat scores 0. Red team: 389 attack candidates, best attack 46. (Check mode measures
   someone else's code and applies no anti-cheat verdict.)
 - **Interactions** (development only — not in the demo): from a state frame (menu open, tab selected), Nemotron 3
@@ -79,13 +81,24 @@ drifting off-centre or the page background ending early. Details: [`docs/SCORING
 | **hafsausmani.com** (the author's own site), live run from its URL — replay in [`ui/published/hafsausmani-home`](ui/published/hafsausmani-home/run.json) | worst size **87.4** (mobile 94.6 · tablet 92.9 · desktop 87.4), width sweep pass; **~33 s** end to end with the design reading cached (compile + render + score 14 s; an uncached reading adds 13–30 s); model **$0.0022** (+ ~$0.001 for an uncached reading) and sandbox ~$0.04; the delivered code shows the site's real headshot and icon |
 | **Check-mode sanity check**: hafsausmani.com checked against its own screenshots (a reproducibility test, not accuracy on a different build) — [`docs/results/hafsausmani-self-check.json`](docs/results/hafsausmani-self-check.json) | **99.8 · 99.9 · 99.9**, no missing text, width sweep pass |
 | **Repair benchmark** on builds generated by other tools from original designs | _pending_ — the bar was committed before any repair run (commit `c2f9412`): [`docs/REPAIR.md`](docs/REPAIR.md) |
-| **Original benchmark screens** (designed for this project) | _pending_ |
+| **Original design: the author's fitness dashboard** — her own exports as they are (402 × 2453, 768 × 1936, 1071 × 1177; Lato; stock photos, gradients) | worst size **59.9** (mobile 66.0 · tablet 60.1 · desktop 59.9), width sweep pass — a **local** measurement on the first screen of each frame (Oct 12); the sandbox run is pending. A sandbox render of an earlier version matched its local score (41.1 vs 40.9) |
+| **hafsausmani.com with its own fonts** (Space Grotesk + JetBrains Mono; its Moche headline face is commercial and gets an open stand-in) | **54.5** (78.8 · 71.9 · 54.5), local measurement (Oct 12). Not comparable with the 87.4 above, where both the site and the rebuild were normalised to Inter |
 
 During development we measured on captures of public third-party pages. They are not reported as results here:
 the pages are not ours to publish (some development measurements appear in `docs/FEEDBACK.md` as tool feedback).
 
 **Cost**: a rebuild is ~$0.002–0.01 in model calls plus ~$0.05 of sandbox time; a check ~$0.001 (design reading)
-+ sandbox; a repair ~$0.02–0.04 in model calls + up to 13 sandbox checks (~$0.25).
++ sandbox; a repair ~$0.02–0.04 in model calls + up to 13 sandbox checks — about **$0.55** in all, mostly sandbox time.
+
+## Limits (stated plainly)
+- Frames are scored on their **first screen** (a full page taller than 1.5 screens is cropped for scoring; the
+  whole page is kept for display). Full-page scoring needs a different scorer and is not done yet.
+- **Fonts**: 16 open-licence families (Inter, Lato, Roboto, Open Sans, Poppins, Montserrat, DM Sans, Source Sans 3,
+  Space Grotesk, Manrope, Nunito Sans, Work Sans, Plus Jakarta Sans, IBM Plex Sans, IBM Plex Mono, JetBrains Mono).
+  Commercial fonts (SF Pro, Helvetica, Avenir, …) cannot be shipped: the closest open family is used and named.
+- **Photos** become placeholder blocks in scored code (code never embeds images); on your own site the delivered
+  code puts your real images back.
+- Text is Latin-script only (OCR and the fonts).
 
 ## Safety in URL mode
 Public http(s) pages only, with "I own this page or have permission" confirmed. Every resolved address must be

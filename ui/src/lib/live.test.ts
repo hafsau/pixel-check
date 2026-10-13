@@ -16,6 +16,7 @@ import {
   failureNotice,
   runDuration,
   sourceHost,
+  readAs,
   type LiveStatus,
 } from './live';
 
@@ -29,20 +30,22 @@ const png = (w: number, h: number, extra: Partial<{ type: string; name: string; 
 });
 
 describe('validateFrame', () => {
-  it('accepts a PNG of exactly the breakpoint size', () => {
+  // Oct 12: frames as designers export them — any width 320–1600 px, any height, PNG / JPEG / WebP (lib/frames.ts)
+  it('accepts designer exports of any size within the bounds', () => {
     expect(validateFrame('mobile', png(390, 844))).toBeNull();
-    expect(validateFrame('tablet', png(768, 1024))).toBeNull();
-    expect(validateFrame('desktop', png(1280, 800))).toBeNull();
+    expect(validateFrame('mobile', png(402, 2453))).toBeNull();
+    expect(validateFrame('desktop', png(1071, 1177))).toBeNull();
   });
 
-  it('names the frame and both sizes when the size is wrong', () => {
-    expect(validateFrame('tablet', png(800, 1024))).toBe('Tablet: the frame must be exactly 768×1024 px (got 800×1024).');
+  it('names the frame and the bound when the size is out of range', () => {
+    expect(validateFrame('tablet', png(300, 1024))).toBe('Tablet: 300 px wide — frames must be 320–1600 px wide (export at 1×).');
   });
 
-  it('rejects non-PNG files by type, and accepts a .png name when the browser gives no type', () => {
-    expect(validateFrame('mobile', png(390, 844, { type: 'image/jpeg', name: 'a.jpg' }))).toBe('Mobile: the frame must be a PNG image.');
+  it('accepts PNG, JPEG and WebP by type or name, nothing else', () => {
+    expect(validateFrame('mobile', png(390, 844, { type: 'image/jpeg', name: 'a.jpg' }))).toBeNull();
     expect(validateFrame('mobile', png(390, 844, { type: '', name: 'A.PNG' }))).toBeNull();
-    expect(validateFrame('mobile', png(390, 844, { type: '', name: 'a.webp' }))).toBe('Mobile: the frame must be a PNG image.');
+    expect(validateFrame('mobile', png(390, 844, { type: '', name: 'a.webp' }))).toBeNull();
+    expect(validateFrame('mobile', png(390, 844, { type: 'image/gif', name: 'a.gif' }))).toBe('Mobile: use a PNG, JPEG or WebP image.');
   });
 
   it('rejects files over the server limit (8 MB) before decoding matters', () => {
@@ -51,7 +54,7 @@ describe('validateFrame', () => {
   });
 
   it('reports an image the browser could not decode', () => {
-    expect(validateFrame('mobile', png(0, 0))).toBe('Mobile: the frame is not a readable PNG image.');
+    expect(validateFrame('mobile', png(0, 0))).toBe('Mobile: not a readable image.');
   });
 
   it('uses the same sizes as the server', () => {
@@ -295,5 +298,20 @@ describe('runDuration / sourceHost', () => {
 describe('brand name in live messages', () => {
   it('says PixelCheck (no hyphen) when the server is unreachable', () => {
     expect(apiErrorMessage(0, null)).toBe('Could not reach the PixelCheck server. Check your connection and try again.');
+  });
+});
+
+// Oct 12: the result says how the frames were read and which fonts were detected
+describe('readAs', () => {
+  it('names the fonts and the frame notes', () => {
+    const st = {
+      state: 'done', stages: [],
+      result: { match: 59.9, per_bp: null, usd: 0.004, fonts: { body: 'Lato', kept: ['Lato'] } },
+      frames: { notes: ['mobile.png is 2453 px tall (a full page) → scored on the first screen (402×870); the full page is kept for display'] },
+    } as unknown as LiveStatus;
+    expect(readAs(st)).toEqual({ fonts: 'Lato', notes: ['mobile.png is 2453 px tall (a full page) → scored on the first screen (402×870); the full page is kept for display'] });
+    const two = { ...st, result: { ...st.result, fonts: { body: 'Space Grotesk', kept: ['Space Grotesk', 'JetBrains Mono', 'Roboto'] } } } as LiveStatus;
+    expect(readAs(two).fonts).toBe('Space Grotesk (text) · JetBrains Mono, Roboto');
+    expect(readAs({ state: 'done', stages: [] } as LiveStatus)).toEqual({ fonts: null, notes: [] });
   });
 });

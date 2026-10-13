@@ -309,6 +309,10 @@ def merge(vlm: dict, meas: dict) -> dict:
             continue
         if any(b.get("media") and _inside_box(l["box"], b["box"]) for b in meas.get("blocks", [])):
             continue
+        y0, y1 = l["box"][1], l["box"][1] + l["box"][3]
+        if any(t.get("box") and _norm(tx) in _norm(t["text"])        # a piece of a text already placed on this row
+               and min(y1, t["box"][1] + t["box"][3]) - max(y0, t["box"][1]) > 0 for t in texts):
+            continue
         item = {"text": tx, "role": "other", "size_px": None, "weight": None, "box": list(l["box"]), "color": l["color"],
                 "on": l["backdrop"], "measured": True, "lines": 1, "line_boxes": [list(l["box"])], "line_texts": [tx],
                 "ocr_only": True, "font": l.get("font")}

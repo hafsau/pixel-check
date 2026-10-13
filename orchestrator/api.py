@@ -601,6 +601,11 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     return app
 
 
+def spec_fonts(spec: dict) -> dict | None:
+    """The fonts perception detected for the page ({"body", "kept"}), for the run's result."""
+    return next((f["fonts"] for f in (spec.get("breakpoints") or {}).values() if (f or {}).get("fonts")), None)
+
+
 def default_pipeline(run_id: str, frames: dict[str, bytes], run_dir: Path, emit) -> dict:
     """The real pipeline for one live run: perceive (vision + measurement) → loop (fluid compiler, Nemotron names
     the regions, render + score in Token Factory Sandboxes) → replay bundle for the web app."""
@@ -625,7 +630,7 @@ def default_pipeline(run_id: str, frames: dict[str, bytes], run_dir: Path, emit)
     from export_run import export
     export(run_dir / run_id, run_dir / "frames", title="Live run", label="live", index=False, out_root=run_dir / "bundle",
            owned=run_dir if owned else None)
-    return {"match": res.get("match"), "per_bp": res.get("per_bp"), "usd": res.get("spend_usd")}
+    return {"match": res.get("match"), "per_bp": res.get("per_bp"), "usd": res.get("spend_usd"), "fonts": spec_fonts(spec)}
 
 
 def _save_owned(got: dict[str, bytes], run_dir: Path) -> None:

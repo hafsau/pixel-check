@@ -56,3 +56,14 @@ def test_a_clipped_headline_takes_its_font_and_weight_from_the_other_frames():
                                                        t("USMANI", 727, clipped=True)]}}
     u = clipped_from_frames(bps)["desktop"]["texts"][1]
     assert u["font"] == "Manrope" and u["weight"] == 800
+
+
+def test_a_fragment_of_a_matched_text_on_the_same_row_is_not_added_again():
+    """Dashboard: OCR split "A gentle routine to wake up your | joints" at a gap; the paragraph matched the first part
+    and "joints" was re-added on its own, floating beside the paragraph."""
+    meas = {"text_lines": [line("A gentle routine to wake up your", [398, 687, 230, 15]), line("joints", [632, 687, 38, 15]),
+                           line("and build consistent motion.", [398, 710, 190, 15])],
+            "blocks": [], "size": [1071, 1177], "background": "#ffffff"}
+    vlm = {"texts": [{"text": "A gentle routine to wake up your joints and build consistent motion.", "role": "body"}]}
+    texts = [t["text"] for t in merge(vlm, meas)["texts"]]
+    assert "joints" not in texts

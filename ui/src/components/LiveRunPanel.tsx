@@ -4,6 +4,7 @@ import { FRAME_SIZES, LIVE_BPS, framesReady, urlReady, validatePageUrl, type Liv
 import { getHealth, startRun, startUrlRun, type Health, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
+import { FramesSummary, inferPicked } from './FramesSummary';
 import { IconAlert } from './Icons';
 
 export type HealthState = { status: 'loading' } | { status: 'waking' } | { status: 'ok'; health: Health } | { status: 'unreachable'; message: string };
@@ -32,7 +33,8 @@ export function LiveRunPanel() {
   const h = health.status === 'ok' ? health.health : null;
   const open = !!h?.live && h.runs_left_today > 0 && h.runs_left_total > 0;
   const urlError = validatePageUrl(url);
-  const ready = mode === 'upload' ? framesReady(statuses, passcode) : urlReady(url, owns, passcode);
+  const inferred = inferPicked(frames);
+  const ready = mode === 'upload' ? framesReady(statuses, passcode) && !!inferred?.ok : urlReady(url, owns, passcode);
   const missing = [
     ...(mode === 'upload'
       ? LIVE_BPS.filter((bp) => statuses[bp] !== 'ok').map((bp) => `a valid ${bp} frame`)
@@ -98,6 +100,9 @@ export function LiveRunPanel() {
                   {LIVE_BPS.map((bp) => (
                     <FramePicker key={bp} bp={bp} width={FRAME_SIZES[bp][0]} height={FRAME_SIZES[bp][1]} onChange={(st) => setFrames((f) => ({ ...f, [bp]: st }))} />
                   ))}
+                  <div className="sm:col-span-3">
+                    <FramesSummary inferred={inferred} />
+                  </div>
                 </div>
                 <div hidden={mode !== 'url'} className={mode !== 'url' ? 'hidden' : 'grid gap-4 pt-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'}>
                   <div className="flex flex-col gap-3">
@@ -182,7 +187,7 @@ export function LiveRunPanel() {
                   ? 'Ready. Frames are sent to the PixelCheck server only when you press Start.'
                   : 'Ready. The address is sent to the PixelCheck server only when you press Start.'
                 : `Still needed: ${missing.join(', ')}.`}{' '}
-            {mode === 'upload' ? 'Frames must be PNG, exactly 390×844, 768×1024 and 1280×800, up to 8 MB each.' : ''}
+            {mode === 'upload' ? 'Frames: your own exports — PNG, JPEG or WebP, 320–1600 px wide, any height (full pages are scored on their first screen), up to 8 MB each.' : ''}
           </p>
         </form>
       </div>

@@ -3,7 +3,7 @@ import type { Run } from '../lib/types';
 import { Link } from '../lib/router';
 import { useLoad } from '../lib/data';
 import { normalizeRun } from '../lib/owned';
-import { apiBase, failureNotice, liveFilesBase, resolveAsset, runDuration, sourceHost, stageProgress, type LiveStatus, type PollState, type StageState } from '../lib/live';
+import { apiBase, failureNotice, liveFilesBase, readAs, resolveAsset, runDuration, sourceHost, stageProgress, type LiveStatus, type PollState, type StageState } from '../lib/live';
 import { useLivePoll } from '../lib/liveApi';
 import { fmtSecs, fmtUsd } from '../lib/format';
 import { RunView } from './RunPage';
@@ -14,11 +14,11 @@ import { IconAlert, IconArrowLeft, IconCheck, IconMinus, IconX } from '../compon
 /** /live/<id> and /live/<id>/result: progress while the run works, then the normal Run / Result view from the API's bundle. */
 export function LiveRunPage({ id, result = false }: { id: string; result?: boolean }) {
   const [poll, retry] = useLivePoll(id);
-  if (poll.phase === 'done') return <LiveResult id={id} result={result} usd={poll.status?.result?.usd ?? null} source={poll.status?.source} />;
+  if (poll.phase === 'done') return <LiveResult id={id} result={result} usd={poll.status?.result?.usd ?? null} source={poll.status?.source} read={readAs(poll.status)} />;
   return <LiveProgress id={id} poll={poll} retry={retry} />;
 }
 
-function LiveResult({ id, result, usd, source }: { id: string; result: boolean; usd: number | null; source?: LiveStatus['source'] }) {
+function LiveResult({ id, result, usd, source, read }: { id: string; result: boolean; usd: number | null; source?: LiveStatus['source']; read?: ReturnType<typeof readAs> }) {
   const host = sourceHost(source);
   const base = useMemo(() => liveFilesBase(apiBase(), id), [id]);
   const asset = useCallback((rel: string) => resolveAsset(base, rel) ?? '', [base]);
@@ -42,6 +42,17 @@ function LiveResult({ id, result, usd, source }: { id: string; result: boolean; 
         <p className="mt-4 rounded-md border border-accent/30 bg-accent/5 px-3 py-2 text-xs text-ink-muted">
           <strong className="font-semibold text-ink">Live run</strong> — made just now from {host ? <>a capture of <span className="font-medium text-ink">{host}</span></> : 'your frames'} with real models on Nebius Token Factory and real renders in
           Token Factory Sandboxes{usd != null ? ` · model cost ${fmtUsd(usd, 4)}` : ''}. It is not added to the replay list.
+          {read?.fonts && (
+            <>
+              <br />
+              <strong className="font-semibold text-ink">Fonts detected:</strong> {read.fonts}.
+            </>
+          )}
+          {read?.notes.map((n) => (
+            <span key={n} className="block">
+              {n}.
+            </span>
+          ))}
         </p>
       }
     />

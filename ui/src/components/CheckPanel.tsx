@@ -6,6 +6,7 @@ import { REPAIR_ROUNDS } from '../lib/repair';
 import { getHealth, startCheck, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
+import { FramesSummary, inferPicked } from './FramesSummary';
 import { Availability, type HealthState } from './LiveRunPanel';
 import { IconAlert } from './Icons';
 
@@ -35,7 +36,8 @@ export function CheckPanel() {
 
   const statuses = Object.fromEntries(LIVE_BPS.map((bp) => [bp, frames[bp]?.status === 'ok' ? 'ok' : frames[bp]?.status === 'error' ? 'error' : 'empty'])) as Record<LiveBp, 'ok' | 'error' | 'empty'>;
   const draft = { frames: statuses, source, url, code, owns, passcode, repair };
-  const ready = checkReady(draft);
+  const inferred = inferPicked(frames);
+  const ready = checkReady(draft) && !!inferred?.ok;
   const missing = checkMissing(draft);
   const h = health.status === 'ok' ? health.health : null;
   const open = !!h?.live && h.runs_left_today > 0 && h.runs_left_total > 0;
@@ -68,7 +70,7 @@ export function CheckPanel() {
             Check a build
           </h1>
           <p className="mt-1.5 text-sm text-ink-muted">
-            Measures your build against your frames at <span className="num">390 / 768 / 1280</span> and across <span className="num">360–1600</span> px. Your build is not changed.
+            Measures your build against your frames at their own widths and across <span className="num">360–1600</span> px. Your build is not changed.
           </p>
         </div>
         <Availability health={health} />
@@ -85,6 +87,9 @@ export function CheckPanel() {
               {LIVE_BPS.map((bp) => (
                 <FramePicker key={bp} bp={bp} width={FRAME_SIZES[bp][0]} height={FRAME_SIZES[bp][1]} onChange={(st) => setFrames((f) => ({ ...f, [bp]: st }))} />
               ))}
+            </div>
+            <div className="mt-3">
+              <FramesSummary inferred={inferred} />
             </div>
           </div>
 

@@ -1,4 +1,5 @@
 // Live mode client logic (orchestrator/api.py). Pure functions — the components only wire them to fetch and timers.
+import { checkFrameFile } from './frames';
 
 export type LiveBp = 'mobile' | 'tablet' | 'desktop';
 export const LIVE_BPS: LiveBp[] = ['mobile', 'tablet', 'desktop'];
@@ -22,14 +23,7 @@ export interface FrameFacts {
 
 /** Client-side check mirroring the server's (api._check_png + MAX_BYTES). → message, or null when the frame is fine. */
 export function validateFrame(bp: LiveBp, f: FrameFacts): string | null {
-  const name = cap(bp);
-  const isPng = f.type ? f.type === 'image/png' : /\.png$/i.test(f.name);
-  if (!isPng) return `${name}: the frame must be a PNG image.`;
-  if (f.size > MAX_FRAME_BYTES) return `${name}: the frame is larger than ${MAX_FRAME_BYTES / (1024 * 1024)} MB.`;
-  if (!f.width || !f.height) return `${name}: the frame is not a readable PNG image.`;
-  const [w, h] = FRAME_SIZES[bp];
-  if (f.width !== w || f.height !== h) return `${name}: the frame must be exactly ${w}×${h} px (got ${f.width}×${f.height}).`;
-  return null;
+  return checkFrameFile(bp, f); // any size within the bounds (lib/frames.ts mirrors orchestrator/frames.py)
 }
 
 export function framesReady(frames: Partial<Record<LiveBp, 'ok' | 'error' | 'empty'>>, passcode: string): boolean {
@@ -91,7 +85,9 @@ export type StageId = 'capture' | 'perceive' | 'compile' | 'bundle';
 export interface LiveStatus {
   state: LiveState;
   stages: { stage: StageId | (string & {}); t: number }[];
-  result?: { match: number | null; per_bp: Partial<Record<LiveBp, number>> | null; usd: number | null } | null;
+  result?: { match: number | null; per_bp: Partial<Record<LiveBp, number>> | null; usd: number | null;
+            fonts?: { body: string; kept: string[] } | null } | null;
+  frames?: { notes?: string[]; sizes?: Partial<Record<LiveBp, [number, number]>> } | null;
   bundle?: string | null;
   error?: string;
   created?: number;
@@ -229,4 +225,13 @@ export function sourceHost(source: { url?: string } | null | undefined): string 
   } catch {
     return null;
   }
+}
+
+/** How the run read the frames: the detected fonts (body face first, then mono / display faces) and the frame notes
+ *  (relabelled by width, full pages scored on their first screen). */
+export function readAs(st: LiveStatus | null | undefined): { fonts: string | null; notes: string[] } {
+  const f = st?.result?.fonts;
+  const others = f ? f.kept.filter((k) => k !== f.body) : [];
+  const fonts = f ? (others.length ? `${f.body} (text) · ${others.join(', ')}` : f.body) : null;
+  return { fonts, notes: st?.frames?.notes ?? [] };
 }

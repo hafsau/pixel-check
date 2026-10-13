@@ -82,6 +82,9 @@ What the Render free plan means, and how the code copes:
   scripts. Inside the image `/api/health` answers; OCR on a stored frame matches the Mac's Tesseract on 8/9 lines
   within 2 px.
 - `npm run build` ships no runs unless published; with the hafsausmani.com replay published, `vite preview` serves it.
+- Oct 12: the API image's static preflight also builds the font catalogue (16 open families, 96 faces) so the
+  first live run does not convert fonts; the sandbox runtime image is **v20** (fonts + frames at any size). Frames
+  are accepted as designers export them (320–1600 px wide, any height, PNG / JPEG / WebP).
 - Oct 8 (tests, no deploy yet): state restored from a gist after a wiped disk; live mode off when the gist is
   unreadable; runs refused when the gist cannot record them; visitors stored only as keyed hashes; preflight
   state-store check; the web app's waking retry.

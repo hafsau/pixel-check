@@ -82,6 +82,55 @@ def ocr_lines(img: np.ndarray) -> list[dict]:
     return kept
 
 
+def _line_of(words: list[dict], src: dict) -> dict:
+    x0 = min(w["box"][0] for w in words); y0 = min(w["box"][1] for w in words)
+    x1 = max(w["box"][0] + w["box"][2] for w in words); y1 = max(w["box"][1] + w["box"][3] for w in words)
+    return {**{k: v for k, v in src.items() if k not in ("text", "box", "words")},
+            "text": " ".join(w["text"] for w in words), "box": [x0, y0, x1 - x0, y1 - y0], "words": words}
+
+
+def clean_lines(img: np.ndarray, lines: list[dict]) -> list[dict]:
+    """OCR lines cleaned before typography (Oct 12): split where neighbouring words differ a lot in height (a big
+    "4" joined with a small "Days"); drop a leading "word" with no letters or digits, or a single character in a
+    clearly different colour — an icon OCR read as a character ("> Current Streak")."""
+    from .typography import metrics
+
+    def size(w):                     # font size implied by the word's ink height and its own letters' shapes
+        hr = metrics(w["text"], 400)[0] if any(ch.isalnum() for ch in w["text"]) else 0
+        return w["box"][3] / hr if hr > 0.2 else float(w["box"][3])
+    out = []
+    for l in lines:
+        ws = l.get("words") or []
+        if len(ws) < 2:
+            out.append(l)
+            continue
+        groups = [[ws[0]]]
+        def real(w):                 # a word, or a number — not a stray letter with an odd OCR box
+            t = w["text"].strip()
+            return len(t) >= 2 or t.isdigit()
+        for w in ws[1:]:
+            p = groups[-1][-1]
+            a, b = size(p), size(w)
+            big = p if a >= b else w
+            side_by_side = w["box"][0] >= p["box"][0] + p["box"][2] - 2     # overlapping boxes: an OCR mess
+            if max(a, b) > 1.6 * min(a, b) and max(p["box"][3], w["box"][3]) >= 14 and real(big) and side_by_side:
+                groups.append([w])
+            else:
+                groups[-1].append(w)
+        for g in groups:
+            if len(g) >= 2 and len(g[0]["text"]) <= 2:
+                f, rest = g[0], g[1:]
+                rs = float(np.median([size(w) for w in rest]))
+                ink_f, _ = ink_and_backdrop(img, f["box"])
+                ink_r, _ = ink_and_backdrop(img, rest[0]["box"])
+                rgb = lambda h: np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], float)
+                if (not any(ch.isalnum() for ch in f["text"])
+                        or (len(f["text"]) == 1 and np.linalg.norm(rgb(ink_f) - rgb(ink_r)) > 120)):
+                    g = rest
+            out.append(l if len(g) == len(ws) else _line_of(g, l))      # untouched lines keep OCR's own box
+    return out
+
+
 def _iou(a, b) -> float:
     ax1, ay1, bx1, by1 = a[0] + a[2], a[1] + a[3], b[0] + b[2], b[1] + b[3]
     iw, ih = max(0, min(ax1, bx1) - max(a[0], b[0])), max(0, min(ay1, by1) - max(a[1], b[1]))
@@ -575,7 +624,7 @@ def drop_caret(img: np.ndarray, line: dict) -> dict:
 
 def measure(png: bytes) -> dict:
     img = np.asarray(Image.open(io.BytesIO(png)).convert("RGB"), dtype=np.float32)
-    lines = [drop_caret(img, l) for l in ocr_lines(img)]
+    lines = [drop_caret(img, l) for l in clean_lines(img, ocr_lines(img))]
     from .typography import DEFAULT, family_scores, infer, page_families
     for l in lines:
         l["color"], l["backdrop"] = ink_and_backdrop(img, l["box"])
