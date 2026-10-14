@@ -520,10 +520,18 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                                 "lines_kept": fix.get("lines_kept"), "usd": fix.get("usd")}
                     summary = {"before": (fix.get("start") or {}).get("worst"),
                                "after": (fix.get("best") or {}).get("worst"), "lines_kept": fix.get("lines_kept")}
+            diagnostics = {}
+            if frames:                       # explain the score beside it (orchestrator/diagnose.py); never changes it
+                from .diagnose import diagnose
+                diagnostics = diagnose(rep, frames=frames, build=out.get("build") or {},
+                                       design_texts=out.get("design_texts") or {}, dom=out.get("dom") or {},
+                                       fonts=out.get("fonts"))
             (bundle / "check.json").write_text(json.dumps({
                 "type": "check", "id": rid, "source": json.loads(status_path(rid).read_text()).get("source"),
                 "report": rep, "design": paths["design"], "build": paths["build"],
-                "design_texts": out.get("design_texts") or {}, "usd": out.get("usd"), "repair": repaired}))
+                "design_texts": out.get("design_texts") or {}, "usd": out.get("usd"), "repair": repaired,
+                "fonts": out.get("fonts"), "diagnostics": diagnostics,
+                "sizes": {bp: list(wh) for bp, wh in _frames.sizes_of(frames).items()} if frames else None}))
             write_status(rid, state="done", stages=stages,
                          result={"match": rep.get("match"), "per_bp": per_bp,
                                  "fluid_pass": (rep.get("fluidity") or {}).get("pass"), "usd": out.get("usd"),

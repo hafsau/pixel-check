@@ -4,6 +4,7 @@ import { LIVE_BPS, joinUrl, liveFilesBase, progressOf, validatePageUrl, type Liv
 import { fmtScore } from './score';
 import type { CellState, StripCell } from './viz';
 import { parseRepair, REPAIR_ROUNDS, type Repair } from './repair';
+import { parseDiagnostics, type Diagnostics } from './diagnostics';
 
 export const MAX_CODE_CHARS = 300_000; // api.MAX_CODE
 /** Every width the check reports on: the three design sizes plus the sandbox's in-between sweep. */
@@ -154,6 +155,10 @@ export interface CheckBundle {
   report: CheckReport;
   /** Nemotron's repair of the App.jsx; null when not requested. */
   repair: Repair | null;
+  /** readings that explain the score (orchestrator/diagnose.py); {} for older bundles and audits */
+  diagnostics: Diagnostics;
+  /** the run's frame sizes (scored first screen); null for older bundles and audits */
+  sizes: FrameSizes;
 }
 
 type Obj = Record<string, unknown>;
@@ -261,7 +266,19 @@ export function parseCheck(raw: unknown, fallbackPerBp?: Partial<Record<LiveBp, 
     usd: num(raw.usd),
     report: parseReport(raw.report, fallbackPerBp),
     repair: parseRepair(raw.repair),
+    diagnostics: parseDiagnostics(raw.diagnostics),
+    sizes: parseSizes(raw.sizes),
   };
+}
+
+function parseSizes(x: unknown): FrameSizes {
+  if (!isObj(x)) return null;
+  const out: Partial<Record<LiveBp, [number, number]>> = {};
+  for (const bp of LIVE_BPS) {
+    const v = x[bp];
+    if (Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && n > 0)) out[bp] = [v[0], v[1]];
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 // ------------------------------------------------------------------------------------------------ width strip
@@ -300,10 +317,23 @@ export interface CheckCell extends StripCell {
 }
 
 /** The report → one cell per width (360 … 1600). Design sizes carry their score; failures carry their reasons. */
-export function checkCells(report: CheckReport): CheckCell[] {
+export type FrameSizes = Partial<Record<LiveBp, [number, number]>> | null;
+
+/** The strip's widths: what the sweep measured plus the run's frame widths (frames come at any width); bundles
+ *  from before Oct 13 have no sizes and keep the standard layout. */
+function stripLayout(report: CheckReport, sizes?: FrameSizes): { widths: number[]; at: Record<number, LiveBp> } {
+  if (!sizes) return { widths: [...CHECK_WIDTHS], at: DESIGN_AT };
+  const at: Record<number, LiveBp> = Object.fromEntries(LIVE_BPS.flatMap((b) => (sizes[b] ? [[sizes[b]![0], b]] : [])));
+  const measured = Object.keys(report.fluidity.widths).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  const widths = [...new Set([...measured, ...Object.keys(at).map(Number)])].sort((a, b) => a - b);
+  return widths.length ? { widths, at } : { widths: [...CHECK_WIDTHS], at: DESIGN_AT };
+}
+
+export function checkCells(report: CheckReport, sizes?: FrameSizes): CheckCell[] {
   const { widths, fails } = report.fluidity;
-  return CHECK_WIDTHS.map((width) => {
-    const bp = DESIGN_AT[width];
+  const layout = stripLayout(report, sizes);
+  return layout.widths.map((width) => {
+    const bp = layout.at[width];
     const key = bp ?? String(width);
     const row = widths[key];
     const base = bp ? { width, kind: 'design' as const, bp, score: report.perBp[bp] } : { width, kind: 'between' as const };
@@ -316,9 +346,9 @@ export function checkCells(report: CheckReport): CheckCell[] {
 }
 
 /** One copy-able line: "Worst size 64.2 (mobile) · fails at 360 px: sideways scroll (+2 more)". */
-export function checkSummary(report: CheckReport): string {
+export function checkSummary(report: CheckReport, sizes?: FrameSizes): string {
   const head = `Worst size ${fmtScore(report.match)}${report.worst ? ` (${report.worst})` : ''}`;
-  const cells = checkCells(report);
+  const cells = checkCells(report, sizes);
   const fails = cells.filter((c) => c.state === 'fail');
   if (fails.length) {
     const f = fails[0];
@@ -327,7 +357,7 @@ export function checkSummary(report: CheckReport): string {
   }
   const between = cells.filter((c) => c.kind === 'between');
   const allPass = report.fluidity.pass === true || (between.length > 0 && between.every((c) => c.state === 'pass'));
-  return allPass ? `${head} · fits ${CHECK_WIDTHS[0]}–${CHECK_WIDTHS[CHECK_WIDTHS.length - 1]} px` : head;
+  return allPass ? `${head} · fits ${cells[0].width}–${cells[cells.length - 1].width} px` : head;
 }
 
 // ------------------------------------------------------------------------------------------------ what hurt the score

@@ -116,3 +116,19 @@ def test_a_code_build_error_is_called_a_build_error():
     out = C.check_code("export default function App(){return <main>}", FRAMES, sb=sb, read_design=lambda f: SPEC,
                        emit=lambda *a, **k: None)
     assert "could not be rendered" in out["report"]["reason"] and "captured" not in out["report"]["reason"]
+
+
+def test_a_check_returns_the_design_text_sizes_and_fonts_for_its_diagnostics():
+    """Oct 13: the scorer's target files stay text + box; the result also carries size_px and the detected fonts."""
+    spec = {"breakpoints": {bp: {"texts": [{"text": "Plan your week", "box": [10, 10, 200, 30], "measured": True,
+                                             "size_px": 24, "font": "Lato"}],
+                                  "fonts": {"body": "Lato", "kept": ["Lato"]}} for bp in FRAMES}}
+    sb = FakeSB()
+    out = C.check_url("https://build.example/", FRAMES, sb=sb, read_design=lambda f: spec, verify=lambda m: None,
+                      emit=lambda *a, **k: None)
+    assert json.loads(sb.runs[1][1]["files"]["/work/targets/mobile.text.json"]) == [{"text": "Plan your week", "box": [10, 10, 200, 30]}]
+    assert out["design_texts"]["mobile"] == [{"text": "Plan your week", "box": [10, 10, 200, 30], "size_px": 24}]
+    assert out["fonts"] == {"body": "Lato", "kept": ["Lato"]}
+    code = C.check_code("export default function App(){return null}", FRAMES, sb=FakeSB(), read_design=None,
+                        emit=lambda *a, **k: None, spec=spec)
+    assert code["fonts"] == {"body": "Lato", "kept": ["Lato"]} and code["design_texts"]["mobile"][0]["size_px"] == 24

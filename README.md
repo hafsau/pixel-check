@@ -113,6 +113,11 @@ the pages are not ours to publish (some development measurements appear in `docs
 - **Photos** become placeholder blocks in scored code (code never embeds images); on your own site the delivered
   code puts your real images back.
 - Text is Latin-script only (OCR and the fonts).
+- **One alignment per screen**: the score lines up the whole first screen once, so spacing that drifts down the page
+  (a build 3 % taller than its design) costs points on every row below — 11–17 points in our test. Each check result
+  shows why its score is what it is: points lost per factor, the drift band by band, the font the build uses vs the
+  design's, and for every text not credited whether it is missing, moved (how far), below the first screen or covered.
+  These readings never change the score. Details: [`docs/SCORING.md`](docs/SCORING.md).
 
 ## Safety in URL mode
 Public http(s) pages only, with "I own this page or have permission" confirmed. Every resolved address must be

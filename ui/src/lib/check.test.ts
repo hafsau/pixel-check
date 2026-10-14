@@ -534,3 +534,30 @@ describe('audit progress', () => {
     expect(checkStages(st).map((s: { id: string }) => s.id)).toEqual(['capture', 'audit']);
   });
 });
+
+describe('a check at the run’s own frame sizes (frames come at any width)', () => {
+  const raw = {
+    type: 'check',
+    sizes: { mobile: [402, 870], tablet: [768, 1024], desktop: [1071, 1177] },
+    report: {
+      mode: 'check', match: 38.49, worst: 'mobile', per_bp: { mobile: 38.49, tablet: 61.13, desktop: 64.54 },
+      fluidity: { pass: true, fails: [], widths: { '360': { overflow: 0, ok: true }, '375': { overflow: 0, ok: true }, '585': { overflow: 0, ok: true }, '920': { overflow: 0, ok: true }, '1600': { overflow: 0, ok: true }, mobile: { overflow: 0 }, tablet: { overflow: 0 }, desktop: { overflow: 0 } } },
+    },
+  };
+
+  it('reads the sizes and lays the strip out at the measured widths plus the frame widths', () => {
+    const c = parseCheck(raw);
+    expect(c.sizes).toEqual({ mobile: [402, 870], tablet: [768, 1024], desktop: [1071, 1177] });
+    const cells = checkCells(c.report, c.sizes);
+    expect(cells.map((x) => x.width)).toEqual([360, 375, 402, 585, 768, 920, 1071, 1600]);
+    expect(cells.filter((x) => x.kind === 'design').map((x) => (x as { bp: string }).bp)).toEqual(['mobile', 'tablet', 'desktop']);
+    expect(cells.every((x) => x.state === 'pass')).toBe(true);
+    expect(checkSummary(c.report, c.sizes)).toBe('Worst size 38.5 (mobile) · fits 360–1600 px');
+  });
+
+  it('older bundles (no sizes) keep the standard layout', () => {
+    const c = parseCheck({ type: 'check', report: { fluidity: { widths: {} } } });
+    expect(c.sizes).toBeNull();
+    expect(checkCells(c.report, c.sizes).map((x) => x.width)).toEqual([...CHECK_WIDTHS]);
+  });
+});

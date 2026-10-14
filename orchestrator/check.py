@@ -34,6 +34,21 @@ def design_texts(spec: dict) -> dict[str, list]:
             for bp in BPS}
 
 
+def design_details(spec: dict) -> dict[str, list]:
+    """design_texts plus each text's measured size (size_px) — for the diagnostics beside the score, never scored."""
+    out = {}
+    for bp, texts in design_texts(spec).items():
+        full = [t for t in (spec.get("breakpoints", {}).get(bp) or {}).get("texts", [])
+                if t.get("measured") and t.get("box") and (t.get("text") or "").strip()]
+        out[bp] = [{**t, **({"size_px": f["size_px"]} if isinstance(f.get("size_px"), (int, float)) else {})}
+                   for t, f in zip(texts, full)]
+    return out
+
+
+def _fonts(spec: dict) -> dict | None:
+    return next((f["fonts"] for f in (spec.get("breakpoints") or {}).values() if (f or {}).get("fonts")), None)
+
+
 def _score(sb, image: str, frames: dict[str, bytes], spec: dict, emit) -> dict:
     emit("score")
     files = {f"/work/targets/{bp}.png": png for bp, png in frames.items()}
@@ -62,7 +77,7 @@ def check_url(url: str, frames: dict[str, bytes], *, sb, read_design, verify, em
     spec = read_design(frames)
     report = _score(sb, r.result_image, frames, spec, emit)
     return {"report": report, "build": {bp: got[f"{bp}.png"] for bp in BPS if f"{bp}.png" in got}, "meta": meta,
-            "design_texts": design_texts(spec), "dom": _doms(got), "nodes": _doms(got, "nodes")}
+            "design_texts": design_details(spec), "fonts": _fonts(spec), "dom": _doms(got), "nodes": _doms(got, "nodes")}
 
 
 AUDIT_CMD = "cd /opt/pc && timeout 120 python3 evaluate.py --audit"
@@ -116,4 +131,4 @@ def check_code(code: str, frames: dict[str, bytes], *, sb, read_design, emit, sp
     if "captured" in (report.get("reason") or ""):      # the scorer's wording is for URLs; here the code did not build
         report["reason"] = "the code could not be rendered (it did not build)"
     return {"report": report, "build": {bp: got[f"{bp}.png"] for bp in BPS if f"{bp}.png" in got}, "meta": {},
-            "design_texts": design_texts(spec), "dom": _doms(got), "nodes": _doms(got, "nodes")}
+            "design_texts": design_details(spec), "fonts": _fonts(spec), "dom": _doms(got), "nodes": _doms(got, "nodes")}

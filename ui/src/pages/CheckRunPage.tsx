@@ -16,6 +16,7 @@ import { CompareSlider } from '../components/CompareSlider';
 import { FittedFrame, FrameEmpty, FrameImage } from '../components/FittedFrame';
 import { StageIcon, useElapsed } from './LiveRunPage';
 import { RepairCard } from '../components/RepairCard';
+import { driftLine, findings, lostRows, textStatusLabel, type SizeDiagnostics, type TextStatus } from '../lib/diagnostics';
 
 /** /check/<id>: progress while the check runs, then the measured result. */
 export function CheckRunPage({ id }: { id: string }) {
@@ -239,9 +240,9 @@ function AuditResult({ check, base, replay }: { check: CheckBundle; base: string
 function DesignCheckResult({ id, check, base }: { id: string; check: CheckBundle; base: string }) {
   const { report } = check;
   const asset = (rel: string | undefined) => (rel ? resolveAsset(base, rel) : null);
-  const cells = useMemo(() => checkCells(report), [report]);
+  const cells = useMemo(() => checkCells(report, check.sizes), [report, check.sizes]);
   const hurts = useMemo(() => hurtList(report), [report]);
-  const summary = useMemo(() => checkSummary(report), [report]);
+  const summary = useMemo(() => checkSummary(report, check.sizes), [report, check.sizes]);
   const [bp, setBp] = useState<LiveBp>(report.worst ?? 'mobile');
   const activeCell = cells.findIndex((c) => c.score !== undefined && (c as { bp?: LiveBp }).bp === bp);
 
@@ -271,12 +272,16 @@ function DesignCheckResult({ id, check, base }: { id: string; check: CheckBundle
             <CopyLine text={summary} />
           </section>
 
-          <section aria-labelledby="hurt-title" className="card card-pad">
-            <h2 id="hurt-title" className="eyebrow">
-              What hurt the score
-            </h2>
-            <HurtList hurts={hurts} />
-          </section>
+          {check.diagnostics[bp] ? (
+            <WhyCard bp={bp} score={report.perBp[bp]} diag={check.diagnostics[bp]!} warnings={report.warnings} />
+          ) : (
+            <section aria-labelledby="hurt-title" className="card card-pad">
+              <h2 id="hurt-title" className="eyebrow">
+                What hurt the score
+              </h2>
+              <HurtList hurts={hurts} />
+            </section>
+          )}
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
@@ -320,7 +325,7 @@ function DesignCheckResult({ id, check, base }: { id: string; check: CheckBundle
       </div>
 
       <p className="mt-6 text-xs text-ink-muted">
-        Measured in a Token Factory Sandbox{check.usd != null ? ` · model cost ${fmtUsd(check.usd, 4)}` : ''}. Your build was not changed{check.repair && repairOutcome(check.repair).improved ? ' — the repair is a separate copy' : ''}.
+        Measured in a Token Factory Sandbox{check.usd != null ? ` · cost ${fmtUsd(check.usd, 3)} (models + sandbox)` : ''}. Your build was not changed{check.repair && repairOutcome(check.repair).improved ? ' — the repair is a separate copy' : ''}.
       </p>
     </div>
   );
@@ -368,6 +373,66 @@ function CopyLine({ text }: { text: string }) {
   );
 }
 
+/** Why the selected size scored what it did (orchestrator/diagnose.py): points per factor, named differences,
+ *  warnings — readings beside the score, never part of it. */
+function WhyCard({ bp, score, diag, warnings }: { bp: LiveBp; score: number | null; diag: SizeDiagnostics; warnings: string[] }) {
+  const rows = lostRows(diag.lost);
+  const named = findings(diag);
+  const max = Math.max(1, ...rows.map((r) => r.points));
+  return (
+    <section aria-labelledby="why-title" className="card card-pad flex flex-col gap-4">
+      <h2 id="why-title" className="eyebrow">
+        Why {cap(bp)} scored {fmtScore(score)}
+      </h2>
+      {rows.length > 0 && (
+        <div>
+          <p className="text-xs text-ink-muted">Points lost, by factor</p>
+          <ul className="mt-2 flex flex-col gap-2">
+            {rows.map((r) => (
+              <li key={r.key} className="grid grid-cols-[7.5rem_minmax(0,1fr)_2.5rem] items-center gap-2 text-sm">
+                <span>{r.label}</span>
+                <span className="h-1.5 overflow-hidden rounded-pill bg-ink/[0.07]" aria-hidden="true">
+                  <span className="block h-full rounded-pill bg-bad/70" style={{ width: `${(r.points / max) * 100}%` }} />
+                </span>
+                <span className="num text-right text-ink-muted">−{r.points}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {named.length > 0 && (
+        <div>
+          <p className="text-xs text-ink-muted">What differs</p>
+          <ul className="mt-1.5 flex flex-col gap-1.5 text-sm">
+            {named.map((f) => (
+              <li key={f} className="flex items-start gap-1.5">
+                <span aria-hidden="true" className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
+                <span>{f}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div>
+          <p className="text-xs text-ink-muted">Warnings</p>
+          <ul className="mt-1.5 flex flex-col gap-1.5 text-sm">
+            {warnings.map((w) => (
+              <li key={w} className="flex items-start gap-1.5">
+                <IconAlert /> <span>{w}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="text-[11px] leading-relaxed text-ink-muted">
+        The score lines up the whole screen once, so spacing that drifts down the page costs points on every row below it. These readings explain
+        the score; they do not change it.
+      </p>
+    </section>
+  );
+}
+
 function HurtList({ hurts }: { hurts: Hurt[] }) {
   if (!hurts.length)
     return (
@@ -399,12 +464,15 @@ function HurtList({ hurts }: { hurts: Hurt[] }) {
 
 function SizeView({ check, bp, setBp, asset }: { check: CheckBundle; bp: LiveBp; setBp: (b: LiveBp) => void; asset: (rel: string | undefined) => string | null }) {
   const [mode, setMode] = useState<'side' | 'overlay'>('side');
-  const [w, h] = FRAME_SIZES[bp];
+  const [w, h] = check.sizes?.[bp] ?? FRAME_SIZES[bp];
   const data = check.report.bps[bp];
   const design = asset(check.design[bp]);
   const build = asset(check.build[bp]);
   const missing = data?.missingText ?? [];
+  const diag = check.diagnostics[bp];
+  const statuses: TextStatus[] = diag?.text.length ? diag.text : missing.map((t) => ({ text: t, status: 'missing' as const }));
   const marks = missingBoxes(missing, check.designTexts[bp] ?? []);
+  const drift = driftLine(diag?.drift ?? null);
   const regions = data?.regions ?? [];
 
   return (
@@ -435,7 +503,7 @@ function SizeView({ check, bp, setBp, asset }: { check: CheckBundle; bp: LiveBp;
           <figure className="min-w-0">
             <FittedFrame width={w} height={h}>
               {design ? <FrameImage src={design} alt={`${cap(bp)} design`} /> : <FrameEmpty>No design frame</FrameEmpty>}
-              {design && marks.map((m, i) => <Mark key={i} box={m.box} frame={[w, h]} label={`Missing: ${m.text}`} dashed />)}
+              {design && marks.map((m, i) => <Mark key={i} box={m.box} frame={[w, h]} label={`${m.text}: ${textStatusLabel(statuses.find((t) => t.text.toLowerCase() === m.text.toLowerCase()) ?? { text: m.text, status: 'missing' })}`} dashed />)}
             </FittedFrame>
             <figcaption className="mt-1.5 text-center text-xs text-ink-muted">Design</figcaption>
           </figure>
@@ -460,12 +528,16 @@ function SizeView({ check, bp, setBp, asset }: { check: CheckBundle; bp: LiveBp;
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-1.5 text-xs">
-        {missing.length ? (
+        {statuses.length ? (
           <>
-            <span className="mr-1 font-medium text-ink">Missing text</span>
-            {missing.map((t, i) => (
-              <span key={i} className="mono-chip max-w-full truncate border-bad/30 bg-bad/5 text-bad" title={t}>
-                {t}
+            <span className="mr-1 font-medium text-ink">Text not credited</span>
+            {statuses.map((t, i) => (
+              <span
+                key={i}
+                className={`mono-chip max-w-full truncate ${t.status === 'missing' ? 'border-bad/30 bg-bad/5 text-bad' : 'border-warn/30 bg-warn/5 text-warn'}`}
+                title={`${t.text}: ${textStatusLabel(t)}`}
+              >
+                {t.text} <span className="font-sans opacity-80">· {textStatusLabel(t)}</span>
               </span>
             ))}
           </>
@@ -477,10 +549,19 @@ function SizeView({ check, bp, setBp, asset }: { check: CheckBundle; bp: LiveBp;
         {(marks.length > 0 || regions.length > 0) && (
           <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-ink-muted" aria-hidden="true">
             <span className="inline-block h-2.5 w-3.5 rounded-[2px] border-2 border-bad" /> differs
-            <span className="ml-2 inline-block h-2.5 w-3.5 rounded-[2px] border-2 border-dashed border-bad" /> missing
+            <span className="ml-2 inline-block h-2.5 w-3.5 rounded-[2px] border-2 border-dashed border-bad" /> text not credited
           </span>
         )}
       </div>
+      {drift && (
+        <p className="mt-3 text-xs text-ink-muted">
+          <span className="font-medium text-ink">Drift, top to bottom:</span> <span className="num">{drift}</span>
+          {diag?.drift?.scale != null && Math.abs(1 - diag.drift.scale) >= 0.015 && (
+            <> · spacing {Math.round(Math.abs(1 - diag.drift.scale) * 100)}% {diag.drift.scale < 1 ? 'tighter' : 'looser'} than the design</>
+          )}
+          <span className="block text-[11px]">How far the build sits from the design in each band of the screen (+ lower, − higher; ? not placed).</span>
+        </p>
+      )}
     </section>
   );
 }

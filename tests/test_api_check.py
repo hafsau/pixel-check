@@ -4,6 +4,8 @@ Same gates as live mode: kill switch, passcode, caps, ownership confirmation and
 capture is verified (navigation, sensitive fields) before scoring. Fake checker, fake resolver. TDD, Oct 6."""
 import json
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from test_api import SIZES, png, wait_done
@@ -233,3 +235,36 @@ def test_repair_sandbox_cost_counts_in_its_three_run_budget(tmp_path, monkeypatc
         pass
     assert isinstance(seen.get("meter"), tf_client.TFClient)
     assert seen["meter"].run_budget == 3 * config.LIVE_RUN_BUDGET_USD    # a repair weighs 3 runs
+
+
+def test_a_check_bundle_carries_diagnostics_beside_the_score(tmp_path):
+    """Oct 13 council: the score is explained (text status, drift, points lost, named differences), not changed."""
+    def checker(*a):
+        out = fake_checker(*a)
+        out["dom"] = {"mobile": [{"text": "Start", "box": [1, 400, 41, 20], "font_size": "14px", "font_family": "Roboto"}]}
+        out["fonts"] = {"body": "Lato"}
+        out["report"]["breakpoints"]["mobile"].update(components={"structure": .5, "layout": .6, "text": .5, "color": .8},
+                                                      offset_px=[0, 0])
+        return out
+    c = client(tmp_path, checker=checker)
+    st = wait_done(c, post(c).json()["id"])
+    rep = c.get(st["bundle"]).json()
+    m = rep["diagnostics"]["mobile"]
+    assert m["text"] == [{"text": "Start", "status": "moved", "dy": 406, "dx": 19}]
+    assert m["font"] == {"design": "Lato", "build": "Roboto"}
+    assert sum(m["lost"].values()) == pytest.approx(100 - 64.2, abs=0.05)
+    assert rep["report"]["breakpoints"]["mobile"]["score"] == 64.2       # the score itself is untouched
+
+
+def test_an_audit_has_no_design_diagnostics(tmp_path):
+    c = client(tmp_path, checker=audit_checker)
+    r = c.post("/api/checks", data={"url": "https://example.com/app", "owns": "true", "passcode": "letmein"})
+    rep = c.get(wait_done(c, r.json()["id"])["bundle"]).json()
+    assert rep.get("diagnostics") in (None, {})
+
+
+def test_a_check_bundle_records_its_frame_sizes(tmp_path):
+    """The result page draws the frames and the width strip at the run's own sizes (frames come at any width)."""
+    c = client(tmp_path)
+    rep = c.get(wait_done(c, post(c).json()["id"])["bundle"]).json()
+    assert rep["sizes"] == {bp: list(wh) for bp, wh in SIZES.items()}

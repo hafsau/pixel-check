@@ -86,3 +86,22 @@ Round-2 attacks: `out/redteam/round2/` (local only). Full-pipeline regression (l
 Threshold changes made openly in round 2: "20 px offset ≥ 80" now applies with text off (with text on, strings pushed below the fold are genuinely missing; must still beat every hack). `h_heading_br` is not a markup-only variant (the `<br>` changes the mobile line break).
 
 Accepted residuals: oracle pixel textures built FROM the target image (stripes/checker at the target's ink density) still score high at pixel level — the code-writing models never receive image bytes (only text measurements derived from the design), so building such a texture would need the target pixels; this bounds credibility, not the loop; honest "close" lost ~3 points to a hidden "Password" label in the dev ground truth (production specs come from OCR of visible text).
+
+## Known limits, disclosed (Oct 13 — council review of an AI-built page)
+Found by checking a Lovable build of Hafsa's dashboard (first output, all three frames given; one example, not a
+benchmark). The score was **not** changed after seeing this result; these limits are disclosed and explained on the
+result page instead (`orchestrator/diagnose.py`).
+- **One alignment per screen.** The scorer tries one global shift (≤ 32 px per axis, 0.6 % per px). Spacing that
+  drifts down the page is not absorbed: a build ~3 % taller than its design costs ~11–17 points (tablet / desktop),
+  a phone layout ~20 % tighter ~24 points. Diagnostic only (never the score): undoing that stretch gave 77.8 / 75.3
+  (tablet / desktop) and 62.8 (mobile) instead of 61.1 / 64.5 / 38.5. Calibration covered shifts, not stretching.
+  Per-band alignment is future work: pre-registered and re-run against the red-team attacks before any change.
+- **Text "missing" vs moved.** Text counts only within max(96 px, 15 % of the width) of its design spot. Text that is
+  in the build but further away, below the first screen, or covered (e.g. by a platform badge) scores as not found.
+  The result page now says which: not in the build · N px higher/lower · below the first screen · covered or faint.
+- **Fonts barely register.** Edge structure hardly changes between similar sans faces (Roboto for Lato), so the score
+  is lenient there; the result page names the font the build uses vs the design's.
+- **Photos.** A different photo in the same place costs ~2 points (colour and edges); a grey placeholder costs about
+  the same. A platform badge inside the screen counts as extra content (~1 point).
+- **Repeatability.** The same URL checked four times on Oct 13 gave identical scores (38.49 / 61.13 / 64.54) and
+  identical diagnostics; quote whole numbers.
