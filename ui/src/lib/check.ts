@@ -5,6 +5,7 @@ import { fmtScore } from './score';
 import type { CellState, StripCell } from './viz';
 import { parseRepair, REPAIR_ROUNDS, type Repair } from './repair';
 import { parseDiagnostics, type Diagnostics } from './diagnostics';
+import { parseBrief, type Brief } from './brief';
 
 export const MAX_CODE_CHARS = 300_000; // api.MAX_CODE
 /** Every width the check reports on: the three design sizes plus the sandbox's in-between sweep. */
@@ -159,6 +160,8 @@ export interface CheckBundle {
   diagnostics: Diagnostics;
   /** the run's frame sizes (scored first screen); null for older bundles and audits */
   sizes: FrameSizes;
+  /** what to do next (orchestrator/brief.py); null for older bundles */
+  brief: Brief | null;
 }
 
 type Obj = Record<string, unknown>;
@@ -268,6 +271,7 @@ export function parseCheck(raw: unknown, fallbackPerBp?: Partial<Record<LiveBp, 
     repair: parseRepair(raw.repair),
     diagnostics: parseDiagnostics(raw.diagnostics),
     sizes: parseSizes(raw.sizes),
+    brief: parseBrief(raw.brief),
   };
 }
 
@@ -429,13 +433,14 @@ const CHECK_REST = [
 ];
 
 const CHECK_REPAIR = { id: 'repair', label: `Repairing (≤ ${REPAIR_ROUNDS} rounds)` };
+const CHECK_BRIEF = { id: 'brief', label: 'Writing the fix brief (Nemotron)' };
 
 /** The check's stages; App.jsx checks add "repair" when it was asked for or the server already reports it. */
 const AUDIT_STAGE = { id: 'audit', label: 'Measuring every width (no designs)' };
 
 export function checkStages(st: Pick<LiveStatus, 'state' | 'stages' | 'source'> & { audit?: boolean }, opts: { repair?: boolean } = {}) {
-  if (st.audit) return progressOf([CHECK_CAPTURE, AUDIT_STAGE], st);
+  if (st.audit) return progressOf([CHECK_CAPTURE, AUDIT_STAGE, CHECK_BRIEF], st);
   const isUrl = !!st.source?.url;
   const repair = !isUrl && (!!opts.repair || st.stages.some((s) => s.stage === 'repair'));
-  return progressOf([isUrl ? CHECK_CAPTURE : CHECK_RENDER, ...CHECK_REST, ...(repair ? [CHECK_REPAIR] : [])], st);
+  return progressOf([isUrl ? CHECK_CAPTURE : CHECK_RENDER, ...CHECK_REST, ...(repair ? [CHECK_REPAIR] : []), CHECK_BRIEF], st);
 }

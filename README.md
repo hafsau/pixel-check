@@ -5,15 +5,19 @@
 PixelCheck is a referee for UI builds. Your **design frames are the spec** — phone, tablet and desktop, exported as
 you made them. PixelCheck measures **any build** against them — a deployed URL or an `App.jsx`, made by v0, Lovable,
 a teammate or you — at each designed size and at every width in between, and shows what broke and why: a score
-per size, a red/green width strip, missing text, the element that overflows. The build never grades itself: every
+per size, a red/green width strip, what moved or went missing, the element that overflows — and **what to do next**:
+**NVIDIA Nemotron 3 Super** turns the measurements into a short fix brief and a message to paste into your AI builder,
+and a verifier outside the model drops any claim the measurements don't back. The build never grades itself: every
 render and score runs in an isolated **Nebius Token Factory Sandbox**, the design frames enter only a separate
 disposable scoring run, and anti-cheat checks stop a build from gaming the score.
 
 PixelCheck can also **rebuild** a screen from its frames — one responsive React + Tailwind codebase that passes the
 same checks — and try to **repair** a failing build (experimental: its benchmark is pending, see
-[`docs/REPAIR.md`](docs/REPAIR.md)). Models run on **Nebius Token Factory**: **NVIDIA Nemotron 3 Ultra** plans
-responsive intent, **NVIDIA Nemotron 3 Super** names page regions and proposes the repair agent's edits, and Gemma 3
-27B reads the design frames.
+[`docs/REPAIR.md`](docs/REPAIR.md)).
+
+**Built with** NVIDIA Nemotron 3 Super (writes the fix brief, names page regions, proposes the repair agent's edits) and
+Nemotron 3 Ultra (plans responsive intent) on Nebius Token Factory, Gemma 3 27B (reads the design frames), and Token
+Factory Sandboxes (capture every build, then score it in a disposable run with the network off).
 
 > Built solo for the Nebius × NVIDIA Global AI Hackathon (track: Coding and Agentic Engineering).
 > Demo: _(Vercel URL — added at deploy)_ · Video: _(YouTube — added at submission)_
@@ -24,8 +28,8 @@ responsive intent, **NVIDIA Nemotron 3 Super** names page regions and proposes t
 
 | Mode | Input | Output |
 |---|---|---|
-| **Check** | 3 design frames + any build (a public URL or an `App.jsx`) | How close the build is at the frames' own widths, whether it breaks in between (360 / 375 / midpoints / 1600 px) and why, which text is missing. Your code is not changed (a URL is captured as it looks, with animations stopped and scrollbars hidden; an `App.jsx` must be one React + Tailwind file and is rendered offline with the default Tailwind theme and the fonts it names from PixelCheck's catalogue — remote images and fonts don't load) |
-| **Audit** (no designs) | A public URL | The page measured on its own: whether it breaks at any width from 360 to 1600 px, platform badges ("Edit with Lovable", "Made with Replit"…) covering your content, and text shown on a larger screen but gone on a smaller one. No match score: there is no design to compare with |
+| **Check** | 3 design frames + any build (a public URL or an `App.jsx`) | How close the build is at the frames' own widths, whether it breaks in between (360 / 375 / midpoints / 1600 px) and why, which text moved or is missing, and a **fix brief** from Nemotron 3 Super (every claim tied to a measured fact) to paste into your AI builder. Your code is not changed (a URL is captured as it looks, with animations stopped and scrollbars hidden; an `App.jsx` must be one React + Tailwind file and is rendered offline with the default Tailwind theme and the fonts it names from PixelCheck's catalogue — remote images and fonts don't load) |
+| **Audit** (no designs) | A public URL | The page measured on its own: whether it breaks at any width from 360 to 1600 px, platform badges ("Edit with Lovable", "Made with Replit"…) covering your content, and text shown on a larger screen but gone on a smaller one. No match score: there is no design to compare with. Gets the same fix brief |
 | **Rebuild** (the reference) | 3 design frames as you export them (PNG / JPEG / WebP, 320–1600 px wide, any height; labelled by width, full pages scored on their first screen), or a URL of a page you own | One responsive React + Tailwind `App.jsx` (or a runnable Vite project), scored per size, with a width sweep. For your own site: your real images back in the delivered code |
 | **Repair** _(experimental)_ | A check of an `App.jsx` | Nemotron edits Tailwind classes size by size (it cannot add, move or delete elements, but it can restyle, hide or reorder them), the sandbox re-checks, the best round is kept — or your code comes back unchanged. Benchmark pending: [`docs/REPAIR.md`](docs/REPAIR.md) |
 

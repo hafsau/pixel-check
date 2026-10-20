@@ -142,17 +142,17 @@
      "bg_covers": true,
      "ok": true
     },
-    "mobile": {
-     "overflow": 0,
-     "max_gap": 52,
-     "bg_covers": true
-    },
     "tablet": {
      "overflow": 0,
      "max_gap": 82,
      "bg_covers": true
     },
     "desktop": {
+     "overflow": 0,
+     "max_gap": 52,
+     "bg_covers": true
+    },
+    "mobile": {
      "overflow": 0,
      "max_gap": 52,
      "bg_covers": true
@@ -196,10 +196,24 @@
   "desktop": "build/desktop.webp"
  },
  "design_texts": {},
- "usd": 0.041,
+ "usd": 0.0439,
  "repair": null,
+ "brief": {
+  "source": "none",
+  "summary": [],
+  "fix": [],
+  "added": 0,
+  "dropped": 0,
+  "dropped_items": [],
+  "intro": "Please fix these issues found when checking the page at every screen size:",
+  "facts": [],
+  "notes": []
+ },
+ "fonts": null,
+ "diagnostics": {},
+ "sizes": null,
  "title": "EqualTales",
  "label": "owned app \u00b7 audit",
  "publish_source": "owned:equaltales.vercel.app",
- "created": 1791926840.963773
+ "created": 1792519434.672545
 }

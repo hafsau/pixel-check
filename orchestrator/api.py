@@ -526,15 +526,24 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 diagnostics = diagnose(rep, frames=frames, build=out.get("build") or {},
                                        design_texts=out.get("design_texts") or {}, dom=out.get("dom") or {},
                                        fonts=out.get("fonts"))
+            source = json.loads(status_path(rid).read_text()).get("source")
+            emit("brief")                    # Nemotron: what to do next, verified against the facts (orchestrator/brief.py)
+            meter = out.get("client")        # the check's own model client: the brief's cost lands in this run
+            try:
+                from . import brief as _brief
+                fix = _brief.brief({"report": rep, "diagnostics": diagnostics, "source": source}, client=meter)
+            except Exception:                # an extra: never fail the check over it
+                fix = None
+            usd = round(meter.run_spend, 4) if meter is not None and hasattr(meter, "run_spend") else out.get("usd")
             (bundle / "check.json").write_text(json.dumps({
-                "type": "check", "id": rid, "source": json.loads(status_path(rid).read_text()).get("source"),
+                "type": "check", "id": rid, "source": source,
                 "report": rep, "design": paths["design"], "build": paths["build"],
-                "design_texts": out.get("design_texts") or {}, "usd": out.get("usd"), "repair": repaired,
+                "design_texts": out.get("design_texts") or {}, "usd": usd, "repair": repaired, "brief": fix,
                 "fonts": out.get("fonts"), "diagnostics": diagnostics,
                 "sizes": {bp: list(wh) for bp, wh in _frames.sizes_of(frames).items()} if frames else None}))
             write_status(rid, state="done", stages=stages,
                          result={"match": rep.get("match"), "per_bp": per_bp,
-                                 "fluid_pass": (rep.get("fluidity") or {}).get("pass"), "usd": out.get("usd"),
+                                 "fluid_pass": (rep.get("fluidity") or {}).get("pass"), "usd": usd,
                                  **({"repair": summary} if summary else {})},
                          bundle=f"/api/runs/{rid}/files/check.json")
         except (_Refused, CheckRefused) as e:
@@ -706,10 +715,12 @@ def default_checker(kind: str, build: str, frames: dict[str, bytes], run_dir: Pa
         from .check import audit_url
         out = audit_url(build, sb=sb, verify=verify, emit=emit)
         out["usd"] = round(client.run_spend, 4)
+        out["client"] = client             # the worker writes the fix brief with it (orchestrator/brief.py)
         return out
     out = (check_url(build, frames, sb=sb, read_design=read, verify=verify, emit=emit) if kind == "url"
            else check_code(build, frames, sb=sb, read_design=read, emit=emit))
     out["usd"] = round(client.run_spend, 4)
+    out["client"] = client
     return out
 
 

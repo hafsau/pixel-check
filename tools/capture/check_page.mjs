@@ -127,12 +127,27 @@ function badgeCover(where) {
       if (x1 < x0) continue;
       br = { left: x0 - 3, top: y0 - 3, right: x1 + 3, bottom: y1 + 3 };
     }
+    const hits = (r) => Math.min(r.right, br.right) - Math.max(r.left, br.left) > 2 && Math.min(r.bottom, br.bottom) - Math.max(r.top, br.top) > 2;
+    const seen = new Set();
     for (const el of document.querySelectorAll("body *")) {
-      if (el.closest("[data-pc-badge]") || ![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
-      const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
-      if (r.width <= 0 || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
-      const ix = Math.min(r.right, br.right) - Math.max(r.left, br.left), iy = Math.min(r.bottom, br.bottom) - Math.max(r.top, br.top);
-      if (ix > 2 && iy > 2) out.push(`${where}: ${what} covers "${el.textContent.trim().slice(0, 40)}" (a platform badge, not your layout)`);
+      const own = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim());
+      if (el.closest("[data-pc-badge]") || !own.length) continue;
+      const cs = getComputedStyle(el);
+      if (el.getBoundingClientRect().width <= 0 || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+      // a tap target counts by its box (part of a button covered matters even if the label reads); text by its glyphs
+      // (Oct 20 council: a full-width heading's box is not its letters)
+      const tap = el.closest("a, button, [role=button], label, input, select, textarea");
+      const target = tap && !tap.closest("[data-pc-badge]") ? tap : null;
+      const covered = target ? hits(target.getBoundingClientRect())
+        : own.some((n) => { const rg = document.createRange(); rg.selectNodeContents(n); return [...rg.getClientRects()].some(hits); });
+      if (!covered) continue;
+      // the visible label, lines separated by spaces, cut at a word ("Drop your selfie hereor click to browseP" before)
+      let name = ((target || el).innerText || (target || el).textContent || "").replace(/\s+/g, " ").trim();
+      if (name.length > 40) name = name.slice(0, 41).replace(/\s+\S*$/, "") + "…";
+      const kind = target ? (target.tagName === "A" ? "link" : "button") : null;
+      const line = kind ? `${where}: ${what} covers part of the "${name}" ${kind} (a platform badge, not your layout)`
+        : `${where}: ${what} covers "${name}" (a platform badge, not your layout)`;
+      if (!seen.has(line)) { seen.add(line); out.push(line); }
     }
   }
   return out;

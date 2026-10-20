@@ -30,8 +30,8 @@
    "tablet": null,
    "desktop": null
   },
-  "created": 1791926840.963773,
-  "usd": 0.041,
+  "created": 1792519434.672545,
+  "usd": 0.0439,
   "fluid_pass": true,
   "warnings": 0,
   "vanished": 0,
@@ -51,10 +51,10 @@
    "tablet": null,
    "desktop": null
   },
-  "created": 1791926841.0145102,
-  "usd": 0.0344,
+  "created": 1792519434.7249339,
+  "usd": 0.0354,
   "fluid_pass": true,
-  "warnings": 1,
+  "warnings": 3,
   "vanished": 0,
   "thumb": "build/mobile.webp",
   "source": "owned:heatshot-ai.lovable.app"
@@ -72,8 +72,8 @@
    "tablet": null,
    "desktop": null
   },
-  "created": 1791926841.043199,
-  "usd": 0.0303,
+  "created": 1792519434.7575948,
+  "usd": 0.0315,
   "fluid_pass": true,
   "warnings": 1,
   "vanished": 7,

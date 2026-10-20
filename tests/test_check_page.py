@@ -85,12 +85,29 @@ SHADOWBADGE = (b'<!doctype html><html><head><title>Pill</title><style>body{margi
                b'{mode:"closed"});h.innerHTML=\'<a href="https://replit.com" style="position:fixed;right:24px;bottom:20px;'
                b'padding:8px 14px;background:#222;color:#fff;font:13px sans-serif">Made with Replit</a>\';</script></body></html>')
 
+# Oct 20 council: the badge test used each text element's whole box — a full-width heading counted as "covered" when its
+# letters were nowhere near the badge (the Lovable dashboard's "Weekly Activity"). Text is judged by its glyphs; a
+# button or link by its box (part of a tap target covered matters even if the label is readable)
+WIDEHEAD = (b'<!doctype html><html><head><title>Wide</title><style>body{margin:0;font:16px sans-serif}main{padding:20px}'
+            b'h2{position:fixed;left:0;right:0;bottom:6px;margin:0;padding:4px 16px;font-size:18px;text-align:left}'
+            b'.out{position:fixed;right:8px;bottom:6px;background:#111;color:#fff;padding:6px 10px;font-size:13px}</style>'
+            b'</head><body><main><h1>Dashboard</h1></main><h2>Weekly Activity</h2>'
+            b'<a class="out" href="https://lovable.dev">Edit with Lovable</a></body></html>')
+
+# a button's name is its visible text with spaces between lines, cut at a word ("Drop your selfie hereor click to browseP")
+BUTTONNAME = (b'<!doctype html><html><head><title>Upload</title><style>body{margin:0;font:16px sans-serif}main{padding:20px}'
+              b'.drop{position:fixed;left:10px;right:10px;bottom:6px;display:block;padding:10px;text-align:left}'
+              b'.drop span,.drop small{display:block}.out{position:fixed;right:8px;bottom:8px;background:#111;color:#fff;'
+              b'padding:6px 10px;font-size:13px}</style></head><body><main><h1>Headshots</h1></main><button class="drop">'
+              b'<span>Drop your selfie here</span><span>or click to browse</span><small>PNG, JPG up to 10MB</small></button>'
+              b'<a class="out" href="https://lovable.dev">Edit with Lovable</a></body></html>')
+
 
 class _H(http.server.BaseHTTPRequestHandler):
     routes = {"/fluid": FLUID, "/wide": WIDE, "/login": LOGIN, "/hidden": HIDDEN, "/split": SPLIT, "/fade": FADE,
               "/clip": CLIP, "/shot": SHOT, "/exact": EXACT,
               "/marquee": MARQUEE, "/carousel": CAROUSEL, "/bleed": BLEED,
-              "/nested": NESTED, "/bghero": BGHERO, "/badge": BADGE, "/shadowbadge": SHADOWBADGE}
+              "/nested": NESTED, "/bghero": BGHERO, "/badge": BADGE, "/shadowbadge": SHADOWBADGE, "/widehead": WIDEHEAD, "/buttonname": BUTTONNAME}
 
     def do_GET(self):
         body = self.routes.get(self.path)
@@ -335,3 +352,23 @@ def test_a_badge_inside_a_closed_shadow_root_is_found_by_its_host(tmp_path, serv
     assert r.returncode == 0, r.stderr[-400:]
     w = json.loads((tmp_path / "checks.json").read_text())["warnings"]
     assert any("Replit" in x and "Generate Questions" in x for x in w), w
+
+
+def test_a_badge_over_a_wide_heading_box_but_not_its_letters_is_not_reported(tmp_path, server):
+    r = run(f"{server}/widehead", tmp_path)
+    assert r.returncode == 0, r.stderr[-400:]
+    w = json.loads((tmp_path / "checks.json").read_text())["warnings"]
+    assert not any("Weekly Activity" in x for x in w), w
+
+
+def test_a_badge_over_part_of_a_button_says_so(tmp_path, server):
+    r = run(f"{server}/shadowbadge", tmp_path)
+    w = json.loads((tmp_path / "checks.json").read_text())["warnings"]
+    assert any('covers part of the "Generate Questions" button' in x for x in w), w
+
+
+def test_a_covered_buttons_name_reads_like_its_label(tmp_path, server):
+    run(f"{server}/buttonname", tmp_path)
+    w = json.loads((tmp_path / "checks.json").read_text())["warnings"]
+    assert any('covers part of the "Drop your selfie here or click to browse' in x for x in w), w
+    assert not any("hereor" in x or "browseP" in x for x in w), w

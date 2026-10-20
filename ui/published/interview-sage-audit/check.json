@@ -208,7 +208,7 @@
    }
   },
   "warnings": [
-   "mobile: the Replit badge covers \"Generate Questions\" (a platform badge, not your layout)"
+   "mobile: the Replit badge covers part of the \"Generate Questions\" button (a platform badge, not your layout)"
   ],
   "runtime_errors": [],
   "vanished": {
@@ -231,10 +231,69 @@
   "desktop": "build/desktop.webp"
  },
  "design_texts": {},
- "usd": 0.0303,
+ "usd": 0.0315,
  "repair": null,
+ "brief": {
+  "source": "nemotron",
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "summary": [
+   {
+    "text": "On mobile, the Replit badge overlaps the Generate Questions button.",
+    "facts": [
+     "F1"
+    ]
+   },
+   {
+    "text": "Several text labels visible on larger screens are missing on mobile.",
+    "facts": [
+     "F2"
+    ]
+   }
+  ],
+  "fix": [
+   {
+    "text": "On mobile, text shown on larger screens is gone: \u201cAdd required skills and qualifications\u201d, \u201cDashboard\u201d, \u201cGenerator\u201d, \u201cInclude the job title and level\u201d, \u201cInterview Sage\u201d, \u201cList key responsibilities\u201d, \u201cQuestion Bank\u201d. If that is not intended, show them or put them in a menu.",
+    "facts": [
+     "F2"
+    ],
+    "added": true
+   }
+  ],
+  "added": 1,
+  "dropped": 0,
+  "dropped_items": [],
+  "intro": "Please fix these issues found when checking the page at every screen size:",
+  "facts": [
+   {
+    "id": "F1",
+    "kind": "warning",
+    "bp": "mobile",
+    "text": "On mobile, the Replit badge covers part of the \"Generate Questions\" button.",
+    "nums": [],
+    "badge": true
+   },
+   {
+    "id": "F2",
+    "kind": "vanished",
+    "bp": "mobile",
+    "text": "On mobile, text shown on larger screens is gone: \u201cAdd required skills and qualifications\u201d, \u201cDashboard\u201d, \u201cGenerator\u201d, \u201cInclude the job title and level\u201d, \u201cInterview Sage\u201d, \u201cList key responsibilities\u201d, \u201cQuestion Bank\u201d.",
+    "nums": []
+   }
+  ],
+  "notes": [
+   {
+    "text": "On mobile, the Replit badge covers part of the \"Generate Questions\" button. It is the platform's badge, not your layout: hide it if your plan allows, or leave space at the bottom so content can scroll clear of it.",
+    "facts": [
+     "F1"
+    ]
+   }
+  ]
+ },
+ "fonts": null,
+ "diagnostics": {},
+ "sizes": null,
  "title": "Interview Sage",
  "label": "owned app \u00b7 audit",
  "publish_source": "owned:interview-sage--hafsausmani.replit.app",
- "created": 1791926841.043199
+ "created": 1792519434.7575948
 }

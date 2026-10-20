@@ -1,4 +1,5 @@
 import type { LiveBp } from './live';
+import { bandLabel } from './score';
 
 /** Check diagnostics (orchestrator/diagnose.py, Oct 13 council): readings beside the score that explain it — what
  *  happened to each text the scorer could not credit, how far the build drifts band by band, named differences and
@@ -111,4 +112,13 @@ const signed = (v: number) => (v > 0 ? `+${v}` : v < 0 ? `−${Math.abs(v)}` : '
 export function driftLine(d: Drift | null): string | null {
   if (!d || !d.bands.length) return null;
   return `${d.bands.map((b) => (b.dy == null ? '?' : signed(b.dy))).join(' · ')} px`;
+}
+
+/** The score card's label: when the page is clearly the same layout with drifting spacing (≥ 5 % off, every text in
+ *  the build) and the band would call it off or "not the design", say that instead. The score is unchanged. */
+export function checkLabel(score: number | null | undefined, d: SizeDiagnostics | undefined): string {
+  const band = bandLabel(score);
+  const scale = d?.drift?.scale;
+  if (score == null || score >= 75 || scale == null || Math.abs(1 - scale) < 0.05) return band;
+  return d!.text.some((t) => t.status === 'missing') ? band : 'Same layout, drifting';
 }

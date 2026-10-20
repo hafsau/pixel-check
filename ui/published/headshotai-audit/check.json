@@ -142,12 +142,12 @@
      "bg_covers": true,
      "ok": true
     },
-    "desktop": {
+    "mobile": {
      "overflow": 0,
      "max_gap": 128,
      "bg_covers": true
     },
-    "mobile": {
+    "desktop": {
      "overflow": 0,
      "max_gap": 128,
      "bg_covers": true
@@ -183,6 +183,8 @@
    }
   },
   "warnings": [
+   "mobile: the \"Edit with Lovable\" badge covers part of the \"Drop your selfie here or click to browse\u2026\" button (a platform badge, not your layout)",
+   "500 px: the \"Edit with Lovable\" badge covers part of the \"Drop your selfie here or click to browse\u2026\" button (a platform badge, not your layout)",
    "1024 px: the \"Edit with Lovable\" badge covers \"Your headshot will appear here\" (a platform badge, not your layout)"
   ],
   "runtime_errors": [],
@@ -198,10 +200,95 @@
   "desktop": "build/desktop.webp"
  },
  "design_texts": {},
- "usd": 0.0344,
+ "usd": 0.0354,
  "repair": null,
+ "brief": {
+  "source": "nemotron",
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "summary": [
+   {
+    "text": "The Edit with Lovable badge overlaps UI elements including the upload button and placeholder text across multiple screen widths.",
+    "facts": [
+     "F1",
+     "F2",
+     "F3"
+    ]
+   }
+  ],
+  "fix": [],
+  "added": 0,
+  "dropped": 3,
+  "dropped_items": [
+   {
+    "text": "On mobile, decrease the width of the Edit with Lovable badge so it does not cover the Drop your selfie here or click to browse\u2026 button.",
+    "why": "acts on a platform badge or lost text (handled separately)"
+   },
+   {
+    "text": "At 500 px, decrease the width of the Edit with Lovable badge so it does not cover the Drop your selfie here or click to browse\u2026 button.",
+    "why": "acts on a platform badge or lost text (handled separately)"
+   },
+   {
+    "text": "At 1024 px, decrease the width of the Edit with Lovable badge so it does not cover Your headshot will appear here.",
+    "why": "acts on a platform badge or lost text (handled separately)"
+   }
+  ],
+  "intro": "Please fix these issues found when checking the page at every screen size:",
+  "facts": [
+   {
+    "id": "F1",
+    "kind": "warning",
+    "bp": "mobile",
+    "text": "On mobile, the \"Edit with Lovable\" badge covers part of the \"Drop your selfie here or click to browse\u2026\" button.",
+    "nums": [],
+    "badge": true
+   },
+   {
+    "id": "F2",
+    "kind": "warning",
+    "bp": null,
+    "text": "At 500 px, the \"Edit with Lovable\" badge covers part of the \"Drop your selfie here or click to browse\u2026\" button.",
+    "nums": [
+     500
+    ],
+    "badge": true
+   },
+   {
+    "id": "F3",
+    "kind": "warning",
+    "bp": null,
+    "text": "At 1024 px, the \"Edit with Lovable\" badge covers \"Your headshot will appear here\".",
+    "nums": [
+     1024
+    ],
+    "badge": true
+   }
+  ],
+  "notes": [
+   {
+    "text": "On mobile, the \"Edit with Lovable\" badge covers part of the \"Drop your selfie here or click to browse\u2026\" button. It is the platform's badge, not your layout: hide it if your plan allows, or leave space at the bottom so content can scroll clear of it.",
+    "facts": [
+     "F1"
+    ]
+   },
+   {
+    "text": "At 500 px, the \"Edit with Lovable\" badge covers part of the \"Drop your selfie here or click to browse\u2026\" button. It is the platform's badge, not your layout: hide it if your plan allows, or leave space at the bottom so content can scroll clear of it.",
+    "facts": [
+     "F2"
+    ]
+   },
+   {
+    "text": "At 1024 px, the \"Edit with Lovable\" badge covers \"Your headshot will appear here\". It is the platform's badge, not your layout: hide it if your plan allows, or leave space at the bottom so content can scroll clear of it.",
+    "facts": [
+     "F3"
+    ]
+   }
+  ]
+ },
+ "fonts": null,
+ "diagnostics": {},
+ "sizes": null,
  "title": "HeadshotAI",
  "label": "owned app \u00b7 audit",
  "publish_source": "owned:heatshot-ai.lovable.app",
- "created": 1791926841.0145102
+ "created": 1792519434.7249339
 }

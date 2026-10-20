@@ -132,7 +132,7 @@ def test_a_code_check_can_be_repaired_and_the_bundle_has_both_versions(tmp_path)
     r = c.post("/api/checks", files=files, data={"code": code, "owns": "true", "passcode": "letmein", "repair": "true"})
     assert r.status_code == 202, r.text
     st = wait_done(c, r.json()["id"])
-    assert st["state"] == "done" and [s["stage"] for s in st["stages"]][-1] == "repair" and st["repair"] is True
+    assert st["state"] == "done" and [s["stage"] for s in st["stages"]][-2:] == ["repair", "brief"] and st["repair"] is True
     assert st["result"]["repair"] == {"before": 21.3, "after": 30.3, "lines_kept": 0.9}
     rep = c.get(st["bundle"]).json()["repair"]
     assert rep["code"] == "repair/App.jsx" and rep["original"] == "original/App.jsx" and rep["history"][1]["worst"] == 30.3
@@ -268,3 +268,66 @@ def test_a_check_bundle_records_its_frame_sizes(tmp_path):
     c = client(tmp_path)
     rep = c.get(wait_done(c, post(c).json()["id"])["bundle"]).json()
     assert rep["sizes"] == {bp: list(wh) for bp, wh in SIZES.items()}
+
+
+# ---- fix brief (Oct 20): Nemotron writes what to do next; a verifier keeps only backed claims
+
+def _diag_checker(client=None):
+    def checker(*a):
+        out = fake_checker(*a)
+        out["dom"] = {"mobile": [{"text": "Start", "box": [1, 400, 41, 20], "font_size": "14px", "font_family": "Roboto"}]}
+        out["fonts"] = {"body": "Lato"}
+        out["report"]["breakpoints"]["mobile"].update(components={"structure": .5, "layout": .6, "text": .5, "color": .8},
+                                                      offset_px=[0, 0])
+        if client is not None:
+            out["client"] = client
+        return out
+    return checker
+
+
+def test_a_check_bundle_carries_a_fix_brief_written_from_its_facts(tmp_path):
+    c = client(tmp_path, checker=_diag_checker())
+    st = wait_done(c, post(c).json()["id"])
+    assert any(s["stage"] == "brief" for s in st["stages"])
+    b = c.get(st["bundle"]).json()["brief"]
+    assert b["source"] == "template" and b["intro"].startswith("Please")      # no model client given: the template
+    assert any("Lato" in i["text"] for i in b["fix"]) and b["facts"]
+
+
+def test_the_brief_uses_the_checks_own_nemotron_client_and_its_cost_counts(tmp_path):
+    import json as _json
+
+    class Client:
+        run_spend = 0.0
+
+        def chat(self, model, messages, **kw):
+            self.run_spend += 0.002
+            facts = [l.split(" ", 1)[0] for l in messages[1]["content"].splitlines() if l.startswith("F")]
+            font = next(l.split(" ", 1)[0] for l in messages[1]["content"].splitlines() if "font" in l)
+            return type("R", (), {"content": _json.dumps({"summary": [], "fix_prompt": [
+                {"text": "Use Lato instead of Roboto.", "facts": [font]}, {"text": "Add a hero video.", "facts": facts[:1]}]})})()
+    cl = Client()
+    c = client(tmp_path, checker=_diag_checker(cl))
+    st = wait_done(c, post(c).json()["id"])
+    rep = c.get(st["bundle"]).json()
+    assert rep["brief"]["source"] == "nemotron" and rep["brief"]["dropped"] == 1
+    fix = [(i["text"], i.get("added", False)) for i in rep["brief"]["fix"]]
+    assert fix[0] == ("Use Lato instead of Roboto.", False)
+    assert ("At 360 px, the page scrolls sideways by 220 px: make each element fit the screen width.", True) in fix   # uncovered
+    assert rep["usd"] == pytest.approx(0.002) and st["result"]["usd"] == pytest.approx(0.002)
+    assert "client" not in rep
+
+
+def test_an_audit_gets_a_brief_too(tmp_path):
+    c = client(tmp_path, checker=audit_checker)
+    r = c.post("/api/checks", data={"url": "https://example.com/app", "owns": "true", "passcode": "letmein"})
+    b = c.get(wait_done(c, r.json()["id"])["bundle"]).json()["brief"]
+    assert b["intro"].startswith("Please fix these issues")
+
+
+def test_a_failing_brief_never_fails_the_check(tmp_path, monkeypatch):
+    from orchestrator import brief
+    monkeypatch.setattr(brief, "brief", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    c = client(tmp_path, checker=_diag_checker())
+    st = wait_done(c, post(c).json()["id"])
+    assert st["state"] == "done" and c.get(st["bundle"]).json()["brief"] is None

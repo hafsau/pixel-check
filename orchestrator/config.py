@@ -42,6 +42,7 @@ MODEL_WRITER = os.environ.get("MODEL_WRITER", "nvidia/Nemotron-3-Ultra-550b-a55b
 WRITER_REVISION_THINKING = os.environ.get("WRITER_REVISION_THINKING", "off")
 MODEL_EDITOR = os.environ.get("MODEL_EDITOR", "nvidia/nemotron-3-super-120b-a12b")
 MODEL_CRITIC = os.environ.get("MODEL_CRITIC", "nvidia/nemotron-3-super-120b-a12b")
+MODEL_BRIEF = os.environ.get("MODEL_BRIEF", "nvidia/nemotron-3-super-120b-a12b")    # check fix brief (orchestrator/brief.py)
 MODEL_FAST = os.environ.get("MODEL_FAST", "nvidia/Nemotron-3_5-Lightning")
 MODEL_VISION = os.environ.get("MODEL_VISION", "google/gemma-3-27b-it")
 CODER_THINKING = os.environ.get("CODER_THINKING", "low")   # coder_settings: low ≥ off on median (n=3/page)

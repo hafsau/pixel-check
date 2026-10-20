@@ -387,6 +387,7 @@ describe('checkStages', () => {
       ['capture', 'done'],
       ['read design', 'active'],
       ['score', 'pending'],
+      ['brief', 'pending'],
     ]);
   });
   it('code checks: render → read design → score; done marks all done', () => {
@@ -395,11 +396,12 @@ describe('checkStages', () => {
       ['render', 'done'],
       ['read design', 'done'],
       ['score', 'done'],
+      ['brief', 'done'],
     ]);
   });
   it('a failure marks the last reached stage failed', () => {
     const s = checkStages({ state: 'failed', source: { code: true }, stages: [{ stage: 'render', t: 1 }] });
-    expect(s.map((x) => x.state)).toEqual(['failed', 'pending', 'pending']);
+    expect(s.map((x) => x.state)).toEqual(['failed', 'pending', 'pending', 'pending']);
   });
 });
 
@@ -453,6 +455,7 @@ describe('checkStages with repair', () => {
       ['read design', 'done'],
       ['score', 'active'],
       ['repair', 'pending'],
+      ['brief', 'pending'],
     ]);
     expect(s[3].label).toMatch(/Repairing/);
   });
@@ -463,14 +466,15 @@ describe('checkStages with repair', () => {
       ['read design', 'done'],
       ['score', 'done'],
       ['repair', 'active'],
+      ['brief', 'pending'],
     ]);
   });
   it('never for URL checks', () => {
     const s = checkStages({ state: 'running', source: { url: 'https://a.com' }, stages: [] }, { repair: true });
-    expect(s.map((x) => x.id)).toEqual(['capture', 'read design', 'score']);
+    expect(s.map((x) => x.id)).toEqual(['capture', 'read design', 'score', 'brief']);
   });
   it('no repair stage when not asked', () => {
-    expect(checkStages({ state: 'done', source: { code: true }, stages: [] }).map((x) => x.id)).toEqual(['render', 'read design', 'score']);
+    expect(checkStages({ state: 'done', source: { code: true }, stages: [] }).map((x) => x.id)).toEqual(['render', 'read design', 'score', 'brief']);
   });
 });
 
@@ -531,7 +535,7 @@ describe('audit without designs', () => {
 describe('audit progress', () => {
   it('lists capture and audit only — no frames to read', () => {
     const st = { state: 'running', stages: [{ stage: 'capture', t: 1 }], source: { url: 'https://x.app' }, audit: true } as never;
-    expect(checkStages(st).map((s: { id: string }) => s.id)).toEqual(['capture', 'audit']);
+    expect(checkStages(st).map((s: { id: string }) => s.id)).toEqual(['capture', 'audit', 'brief']);
   });
 });
 

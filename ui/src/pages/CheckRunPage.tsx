@@ -5,7 +5,7 @@ import { apiBase, failureNotice, FRAME_SIZES, LIVE_BPS, liveFilesBase, resolveAs
 import { useLivePoll, getCheck } from '../lib/liveApi';
 import { boxPct, checkCells, checkStages, checkSummary, hurtList, missingBoxes, parseCheck, repairRequested, type Box, type CheckBundle, type Hurt } from '../lib/check';
 import { REPAIR_ROUNDS, repairOutcome } from '../lib/repair';
-import { bandLabel, fmtScore } from '../lib/score';
+import { fmtScore } from '../lib/score';
 import { cap, fmtSecs, fmtUsd } from '../lib/format';
 import { ErrorView, Loading } from '../components/StatusView';
 import { IconAlert, IconArrowLeft, IconCheck, IconCopy } from '../components/Icons';
@@ -16,7 +16,8 @@ import { CompareSlider } from '../components/CompareSlider';
 import { FittedFrame, FrameEmpty, FrameImage } from '../components/FittedFrame';
 import { StageIcon, useElapsed } from './LiveRunPage';
 import { RepairCard } from '../components/RepairCard';
-import { driftLine, findings, lostRows, textStatusLabel, type SizeDiagnostics, type TextStatus } from '../lib/diagnostics';
+import { checkLabel, driftLine, findings, lostRows, textStatusLabel, type SizeDiagnostics, type TextStatus } from '../lib/diagnostics';
+import { briefFooter, pasteText, type Brief, type BriefItem } from '../lib/brief';
 
 /** /check/<id>: progress while the check runs, then the measured result. */
 export function CheckRunPage({ id }: { id: string }) {
@@ -212,6 +213,12 @@ function AuditResult({ check, base, replay }: { check: CheckBundle; base: string
           <p className="mt-3 text-xs text-ink-muted">Text visible on a larger size but not on this one — it may sit behind a menu; check that it is meant to.</p>
         </section>
 
+        {check.brief && (
+          <div className="lg:col-span-2">
+            <BriefCard brief={check.brief} />
+          </div>
+        )}
+
         <section aria-labelledby="audit-shots" className="card card-pad lg:col-span-2">
           <h2 id="audit-shots" className="eyebrow">
             As captured
@@ -264,7 +271,7 @@ function DesignCheckResult({ id, check, base }: { id: string; check: CheckBundle
             <div className="flex items-center gap-4">
               <ScoreRing score={report.match} size={96} />
               <div className="text-sm">
-                <p className="font-semibold text-ink">{bandLabel(report.match)}</p>
+                <p className="font-semibold text-ink">{checkLabel(report.match, report.worst ? check.diagnostics[report.worst] : undefined)}</p>
                 {report.worst && <p className="text-xs text-ink-muted">worst: {cap(report.worst)}</p>}
               </div>
             </div>
@@ -304,6 +311,8 @@ function DesignCheckResult({ id, check, base }: { id: string; check: CheckBundle
               }}
             />
           </section>
+
+          {check.brief && <BriefCard brief={check.brief} />}
 
           <SizeView check={check} bp={bp} setBp={setBp} asset={asset} />
 
@@ -370,6 +379,99 @@ function CopyLine({ text }: { text: string }) {
         {copied ? 'Summary copied' : ''}
       </span>
     </div>
+  );
+}
+
+/** What to do next (orchestrator/brief.py): Nemotron's brief from the measured facts, each claim linked to the
+ *  facts that back it, plus the message to paste into an AI builder. */
+function BriefCard({ brief }: { brief: Brief }) {
+  const [copied, setCopied] = useState(false);
+  const text = pasteText(brief);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <section aria-labelledby="brief-title" className="card card-pad flex flex-col gap-4">
+      <h2 id="brief-title" className="eyebrow">
+        What to do next
+      </h2>
+      {brief.summary.length > 0 && (
+        <ul className="flex flex-col gap-1.5 text-sm">
+          {brief.summary.map((it, i) => (
+            <li key={i} className="flex items-start gap-1.5">
+              <span aria-hidden="true" className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+              <span>
+                {it.text} <FactChips item={it} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {brief.fix.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-ink-muted">Paste into your AI builder (Lovable, v0, Bolt…) or hand to whoever edits the code</p>
+            <button type="button" className="btn-icon h-8 min-h-0 w-8 shrink-0" onClick={copy} aria-label={copied ? 'Copied' : 'Copy the fix prompt'} title={copied ? 'Copied' : 'Copy the fix prompt'}>
+              {copied ? <IconCheck /> : <IconCopy />}
+            </button>
+          </div>
+          <div className="inset mt-1.5 px-3 py-2.5 text-[13px] leading-relaxed">
+            <p className="text-ink">{brief.intro}</p>
+            <ol className="mt-1.5 flex list-decimal flex-col gap-1 pl-5">
+              {brief.fix.map((it, i) => (
+                <li key={i}>
+                  {it.text} <FactChips item={it} />
+                </li>
+              ))}
+            </ol>
+          </div>
+          <span className="sr-only" aria-live="polite">
+            {copied ? 'Fix prompt copied' : ''}
+          </span>
+        </div>
+      )}
+      {brief.notes.length > 0 && (
+        <ul className="flex flex-col gap-1.5 text-xs text-ink-muted">
+          {brief.notes.map((n, i) => (
+            <li key={i} className="flex items-start gap-1.5">
+              <IconAlert /> <span>{n.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[11px] leading-relaxed text-ink-muted">{briefFooter(brief)}</p>
+      {brief.droppedItems.length > 0 && (
+        <details className="text-[11px] text-ink-muted">
+          <summary className="cursor-pointer font-medium">What the check dropped, and why</summary>
+          <ul className="mt-1.5 flex flex-col gap-1.5">
+            {brief.droppedItems.map((d, i) => (
+              <li key={i}>
+                <span className="line-through decoration-ink-faint">{d.text}</span> <span className="text-ink">— {d.why}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function FactChips({ item }: { item: BriefItem }) {
+  return (
+    <>
+      {item.facts.map((f) => (
+        <span key={f.id} className="mono-chip ml-0.5 cursor-help align-[1px] text-[10px]" title={f.text}>
+          {f.id}
+          <span className="sr-only">: {f.text}</span>
+        </span>
+      ))}
+    </>
   );
 }
 
