@@ -18,6 +18,11 @@ export function passcodeNeeded(h: Health | null | undefined): boolean {
   return h?.passcode !== false;
 }
 
+/** Show the passcode field only once the server has answered and wants one (not while it wakes; never when open). */
+export function showPasscodeField(h: Health | null | undefined): boolean {
+  return !!h && h.passcode !== false;
+}
+
 async function body(res: Response): Promise<unknown> {
   try {
     return await res.json();

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { navigate } from '../lib/router';
 import { FRAME_SIZES, LIVE_BPS, framesReady, urlReady, validatePageUrl, type LiveBp } from '../lib/live';
-import { getHealth, passcodeNeeded, startRun, startUrlRun, type Health, wakeAndGetHealth } from '../lib/liveApi';
+import { getHealth, passcodeNeeded, showPasscodeField, startRun, startUrlRun, type Health, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
 import { FramesSummary, inferPicked } from './FramesSummary';
@@ -153,7 +153,7 @@ export function LiveRunPanel() {
             </Tabs>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,18rem)_auto] sm:items-end">
-              {needPass && (
+              {showPasscodeField(health.status === 'ok' ? health.health : null) && (
                 <div>
                   <label htmlFor="passcode" className="text-sm font-medium">
                     Passcode

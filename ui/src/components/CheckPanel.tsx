@@ -3,7 +3,7 @@ import { navigate } from '../lib/router';
 import { FRAME_SIZES, LIVE_BPS, validatePageUrl, type LiveBp } from '../lib/live';
 import { checkMissing, checkPath, checkReady, codeCounter, validateCode, wantsRepair, type CheckSource } from '../lib/check';
 import { REPAIR_ROUNDS } from '../lib/repair';
-import { getHealth, passcodeNeeded, startCheck, wakeAndGetHealth } from '../lib/liveApi';
+import { getHealth, passcodeNeeded, showPasscodeField, startCheck, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
 import { FramesSummary, inferPicked } from './FramesSummary';
@@ -204,7 +204,7 @@ export function CheckPanel() {
           </label>
 
           <div className="grid gap-3 sm:grid-cols-[minmax(0,18rem)_auto] sm:items-end">
-            {needPass && (
+            {showPasscodeField(h) && (
               <div>
                 <label htmlFor={`${ids}-pass`} className="text-sm font-medium">
                   Passcode

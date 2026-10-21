@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkMissing, type CheckDraft } from './check';
 import { framesReady, urlReady } from './live';
-import { passcodeNeeded } from './liveApi';
+import { passcodeNeeded, showPasscodeField } from './liveApi';
 
 // Open live mode (Hafsa, Oct 21): judges type nothing; the server says so in /api/health.
 const ok = { mobile: 'ok', tablet: 'ok', desktop: 'ok' } as const;
@@ -25,5 +25,14 @@ describe('open live mode', () => {
     expect(framesReady(ok, '', false)).toBe(true);
     expect(urlReady('https://example.com', true, '')).toBe(false);
     expect(urlReady('https://example.com', true, '', false)).toBe(true);
+  });
+});
+
+describe('the passcode field', () => {
+  it('appears only once the server has said it wants one (never while waking, never in open mode)', () => {
+    expect(showPasscodeField(null)).toBe(false);
+    expect(showPasscodeField({ live: true, runs_left_today: 5, runs_left_total: 40, passcode: false })).toBe(false);
+    expect(showPasscodeField({ live: true, runs_left_today: 5, runs_left_total: 40, passcode: true })).toBe(true);
+    expect(showPasscodeField({ live: true, runs_left_today: 5, runs_left_total: 40 })).toBe(true);
   });
 });

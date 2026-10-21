@@ -97,13 +97,22 @@ def test_render_env_vars_are_ones_the_server_reads():
 
 def test_render_secrets_have_no_values():
     env = _render_env()
-    for key in ("NEBIUS_API_KEY", "NEBIUS_AI_PROJECT", "LIVE_PASSCODE", "STATE_GIST_ID", "STATE_GIST_TOKEN"):
+    for key in ("NEBIUS_API_KEY", "NEBIUS_AI_PROJECT", "LIVE_ORIGINS", "SPEND_CAP_USD"):
         assert env[key] == {"sync": "false"}, key
     assert env["LIVE_ENABLED"]["value"] == "1" and env["OWNED_HOSTS"]["value"] == "hafsausmani.com"
 
 
+def test_render_is_open_without_gist_or_passcode_and_tightly_capped():
+    """Hafsa (Oct 21): no gist, no passcode — judges type nothing; per wake-up period 5 runs, 3 per visitor, $1."""
+    env = _render_env()
+    assert "LIVE_PASSCODE" not in env and "STATE_GIST_ID" not in env and "STATE_GIST_TOKEN" not in env
+    assert env["LIVE_OPEN"]["value"] == "1"
+    assert int(env["LIVE_DAILY_RUNS"]["value"]) <= 5 and int(env["LIVE_PER_IP_DAILY"]["value"]) <= 3
+    assert float(env["LIVE_DAILY_SPEND_USD"]["value"]) <= 1
+
+
 def test_render_runs_on_the_free_plan_with_state_off_the_disk():
-    """Render free (Oct 8): no disk, the service sleeps and loses its files — caps and spend live in the gist."""
+    """Render free (Oct 8): no disk, the service sleeps and loses its files (Oct 21: no gist — the caps restart then)."""
     y = (ROOT / "render.yaml").read_text()
     assert "plan: free" in y and "disk:" not in y and "healthCheckPath: /api/health" in y and "autoDeploy: false" in y
     env = _render_env()
