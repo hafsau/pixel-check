@@ -446,3 +446,25 @@ export function checkStages(st: Pick<LiveStatus, 'state' | 'stages' | 'source'> 
   const repair = !isUrl && (!!opts.repair || st.stages.some((s) => s.stage === 'repair'));
   return progressOf([isUrl ? CHECK_CAPTURE : CHECK_RENDER, ...CHECK_REST, ...(repair ? [CHECK_REPAIR] : []), CHECK_BRIEF], st);
 }
+
+// ------------------------------------------------------------------------------------------------ the example (Oct 21)
+
+/** The author's own dashboard frames and its Lovable build (her app — published with her permission). The server
+ *  ships these frames' reading (orchestrator/spec_cache), so a live check of the example takes about a minute. */
+export const EXAMPLE = {
+  url: 'https://adaptable-hub-central.lovable.app/',
+  note: 'Example: the author’s dashboard frames and its Lovable build (her own app). Its frames were read in advance, so this check takes about a minute.',
+} as const;
+
+export function exampleFrameUrls(base: string): Record<LiveBp, string> {
+  const b = base.replace(/\/$/, '');
+  return Object.fromEntries(LIVE_BPS.map((bp) => [bp, `${b}/examples/dashboard/${bp}.png`])) as Record<LiveBp, string>;
+}
+
+/** How long it takes, honestly: on the free server, reading your own frames is the slow part (~10 minutes). */
+export function checkDurationNote({ audit, repairing = false }: { audit: boolean; repairing?: boolean }): string {
+  const base = audit
+    ? 'An audit usually takes under a minute'
+    : 'Reading your own frames takes several minutes on this free server (about 10 for three full pages); the example’s frames are read in advance, so it takes about a minute';
+  return `${base}${repairing ? `, plus a few minutes for the repair (≤ ${REPAIR_ROUNDS} Nemotron rounds)` : ''} — keep this page open.`;
+}

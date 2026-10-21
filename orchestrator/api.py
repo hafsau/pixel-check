@@ -265,7 +265,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     s = {"enabled": config.LIVE_ENABLED, "open": config.LIVE_OPEN, "passcode": config.LIVE_PASSCODE, "daily": config.LIVE_DAILY_RUNS,
          "total": config.LIVE_TOTAL_RUNS, "origins": config.LIVE_ORIGINS, "per_ip": config.LIVE_PER_IP_DAILY,
          "trust_proxy": config.LIVE_TRUST_PROXY, "url_allow": config.LIVE_URL_ALLOW, "owned_hosts": config.OWNED_HOSTS,
-         "daily_spend": config.LIVE_DAILY_SPEND_USD, "ledger": config.LEDGER_PATH}
+         "daily_spend": config.LIVE_DAILY_SPEND_USD, "ledger": config.LEDGER_PATH,
+         "run_budget": config.LIVE_RUN_BUDGET_USD, "spend_cap": config.SPEND_CAP_USD}
     s.update(settings or {})
     root = Path(live_dir or config.LIVE_DIR)
     root.mkdir(parents=True, exist_ok=True)
@@ -274,6 +275,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     ledger = Ledger(ledger_path)
     store = store or _state.from_env(dict(os.environ), root)
     take_lock = threading.Lock()
+    reserved: dict[str, int] = {}      # run id → slots admitted but not finished: their budget counts against the caps
+    credit = {"out": None}             # set when a run hits the credit limit: live runs pause, replays keep working
     jobs = threading.Semaphore(max(1, int(s.get("job_slots") or config.JOB_SLOTS)))   # heavy work, one at a time
 
     def today() -> str:
@@ -313,24 +316,58 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
             raise HTTPException(403, "wrong passcode")
 
+    def credit_message(e: Exception) -> str | None:
+        """The demo's credit ran out (the global cap, or the provider refusing payment): pause live runs and say so
+        plainly — never the raw cap figures."""
+        text = f"{type(e).__name__}: {e}"
+        if re.search(r"global spend|\b402\b|insufficient (?:balance|funds|credit)", text, re.I):
+            credit["out"] = "the demo's credit for live runs is used up"
+            return "the demo's credit for live runs is used up; replays still work"
+        return None
+
     def live_ok() -> bool:
-        return bool(s["enabled"]) and state_error is None
+        return bool(s["enabled"]) and state_error is None and not credit["out"]
 
     def require_live():
         if not s["enabled"]:
             raise HTTPException(503, "live mode is switched off; replays still work")
         if state_error is not None:
             raise HTTPException(503, "live mode is unavailable: the run counter could not be read; replays still work")
+        if credit["out"]:
+            raise HTTPException(503, f"live runs are paused: {credit['out']}; replays still work")
 
     def persist():
         store.save(snapshot())
 
-    def take_run(request: Request, weight: int = 1):
-        """A run slot (a repair weighs 3): daily spend under its cap, caps not reached, and the store has recorded
-        it — or no run."""
-        if daily_spend() >= float(s["daily_spend"]):
+    def budget_room(weight: int) -> None:
+        """Spend so far plus the budget of every run still in flight (each run is capped at run_budget) must stay
+        within the daily and total caps — admission at $0 spent let every slot start before any cost landed
+        (live-deploy council, Oct 21)."""
+        ahead = (sum(reserved.values()) + weight) * float(s.get("run_budget") or 0.30)
+        if daily_spend() + ahead > float(s["daily_spend"]) + 1e-9:
             raise HTTPException(429, "today's live-run budget is used up; replays still work")
+        if s.get("spend_cap") is not None and ledger.total() + ahead > float(s["spend_cap"]) + 1e-9:
+            raise HTTPException(429, "the live-run budget is used up; replays still work")
+
+    def room(request: Request, weight: int = 1) -> None:
+        """Would a run be admitted? Checked before the uploads are read, so refused requests cost no decoding."""
         with take_lock:
+            budget_room(weight)
+            v, taken = visitor(request), 0
+            for _ in range(weight):
+                if not caps.take(v):
+                    break
+                taken += 1
+            for _ in range(taken):
+                caps.untake()
+            if taken < weight:
+                raise HTTPException(429, "the live-run limit is reached; replays still work")
+
+    def take_run(request: Request, weight: int = 1, rid: str | None = None):
+        """A run slot (a repair weighs 3): spend + in-flight budgets under the caps, caps not reached, and the store
+        has recorded it — or no run."""
+        with take_lock:
+            budget_room(weight)
             taken = 0
             for _ in range(weight):
                 if not caps.take(visitor(request)):
@@ -344,6 +381,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 for _ in range(taken):
                     caps.untake()
                 raise HTTPException(503, "PixelCheck could not record the run in its run counter; please try again later") from None
+            if rid:
+                reserved[rid] = weight
 
     def visitor(request: Request) -> str:
         """The client address; X-Forwarded-For only behind a trusted proxy (else anyone could pick an address).
@@ -368,7 +407,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     run_check = checker or default_checker
     run_repair = repairer or default_repairer
     resolve = resolver or _resolve
-    app = FastAPI(title="PixelCheck live", docs_url=None, redoc_url=None)
+    app = FastAPI(title="PixelCheck live", docs_url=None, redoc_url=None, openapi_url=None)   # no public endpoint list
 
     @app.middleware("http")
     async def limit_body(request: Request, call_next):
@@ -430,8 +469,9 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         except _Refused as e:
             write_status(rid, state="failed", stages=stages, error=str(e))
         except Exception as e:     # the API must report, never leak credentials from upstream errors
-            write_status(rid, state="failed", stages=stages, error=_scrub(f"{type(e).__name__}: {e}"))
+            write_status(rid, state="failed", stages=stages, error=credit_message(e) or _scrub(f"{type(e).__name__}: {e}"))
         finally:
+            reserved.pop(rid, None)
             jobs.release()
             try:
                 persist()                  # the spend of this run survives a wiped disk
@@ -441,16 +481,18 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     @app.get("/api/health")
     def health():
         d, t = caps.left()
-        return {"live": live_ok(), "runs_left_today": d, "runs_left_total": t, "passcode": not s.get("open")}
+        return {"live": live_ok(), "runs_left_today": d, "runs_left_total": t, "passcode": not s.get("open"),
+                **({"reason": credit["out"]} if credit["out"] else {})}
 
     @app.post("/api/runs", status_code=202)
     async def start(request: Request, mobile: UploadFile = File(...), tablet: UploadFile = File(...),
                     desktop: UploadFile = File(...), passcode: str = Form("")):
         require_live()
         check_passcode(passcode)
+        room(request)
         frames, info, full = await _read_frames((("mobile", mobile), ("tablet", tablet), ("desktop", desktop)))
-        take_run(request)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+        take_run(request, rid=rid)
         run_dir = root / rid
         _save_frames(run_dir, frames, full)
         write_status(rid, state="queued", stages=[], created=time.time(), frames=info)
@@ -471,8 +513,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             host = (urlsplit(url).hostname or "").lower()
             if not any(host == h or host.endswith("." + h) for h in allow):
                 raise HTTPException(422, f"this demo only rebuilds pages from: {', '.join(allow)}")
-        take_run(request)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+        take_run(request, rid=rid)
         (root / rid).mkdir(parents=True)
         write_status(rid, id=rid, state="queued", stages=[], created=time.time(), source={"url": _bare(url)})
         threading.Thread(target=worker, args=(rid, None, url), daemon=True).start()
@@ -557,8 +599,9 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
         except CheckError as e:
             write_status(rid, state="failed", stages=stages, error=_scrub(str(e)))
         except Exception as e:
-            write_status(rid, state="failed", stages=stages, error=_scrub(f"{type(e).__name__}: {e}"))
+            write_status(rid, state="failed", stages=stages, error=credit_message(e) or _scrub(f"{type(e).__name__}: {e}"))
         finally:
+            reserved.pop(rid, None)
             jobs.release()
             try:
                 persist()
@@ -589,6 +632,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
             raise HTTPException(422, "an audit without design frames needs the build's address (a public URL)")
         if audit and want_repair:
             raise HTTPException(422, "repair needs design frames to aim at")
+        room(request, weight=3 if want_repair else 1)        # refuse before decoding the uploads
         if audit:
             frames, info, full = {}, None, {}
         else:
@@ -605,8 +649,8 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                 host = (urlsplit(url).hostname or "").lower()
                 if not any(host == h or host.endswith("." + h) for h in allow):
                     raise HTTPException(422, f"this demo only checks pages from: {', '.join(allow)}")
-        take_run(request, weight=3 if want_repair else 1)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+        take_run(request, weight=3 if want_repair else 1, rid=rid)
         _save_frames(root / rid, frames, full)
         write_status(rid, id=rid, kind="check", state="queued", stages=[], created=time.time(),
                      source={"url": _bare(url)} if url else {"code": True}, repair=want_repair, frames=info, audit=audit)
@@ -651,7 +695,8 @@ def default_pipeline(run_id: str, frames: dict[str, bytes], run_dir: Path, emit)
     from .tf_client import TFClient
     emit("perceive")
     client = TFClient(run_id=run_id, run_budget_usd=config.LIVE_RUN_BUDGET_USD)
-    spec = perceive(client, frames)
+    from .spec_cache import read_design
+    spec = read_design(client, frames, perceive=perceive)    # the example frames' reading ships in the image
     (run_dir / "spec.json").write_text(json.dumps(spec))
     emit("compile")
     res = run_loop(frames, spec, None, run_id=run_id, cfg=LoopConfig(run_budget_usd=config.LIVE_RUN_BUDGET_USD),
@@ -715,7 +760,8 @@ def default_checker(kind: str, build: str, frames: dict[str, bytes], run_dir: Pa
     from .tf_client import TFClient
     client = TFClient(run_id=run_dir.name, run_budget_usd=config.LIVE_RUN_BUDGET_USD)
     sb = Sandbox(meter=client)                    # sandbox time counts in the run's budget and its reported cost
-    read = lambda fr: perceive(client, fr)          # noqa: E731
+    from .spec_cache import read_design
+    read = lambda fr: read_design(client, fr, perceive=perceive)   # noqa: E731  (the example's reading is cached)
     if kind == "audit":                    # no design frames: measured on its own (orchestrator/check.audit_url)
         from .check import audit_url
         out = audit_url(build, sb=sb, verify=verify, emit=emit)
@@ -741,7 +787,8 @@ def default_repairer(code: str, frames: dict[str, bytes], run_dir: Path, emit) -
     # a repair weighs 3 runs against the caps, so it gets 3 runs' budget (mostly sandbox time, ~$0.55)
     client = TFClient(run_id=run_dir.name + "-repair", run_budget_usd=3 * config.LIVE_RUN_BUDGET_USD)
     sb = Sandbox(meter=client)
-    spec = perceive(client, frames)               # cached vision reads: the check already read these frames
+    from .spec_cache import read_design
+    spec = read_design(client, frames, perceive=perceive)   # cached reading: the check already read these frames
     emit("repair")
     check = lambda c: check_code(c, frames, sb=sb, read_design=None, emit=lambda *a, **k: None, spec=spec)  # noqa: E731
     with ThreadPoolExecutor(3) as ex:
@@ -765,7 +812,9 @@ def default_capture(url: str, run_dir: Path, emit, owned: bool = False) -> tuple
     emit("capture")
     cmd = (f"cd /opt/pc && timeout 150 node /opt/pc/capture.mjs page {shlex.quote(url)} --out /work/cap --fonts /opt/pc/fonts "
            f"--wait 2000 --block-private" + (" --real --assets --own-fonts" if owned else ""))
-    sb = Sandbox()
+    from . import config
+    from .tf_client import TFClient
+    sb = Sandbox(meter=TFClient(run_id=run_dir.name, run_budget_usd=config.LIVE_RUN_BUDGET_USD))   # cost in the run budget
     r = sb.run(cmd, files=capture_files(), timeout_s=300, networking=True)
     if r.exit_code != 0 or not r.result_image:
         raise RuntimeError(f"the page could not be captured ({r.status})")

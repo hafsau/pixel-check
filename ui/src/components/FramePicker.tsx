@@ -11,7 +11,7 @@ export type FrameState =
 
 /** One frame input, checked in the browser like the server checks it (PNG / JPEG / WebP, ≤ 8 MB, 320–1600 px wide,
  *  any height), with a preview. width / height: the typical export, for the empty slot's shape only. */
-export function FramePicker({ bp, width, height, onChange }: { bp: LiveBp; width: number; height: number; onChange?: (s: FrameState) => void }) {
+export function FramePicker({ bp, width, height, onChange, preset }: { bp: LiveBp; width: number; height: number; onChange?: (s: FrameState) => void; preset?: File | null }) {
   const id = useId();
   const [state, setState] = useState<FrameState>({ status: 'empty' });
   const urlRef = useRef<string | null>(null);
@@ -39,6 +39,12 @@ export function FramePicker({ bp, width, height, onChange }: { bp: LiveBp; width
     const msg = validateFrame(bp, facts);
     set(msg ? { status: 'error', message: msg, url: facts.width ? url : undefined } : { status: 'ok', file, url, facts });
   };
+
+  // a file handed in by the page ("Try the example") is checked exactly like a picked one
+  useEffect(() => {
+    if (preset) void pick(preset);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset]);
 
   const msgId = `${id}-msg`;
   const url = state.status !== 'empty' ? state.url : undefined;

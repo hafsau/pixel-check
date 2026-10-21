@@ -355,3 +355,63 @@ def test_open_mode_keeps_the_caps(tmp_path):
     c = client(tmp_path, open=True, passcode="", daily=1)
     assert post(c, passcode="").status_code == 202
     assert post(c, passcode="").status_code == 429
+
+
+# ---- live-deploy council (Oct 21): open mode on Render free — protect the credit and the judges' slots
+
+def test_runs_in_flight_count_against_the_spend_cap(tmp_path):
+    """the daily cap was checked only on admission at $0 spent, so every slot could start before any cost landed"""
+    import threading as _t
+    gate = _t.Event()
+
+    def slow(*a):
+        gate.wait(5)
+        return fake_checker(*a)
+    c = client(tmp_path, checker=slow, open=True, passcode="", daily=10, per_ip=10, daily_spend=1.0, run_budget=0.30)
+    codes = [post(c, passcode="").status_code for _ in range(4)]
+    gate.set()
+    assert codes == [202, 202, 202, 429]          # 3 × $0.30 reserved < $1; a fourth would exceed it
+
+
+def test_running_out_of_credit_pauses_live_mode_with_a_plain_message(tmp_path):
+    from orchestrator.tf_client import SpendCapExceeded
+
+    def broke(*a):
+        raise SpendCapExceeded("global spend $25.01 ≥ cap $25.00")
+    c = client(tmp_path, checker=broke, open=True, passcode="")
+    st = wait_done(c, post(c, passcode="").json()["id"])
+    assert st["state"] == "failed" and "credit" in st["error"] and "$25" not in st["error"]
+    h = c.get("/api/health").json()
+    assert h["live"] is False and "credit" in h.get("reason", "")
+    r = post(c, passcode="")
+    assert r.status_code == 503 and "credit" in r.json()["detail"]
+
+
+def test_caps_are_checked_before_the_frames_are_read(tmp_path, monkeypatch):
+    from orchestrator import api
+    reads = []
+    real = api._read_frames
+
+    async def counting(*a, **k):
+        reads.append(1)
+        return await real(*a, **k)
+    monkeypatch.setattr(api, "_read_frames", counting)
+    c = client(tmp_path, open=True, passcode="", daily=1)
+    assert post(c, passcode="").status_code == 202
+    n = len(reads)
+    assert post(c, passcode="").status_code == 429 and len(reads) == n      # refused without decoding the uploads
+
+
+def test_the_api_does_not_publish_its_endpoint_list(tmp_path):
+    c = client(tmp_path)
+    assert c.get("/openapi.json").status_code == 404
+
+
+def test_the_url_capture_sandbox_cost_counts_in_the_run_budget(tmp_path, monkeypatch):
+    from orchestrator import api, tf_client
+    seen = _meter_spy(monkeypatch)
+    try:
+        api.default_capture("https://example.com/", tmp_path / "r1", lambda *a, **k: None)
+    except _Stop:
+        pass
+    assert isinstance(seen.get("meter"), tf_client.TFClient)

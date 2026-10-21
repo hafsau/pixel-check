@@ -55,7 +55,9 @@ const detail = (m: Measure) => (m.overflow > 0 ? `overflow ${m.overflow} px` : m
 export function HeroSweep() {
   const idx = useRunIndex();
   const [showDev] = useShowDevRuns();
-  const seeRun = idx.status === 'ready' ? bestReplayHref(visibleRuns(idx.data, showDev)) : '/#runs';
+  // the example check (a Lovable build of a real design) when it is published; else the best replay
+  const seeRun =
+    idx.status !== 'ready' ? '/#runs' : idx.data.some((e) => e.id === 'lovable-dashboard-check') ? '/check/lovable-dashboard-check/replay' : bestReplayHref(visibleRuns(idx.data, showDev));
   return (
     <section aria-labelledby="hero-title" className="pt-10 sm:pt-16">
       <h1 id="hero-title" className="display text-[40px] sm:text-6xl lg:text-[84px]">

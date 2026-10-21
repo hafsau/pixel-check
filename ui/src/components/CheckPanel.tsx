@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { navigate } from '../lib/router';
 import { FRAME_SIZES, LIVE_BPS, validatePageUrl, type LiveBp } from '../lib/live';
-import { checkMissing, checkPath, checkReady, codeCounter, validateCode, wantsRepair, type CheckSource } from '../lib/check';
+import { EXAMPLE, checkMissing, checkPath, checkReady, codeCounter, exampleFrameUrls, validateCode, wantsRepair, type CheckSource } from '../lib/check';
 import { REPAIR_ROUNDS } from '../lib/repair';
 import { getHealth, passcodeNeeded, showPasscodeField, startCheck, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
@@ -22,6 +22,31 @@ export function CheckPanel() {
   const [repair, setRepair] = useState(false);
   const [noDesigns, setNoDesigns] = useState(false);
   const [owns, setOwns] = useState(false);
+  const [presets, setPresets] = useState<Partial<Record<LiveBp, File>>>({});
+  const [example, setExample] = useState<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
+
+  /** "Try the example": the author's frames + her Lovable build, filled in for a judge who has no frames of their own. */
+  const loadExample = async () => {
+    setExample('loading');
+    try {
+      const urls = exampleFrameUrls(import.meta.env.BASE_URL);
+      const files = await Promise.all(
+        LIVE_BPS.map(async (bp) => {
+          const res = await fetch(urls[bp]);
+          if (!res.ok) throw new Error(String(res.status));
+          return [bp, new File([await res.blob()], `example-${bp}.png`, { type: 'image/png' })] as const;
+        }),
+      );
+      setNoDesigns(false);
+      setSource('url');
+      setUrl(EXAMPLE.url);
+      setOwns(true);
+      setPresets(Object.fromEntries(files));
+      setExample('loaded');
+    } catch {
+      setExample('failed');
+    }
+  };
   const [passcode, setPasscode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +108,18 @@ export function CheckPanel() {
         <fieldset disabled={submitting} className="flex min-w-0 flex-col gap-6">
           <legend className="sr-only">Frames and build to check</legend>
           <div>
+            <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-dashed border-line px-3 py-2.5">
+              <button type="button" className="btn" onClick={() => void loadExample()} disabled={example === 'loading'}>
+                {example === 'loading' ? 'Loading the example…' : 'Try the example'}
+              </button>
+              <p className="min-w-0 flex-1 text-xs text-ink-muted" aria-live="polite">
+                {example === 'loaded'
+                  ? EXAMPLE.note
+                  : example === 'failed'
+                    ? 'The example could not be loaded — try again, or use your own frames.'
+                    : 'No frames of your own? Fill in a real dashboard design and the page an AI builder made from it.'}
+              </p>
+            </div>
             <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
               <Step n={1} /> Your frames
             </h2>
@@ -98,7 +135,7 @@ export function CheckPanel() {
             </label>
             <div className={audit ? 'hidden' : 'grid grid-cols-1 gap-4 sm:grid-cols-3'}>
               {LIVE_BPS.map((bp) => (
-                <FramePicker key={bp} bp={bp} width={FRAME_SIZES[bp][0]} height={FRAME_SIZES[bp][1]} onChange={(st) => setFrames((f) => ({ ...f, [bp]: st }))} />
+                <FramePicker key={bp} bp={bp} width={FRAME_SIZES[bp][0]} height={FRAME_SIZES[bp][1]} preset={presets[bp]} onChange={(st) => setFrames((f) => ({ ...f, [bp]: st }))} />
               ))}
             </div>
             <div className={audit ? 'hidden' : 'mt-3'}>
@@ -235,7 +272,7 @@ export function CheckPanel() {
         )}
         <p id={`${ids}-note`} className="-mt-3 text-xs text-ink-muted">
           {!open ? 'Checks are not available right now.' : ready ? `Ready. Nothing is sent until you press ${wantsRepair(source, repair) ? 'Check + repair' : 'Run check'}.` : `Still needed: ${missing.join(', ')}.`}
-          <span className="mt-0.5 block">The live server runs on a free plan: after 15 quiet minutes it sleeps, and the next check waits up to a minute while it wakes. A check then takes about a minute.</span>
+          <span className="mt-0.5 block">The live server runs on a free plan: after 15 quiet minutes it sleeps, and the next check waits up to a minute while it wakes. An audit then takes under a minute and the example about a minute; reading your own frames takes several minutes (about 10 for three full pages).</span>
         </p>
       </form>
     </section>

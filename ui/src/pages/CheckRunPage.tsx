@@ -3,8 +3,8 @@ import { Link } from '../lib/router';
 import { runAsset, useLoad } from '../lib/data';
 import { apiBase, failureNotice, FRAME_SIZES, LIVE_BPS, liveFilesBase, resolveAsset, sourceHost, type LiveBp, type LiveStatus, type PollState } from '../lib/live';
 import { useLivePoll, getCheck } from '../lib/liveApi';
-import { boxPct, checkCells, checkStages, checkSummary, hurtList, missingBoxes, parseCheck, repairRequested, type Box, type CheckBundle, type Hurt } from '../lib/check';
-import { REPAIR_ROUNDS, repairOutcome } from '../lib/repair';
+import { boxPct, checkCells, checkDurationNote, checkStages, checkSummary, hurtList, missingBoxes, parseCheck, repairRequested, type Box, type CheckBundle, type Hurt } from '../lib/check';
+import { repairOutcome } from '../lib/repair';
 import { fmtScore } from '../lib/score';
 import { cap, fmtSecs, fmtUsd } from '../lib/format';
 import { ErrorView, Loading } from '../components/StatusView';
@@ -99,8 +99,11 @@ function CheckProgress({ id, poll, retry }: { id: string; poll: PollState; retry
         {poll.phase === 'polling' && poll.networkErrors > 0 && <p className="mt-4 text-xs text-warn">Connection hiccup — retrying…</p>}
 
         <p className="mt-5 border-t border-line pt-4 text-xs text-ink-muted">
-          Measured in a <strong className="font-semibold text-ink">Token Factory Sandbox</strong>. Usually 1–3 minutes
-          {repairing ? `, plus a few minutes for the repair (≤ ${REPAIR_ROUNDS} Nemotron rounds)` : ''} — keep this page open.
+          Measured in a <strong className="font-semibold text-ink">Token Factory Sandbox</strong>. {checkDurationNote({ audit: !!poll.status?.audit, repairing })}{' '}
+          <Link to="/check/lovable-dashboard-check/replay" className="font-medium text-ink underline decoration-line underline-offset-2 hover:text-accent-strong">
+            Watch a finished check meanwhile
+          </Link>
+          .
         </p>
       </section>
     </div>
@@ -276,6 +279,10 @@ function DesignCheckResult({ id, check, base }: { id: string; check: CheckBundle
               </div>
             </div>
             <BpBullets perBp={Object.fromEntries(LIVE_BPS.flatMap((b) => (report.perBp[b] != null ? [[b, report.perBp[b]]] : [])))} legend />
+            <p className="text-[11px] leading-relaxed text-ink-muted">
+              <span className="font-medium text-ink">Score</span>: how close each size is to your design.{' '}
+              <span className="font-medium text-ink">Every width</span>: green means nothing overflows or overlaps — a page can fit everywhere and still not match its design.
+            </p>
             <CopyLine text={summary} />
           </section>
 

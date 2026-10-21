@@ -9,9 +9,9 @@ export function HomePage() {
     <div className="page">
       <HeroSweep />
       <CheckTeaser />
+      <RunList />
       <HowItWorks />
       <LiveRunPanel />
-      <RunList />
     </div>
   );
 }

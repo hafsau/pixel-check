@@ -21,7 +21,7 @@ export function SiteHeader() {
             Rebuild
           </Link>
           <Link to="/#runs" className="btn-ghost hidden sm:inline-flex">
-            Runs
+            Examples
           </Link>
           <ThemeToggle />
         </nav>

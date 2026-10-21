@@ -141,6 +141,6 @@ def test_vercel_rewrites_client_routes_but_not_assets_or_replays():
     src = re.compile("^" + v["rewrites"][0]["source"].replace("(?!", "(?!") + "$")
     for path in ("/run/abc", "/live/20261006-101740-bcabfc", "/check/x", "/brand"):
         assert src.match(path), path
-    for path in ("/assets/index-abc.js", "/runs/index.json", "/favicon.svg"):
+    for path in ("/assets/index-abc.js", "/runs/index.json", "/favicon.svg", "/examples/dashboard/mobile.png"):
         assert not src.match(path), path
     assert v["outputDirectory"] == "dist"

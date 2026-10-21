@@ -16,7 +16,7 @@ _Onboarding times below come from our commit history and spend ledger (dates and
 **Used for:** all model calls (design reading, the fix brief on every check, responsive-intent planning, region naming, the repair agent; earlier also code generation and critique) via the OpenAI-compatible endpoint `https://api.tokenfactory.nebius.com/v1/`. A check calls Gemma 3 (reading the frames) and Nemotron 3 Super (the fix brief), plus Sandboxes.
 
 **Worked well**
-- 2026-09-25 [confirmed] Hackathon promo code `NEBIUS-DEVPOST-GLOBAL26` applied; $50 credit showed in the balance.
+- 2026-09-25 [confirmed] The hackathon promo code applied in one step; the $50 credit showed in the balance at once.
 - 2026-09-25 [confirmed] Nebius AI Builder Program welcome email arrived with a clear list of partner credits; +$25 Token Factory credit announced in a separate email.
 
 **Needs work**
@@ -32,7 +32,7 @@ _Onboarding times below come from our commit history and spend ledger (dates and
 - First successful chat completions: Sep 29, in the first working session (gates G1–G2 committed that afternoon); the OpenAI-compatible endpoint worked with the standard `openai` client unchanged.
 - Friction: no spend alert (above); the model catalogue showed "0B" parameters for Nemotron 3 Super and Ultra (Sep 28); Gemma 3 listed as `text->text` though it reads images.
 
-**Build with it again? Why:** Yes. One key and one OpenAI-compatible endpoint gave us Nemotron and a vision model; live per-token prices fed our spend cap directly; ~1,800 calls cost under $5 of model time. We would want spend alerts and a sandbox-vs-inference split in the console.
+**Build with it again? Why:** Yes. One key and one OpenAI-compatible endpoint gave us Nemotron and a vision model; live per-token prices fed our spend cap directly; ~1,200 model calls cost under $5 by Oct 7 (sandbox time was the larger cost). We would want spend alerts and a sandbox-vs-inference split in the console.
 
 ---
 
@@ -54,10 +54,8 @@ _Onboarding times below come from our commit history and spend ledger (dates and
 - 2026-09-29 [confirmed] `-o json` is a global flag and must precede the subcommand (`contree -o json run …`); `contree run -o json` errors with "unrecognized arguments". Easy to trip on.
 - 2026-09-29 [confirmed] **stdout silently capped at 64 KiB.** `POST /instances` with `truncate_output_at: 10485760` echoes that value back, but `metadata.result.stdout` (and `GET /operations/{id}/subprocesses/1`) returns exactly 65,536 bytes with `truncated: false`. Two bugs: the cap ignores the setting, and the flag lies. Workaround: write outputs to files and fetch them via `GET /inspect/{image}/archive`.
 - 2026-09-29 [confirmed] `contree build`: `COPY render.mjs ./` after `WORKDIR /opt/pc` did not place the file in `/opt/pc` (Docker semantics would); absolute destinations work.
-- 2026-09-29 [to verify] Sandboxes are described as free in beta, yet every run reports `resources.cost` (e.g. 0.00217; ~$0.02 for a render + score). We still could not tell whether this is billed against the credit; the docs should say.
+- 2026-10-07 [confirmed] Sandboxes were described as free in beta, yet every run reports `resources.cost` (e.g. 0.00217; ~$0.02 for a render + score). We count it in our spend cap (sandbox time was 60–80 % of our spend); the docs should say whether and how it is billed against the credit.
 - 2026-10-07 [confirmed] `contree build` does not say whether it honours `.dockerignore`. Our repo folder holds `.env`, so we never build from it: we stage a clean copy of the needed files first. A clear statement (and honouring `.dockerignore`) would prevent secrets from being uploaded by accident.
-- [to verify] Short default execution timeout (30 s per MCP docs); a Chromium render at 3 viewports can exceed it. Suggest stating the default in the API reference next to `timeout`.
-- [to verify] Python SDK on PyPI didn't match the documented SDK surface (reported Sep 11 by another builder).
 
 - 2026-10-02 [confirmed] Positive: the network switch per run is exactly what an agent product needs — renders and scoring run with `networking: {"enabled": false}`; only the page-capture runs switch it on. Combined with checkpoints, the design frames enter only a disposable scoring fork, which makes our anti-cheat story simple to explain.
 - 2026-10-07 [confirmed] Positive: deterministic across image rebuilds — the same render selftest produced byte-identical PNG hashes on our runtime images v13 through v17 (built over three days), so scores stay comparable as the image evolves.

@@ -3,6 +3,6 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/((?!assets/|runs/|favicon\\.svg).*)", "destination": "/index.html" }
+    { "source": "/((?!assets/|runs/|examples/|favicon\\.svg).*)", "destination": "/index.html" }
   ]
 }

@@ -1,28 +1,34 @@
 # PixelCheck
 
-**AI writes UI that looks right at one size. PixelCheck proves whether it's right at every size.**
+**AI writes UI that looks right at one size. PixelCheck proves whether it's right at every size — and tells you what
+to fix.**
 
-PixelCheck is a referee for UI builds. Your **design frames are the spec** — phone, tablet and desktop, exported as
-you made them. PixelCheck measures **any build** against them — a deployed URL or an `App.jsx`, made by v0, Lovable,
-a teammate or you — at each designed size and at every width in between, and shows what broke and why: a score
-per size, a red/green width strip, what moved or went missing, the element that overflows — and **what to do next**:
-**NVIDIA Nemotron 3 Super** turns the measurements into a short fix brief and a message to paste into your AI builder,
-and a verifier outside the model drops any claim the measurements don't back. The build never grades itself: every
-render and score runs in an isolated **Nebius Token Factory Sandbox**, the design frames enter only a separate
-disposable scoring run, and anti-cheat checks stop a build from gaming the score.
+**[Live demo](https://pixel-check-peach.vercel.app)** · **[Example result](https://pixel-check-peach.vercel.app/check/lovable-dashboard-check/replay)** ·
+Video: _(YouTube — added at submission)_ · Track: Coding and Agentic Engineering · Nebius × NVIDIA Global AI Hackathon
 
-PixelCheck can also **rebuild** a screen from its frames — one responsive React + Tailwind codebase that passes the
-same checks — and try to **repair** a failing build (experimental: its benchmark is pending, see
-[`docs/REPAIR.md`](docs/REPAIR.md)).
+PixelCheck is the **test step AI coding agents skip**: it runs AI-written UI code in **Nebius Token Factory Sandboxes**,
+tests it against the designer's phone, tablet and desktop frames at every width from 360 to 1600 px, and hands a
+verified fix back — written by **NVIDIA Nemotron 3 Super**, with every claim checked against a measurement.
 
-**Built with** NVIDIA Nemotron 3 Super (writes the fix brief, names page regions, proposes the repair agent's edits) and
-Nemotron 3 Ultra (plans responsive intent) on Nebius Token Factory, Gemma 3 27B (reads the design frames), and Token
-Factory Sandboxes (capture every build, then score it in a disposable run with the network off).
+![A Lovable build of a real dashboard, checked: close on desktop and tablet, drifted on phone, with Nemotron's fix brief](docs/img/check-result.png)
 
-> Built solo for the Nebius × NVIDIA Global AI Hackathon (track: Coding and Agentic Engineering).
-> Demo: _(Vercel URL — added at deploy)_ · Video: _(YouTube — added at submission)_
-> The live server runs on Render's free plan: after 15 idle minutes it sleeps, and the first live request waits up to a
-> minute while it wakes ("Waking the live server…"). Replays load instantly and need no server.
+| Who does what | |
+|---|---|
+| **Nebius Token Factory Sandboxes** | capture every build (network on), then score it in a disposable fork with the network off — the only place the design frames ever enter; render and test the code PixelCheck writes (Rebuild) or repairs |
+| **NVIDIA Nemotron 3 Super** (Token Factory) | writes the fix brief on every check (a verifier outside the model drops unbacked claims); names page regions in rebuilds; proposes the repair agent's edits, which the sandbox re-tests |
+| **NVIDIA Nemotron 3 Ultra** · **Gemma 3 27B** (Token Factory) | plans responsive intent in rebuilds (kept only if the sandbox shows it is no worse) · reads the design frames |
+
+**Try it:** open the demo → **Check a build** → **Try the example** (a real dashboard design and the page Lovable made
+from it) → Run check. An audit of any URL ("No designs?") takes under a minute. The live server is on Render's free
+plan: after 15 idle minutes it sleeps and the first request waits up to a minute; reading your *own* frames takes
+several minutes there. Replays load instantly.
+
+**More:** your **design frames are the spec**, exported as you made them. PixelCheck measures **any build** — a URL or
+an `App.jsx`, made by v0, Lovable, a teammate or you — and shows what broke and why: a score per size, a red/green
+width strip, what moved or went missing, the element that overflows. The build never grades itself, and anti-cheat
+checks stop it from gaming the score. PixelCheck can also **rebuild** a screen from its frames — one responsive React +
+Tailwind codebase that passes the same checks — and try to **repair** a failing `App.jsx` (experimental: Nemotron edits,
+the sandbox re-tests, the best round is kept; benchmark pending, see [`docs/REPAIR.md`](docs/REPAIR.md)).
 
 ---
 
@@ -73,7 +79,7 @@ design frames ─┐
   disposable scoring run.
 - **Anti-cheat**: a static lint (no `<img>`, `url(`, `data:`, canvas, iframes, per-breakpoint copies of the same
   text, no arbitrary breakpoints such as `min-[402px]:max-[403px]:` that would pin a layout to one measured width) and runtime integrity checks (same DOM at every size, ≤ 30 % positioned elements, no traced layouts, no
-  hidden-text stuffing). A cheat scores 0. Red team: 389 attack candidates, best attack 46. (Check mode measures
+  hidden-text stuffing). A cheat scores 0. Red team (scorer v4, Sep 29): 389 attack candidates, best attack 46. (Check mode measures
   someone else's code and applies no anti-cheat verdict.)
 - **Interactions** (development only — not in the demo): from a state frame (menu open, tab selected), Nemotron 3
   Ultra wrote the wiring and the sandbox clicked, pressed Escape and tabbed through it; with measured facts, a
@@ -98,7 +104,7 @@ drifting off-centre or the page background ending early. Details: [`docs/SCORING
 
 | What | Result |
 |---|---|
-| **Check: a Lovable build of the author's dashboard** — Lovable was given all three of her frames and one prompt ("Build this dashboard as a responsive web page. The three images are the mobile, tablet and desktop designs."), first output — replay in [`ui/published/lovable-dashboard-check`](ui/published/lovable-dashboard-check/check.json) | worst size **38** (mobile 38 · tablet 61 · desktop 65), no break at any width 360–1600 px. Close on desktop and tablet; on phones text is **11 % smaller**, spacing **20 % tighter** (content 150 px higher by the bottom of the screen), and the font is Roboto instead of Lato. Nemotron's fix brief: "On mobile, increase the font size by about 12%", "On mobile, increase vertical spacing by about 25%", "On all sizes, change the font from Roboto to Lato". ~1 min, ~$0.05 all-in; four repeat runs gave identical scores. One example, not a ranking of tools |
+| **Check: a Lovable build of the author's dashboard** — Lovable was given all three of her frames and one prompt ("Build this dashboard as a responsive web page. The three images are the mobile, tablet and desktop designs."), first output — replay in [`ui/published/lovable-dashboard-check`](ui/published/lovable-dashboard-check/check.json) | worst size **38** (mobile 38 · tablet 61 · desktop 65), no break at any width 360–1600 px. Close on desktop and tablet; on phones text is **11–15 % smaller** (11 % measured on our Mac, 15 % on the Linux server: reading text from images differs slightly by platform), spacing **20 % tighter** (content 150 px higher by the bottom of the screen), and the font is Roboto instead of Lato. Nemotron's fix brief: "On mobile, increase the font size by about 12%", "On mobile, increase vertical spacing by about 25%", "On all sizes, change the font from Roboto to Lato". ~1 min, ~$0.05 all-in; four repeat runs on one machine gave identical scores, and the deployed server scored the same rounded 38 / 61 / 65. One example, not a ranking of tools |
 | **Audit (no designs) of three of the author's own deployed apps** — replays in [`ui/published/`](ui/published/) | EqualTales: nothing to fix. HeadshotAI: the "Edit with Lovable" badge covers part of the upload button on phones and the placeholder text at 1024 px. Interview Sage: the Replit badge covers part of "Generate Questions" on phones; 7 texts shown on larger screens are gone on phones (its nav labels and tips). ~$0.03–0.04 each |
 | **hafsausmani.com** (the author's own site), live run from its URL — replay in [`ui/published/hafsausmani-home`](ui/published/hafsausmani-home/run.json) | worst size **87.4** (mobile 94.6 · tablet 92.9 · desktop 87.4), width sweep pass; **~33 s** end to end with the design reading cached (compile + render + score 14 s; an uncached reading adds 13–30 s); model **$0.0022** (+ ~$0.001 for an uncached reading) and sandbox ~$0.04; the delivered code shows the site's real headshot and icon |
 | **Check-mode sanity check**: hafsausmani.com checked against its own screenshots (a reproducibility test, not accuracy on a different build) — [`docs/results/hafsausmani-self-check.json`](docs/results/hafsausmani-self-check.json) | **99.8 · 99.9 · 99.9**, no missing text, width sweep pass |
