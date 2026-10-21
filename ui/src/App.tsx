@@ -1,3 +1,4 @@
+import { Analytics } from '@vercel/analytics/react';
 import { matchPath, usePath } from './lib/router';
 import { SiteHeader } from './components/SiteHeader';
 import { SiteFooter } from './components/SiteFooter';
@@ -47,6 +48,7 @@ export default function App() {
         <Routes />
       </main>
       <SiteFooter />
+      <Analytics />
     </>
   );
 }
