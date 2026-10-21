@@ -80,10 +80,10 @@ def _state(env: dict, live: bool, cap: float | None, store=None) -> dict:
     gid, tok = (env.get("STATE_GIST_ID") or "").strip(), (env.get("STATE_GIST_TOKEN") or "").strip()
     if bool(gid) != bool(tok):
         return _check("state store", False, "set both STATE_GIST_ID and STATE_GIST_TOKEN (one is missing)")
-    if not gid and live and (env.get("RENDER") or "").strip():
-        return _check("state store", False, "live mode on Render needs STATE_GIST_ID + STATE_GIST_TOKEN — the disk "
-                                            "is wiped on every wake-up, which would reset the caps and the spend")
-    kind = "gist" if gid else "file"
+    # Render free wipes the disk on every sleep: without a gist the caps and daily spend restart then (Hafsa, Oct 21:
+    # no gist; open live mode with tight caps per wake-up period); say so rather than fail
+    resets = not gid and live and bool((env.get("RENDER") or "").strip())
+    kind = "gist" if gid else ("file (resets when the free server sleeps)" if resets else "file")
     try:
         st = store or state.from_env(env, Path(env.get("LIVE_DIR") or ROOT / "var" / "live"))
         d = st.load()

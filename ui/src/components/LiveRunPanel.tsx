@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { navigate } from '../lib/router';
 import { FRAME_SIZES, LIVE_BPS, framesReady, urlReady, validatePageUrl, type LiveBp } from '../lib/live';
-import { getHealth, startRun, startUrlRun, type Health, wakeAndGetHealth } from '../lib/liveApi';
+import { getHealth, passcodeNeeded, startRun, startUrlRun, type Health, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
 import { FramesSummary, inferPicked } from './FramesSummary';
@@ -34,12 +34,13 @@ export function LiveRunPanel() {
   const open = !!h?.live && h.runs_left_today > 0 && h.runs_left_total > 0;
   const urlError = validatePageUrl(url);
   const inferred = inferPicked(frames);
-  const ready = mode === 'upload' ? framesReady(statuses, passcode) && !!inferred?.ok : urlReady(url, owns, passcode);
+  const needPass = passcodeNeeded(health.status === 'ok' ? health.health : null);
+  const ready = mode === 'upload' ? framesReady(statuses, passcode, needPass) && !!inferred?.ok : urlReady(url, owns, passcode, needPass);
   const missing = [
     ...(mode === 'upload'
       ? LIVE_BPS.filter((bp) => statuses[bp] !== 'ok').map((bp) => `a valid ${bp} frame`)
       : [...(urlError ? ['a valid page address'] : []), ...(owns ? [] : ['the ownership confirmation'])]),
-    ...(passcode.trim() ? [] : ['the passcode']),
+    ...(!needPass || passcode.trim() ? [] : ['the passcode']),
   ];
 
   const submit = async (e: FormEvent) => {
@@ -152,22 +153,24 @@ export function LiveRunPanel() {
             </Tabs>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,18rem)_auto] sm:items-end">
-              <div>
-                <label htmlFor="passcode" className="text-sm font-medium">
-                  Passcode
-                </label>
-                <input
-                  id="passcode"
-                  name="passcode"
-                  type="password"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="input mt-1"
-                  placeholder="From the Devpost testing notes"
-                  value={passcode}
-                  onChange={(e) => setPasscode(e.target.value)}
-                />
-              </div>
+              {needPass && (
+                <div>
+                  <label htmlFor="passcode" className="text-sm font-medium">
+                    Passcode
+                  </label>
+                  <input
+                    id="passcode"
+                    name="passcode"
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="input mt-1"
+                    placeholder="From the Devpost testing notes"
+                    value={passcode}
+                    onChange={(e) => setPasscode(e.target.value)}
+                  />
+                </div>
+              )}
               <button type="submit" className="btn-primary justify-self-start" disabled={!ready || !open || submitting} aria-describedby="live-note">
                 {submitting ? 'Starting…' : 'Start live run'}
               </button>

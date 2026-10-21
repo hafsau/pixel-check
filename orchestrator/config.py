@@ -70,6 +70,7 @@ STOP_MATCH = float(os.environ.get("STOP_MATCH", "92"))
 # Live mode (orchestrator/api.py; CLAUDE.md §6): off unless switched on; passcode only from the environment
 LIVE_ENABLED = os.environ.get("LIVE_ENABLED", "0") == "1"
 LIVE_PASSCODE = os.environ.get("LIVE_PASSCODE", "")
+LIVE_OPEN = os.environ.get("LIVE_OPEN", "0") == "1"    # no passcode (Hafsa, Oct 21); the caps guard the credit
 LIVE_DAILY_RUNS = int(os.environ.get("LIVE_DAILY_RUNS", "10"))
 LIVE_TOTAL_RUNS = int(os.environ.get("LIVE_TOTAL_RUNS", "40"))
 LIVE_RUN_BUDGET_USD = float(os.environ.get("LIVE_RUN_BUDGET_USD", "0.30"))

@@ -11,7 +11,7 @@ Numbers below are the real ones from our runs (Oct 20); quote whole numbers.
 |---|---|---|
 | Oct 21 | Lovable card + replay published, feedback file complete, this pack | Claude ✅ |
 | Oct 21–22 | Optional before/after: paste the fix brief into the same Lovable project (one message, first output), publish → Claude re-checks | Hafsa (15 min) |
-| Oct 22–23 | Deploy: secret gist + token, Render (API), Vercel (web app) — `docs/DEPLOY.md`; Claude verifies the live site end to end | Hafsa (≈ 30 min) + Claude |
+| Oct 22–23 | Deploy: Render (API) + Vercel (web app) — `docs/DEPLOY.md`; Claude verifies the live site end to end | Hafsa (≈ 20 min) + Claude |
 | Oct 23–24 | Record the video from the script below (screen recording + voice) | Hafsa |
 | Oct 24 | Repo public: `gitleaks detect` on full history, MIT detected in GitHub's About panel, fresh-clone test, tag `v1.0-submission` | Claude (Hafsa flips "public") |
 | Oct 25–26 | Devpost draft from §2–§4; links filled in | Claude drafts, Hafsa pastes |
@@ -81,8 +81,9 @@ coding agent can check its own UI at every size before it says "done".
 
 ### Testing notes (for judges)
 - Replays work without any login: home page → **Replay a run** → *Dashboard built by Lovable* and the audits.
-- Live mode: passcode `<in the private testing field>`. The first live request can take up to a minute while the free
-  server wakes. A check takes about 1 minute.
+- Live mode needs no passcode: open the site and run a check. The live server runs on Render's free plan: after 15 idle
+  minutes it sleeps, so the first live request waits up to a minute while it wakes (the site says "Waking the live
+  server…"). A check then takes about a minute. Replays need no server.
 
 ---
 

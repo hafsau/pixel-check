@@ -45,6 +45,8 @@ export interface CheckDraft {
   repair?: boolean;
   /** No design frames: the URL is measured on its own (width breaks, warnings, what vanishes) — no match score. */
   audit?: boolean;
+  /** open live mode: the server needs no passcode */
+  noPasscode?: boolean;
 }
 
 /** What still stops the form from being sent, in words ("Still needed: …"). Only the active source counts. */
@@ -56,7 +58,7 @@ export function checkMissing(d: CheckDraft): string[] {
   } else if (!d.code.trim()) out.push('your App.jsx');
   else if (d.code.length > MAX_CODE_CHARS) out.push(`an App.jsx under ${fmtN(MAX_CODE_CHARS)} characters`);
   if (!d.owns) out.push('the ownership confirmation');
-  if (!d.passcode.trim()) out.push('the passcode');
+  if (!d.noPasscode && !d.passcode.trim()) out.push('the passcode');
   return out;
 }
 

@@ -331,3 +331,27 @@ def test_a_failing_brief_never_fails_the_check(tmp_path, monkeypatch):
     c = client(tmp_path, checker=_diag_checker())
     st = wait_done(c, post(c).json()["id"])
     assert st["state"] == "done" and c.get(st["bundle"]).json()["brief"] is None
+
+
+# ---- open live mode (Hafsa, Oct 21): no passcode for judges; tighter caps guard the credit instead
+
+def test_open_live_mode_needs_no_passcode_and_says_so(tmp_path):
+    c = client(tmp_path, open=True, passcode="")
+    assert c.get("/api/health").json()["passcode"] is False
+    r = post(c, passcode="")
+    assert r.status_code == 202, r.text
+
+
+def test_live_mode_is_not_open_by_accident(tmp_path):
+    """an unset passcode without LIVE_OPEN keeps live runs locked (fail closed), as before"""
+    c = client(tmp_path, passcode="")
+    assert c.get("/api/health").json()["passcode"] is True
+    assert post(c, passcode="").status_code == 403
+    c2 = client(tmp_path / "b")
+    assert post(c2, passcode="nope").status_code == 403
+
+
+def test_open_mode_keeps_the_caps(tmp_path):
+    c = client(tmp_path, open=True, passcode="", daily=1)
+    assert post(c, passcode="").status_code == 202
+    assert post(c, passcode="").status_code == 429

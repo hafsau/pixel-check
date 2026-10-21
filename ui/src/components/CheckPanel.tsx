@@ -3,7 +3,7 @@ import { navigate } from '../lib/router';
 import { FRAME_SIZES, LIVE_BPS, validatePageUrl, type LiveBp } from '../lib/live';
 import { checkMissing, checkPath, checkReady, codeCounter, validateCode, wantsRepair, type CheckSource } from '../lib/check';
 import { REPAIR_ROUNDS } from '../lib/repair';
-import { getHealth, startCheck, wakeAndGetHealth } from '../lib/liveApi';
+import { getHealth, passcodeNeeded, startCheck, wakeAndGetHealth } from '../lib/liveApi';
 import { Tabs } from './Tabs';
 import { FramePicker, type FrameState } from './FramePicker';
 import { FramesSummary, inferPicked } from './FramesSummary';
@@ -37,11 +37,12 @@ export function CheckPanel() {
 
   const statuses = Object.fromEntries(LIVE_BPS.map((bp) => [bp, frames[bp]?.status === 'ok' ? 'ok' : frames[bp]?.status === 'error' ? 'error' : 'empty'])) as Record<LiveBp, 'ok' | 'error' | 'empty'>;
   const audit = noDesigns && source === 'url';
-  const draft = { frames: statuses, source, url, code, owns, passcode, repair: audit ? false : repair, audit };
+  const h = health.status === 'ok' ? health.health : null;
+  const needPass = passcodeNeeded(h);
+  const draft = { frames: statuses, source, url, code, owns, passcode, repair: audit ? false : repair, audit, noPasscode: !needPass };
   const inferred = inferPicked(frames);
   const ready = checkReady(draft) && (audit || !!inferred?.ok);
   const missing = checkMissing(draft);
-  const h = health.status === 'ok' ? health.health : null;
   const open = !!h?.live && h.runs_left_today > 0 && h.runs_left_total > 0;
   const urlError = validatePageUrl(url);
   const codeError = validateCode(code);
@@ -203,22 +204,24 @@ export function CheckPanel() {
           </label>
 
           <div className="grid gap-3 sm:grid-cols-[minmax(0,18rem)_auto] sm:items-end">
-            <div>
-              <label htmlFor={`${ids}-pass`} className="text-sm font-medium">
-                Passcode
-              </label>
-              <input
-                id={`${ids}-pass`}
-                name="passcode"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                className="input mt-1"
-                placeholder="From the Devpost testing notes"
-                value={passcode}
-                onChange={(e) => setPasscode(e.target.value)}
-              />
-            </div>
+            {needPass && (
+              <div>
+                <label htmlFor={`${ids}-pass`} className="text-sm font-medium">
+                  Passcode
+                </label>
+                <input
+                  id={`${ids}-pass`}
+                  name="passcode"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="input mt-1"
+                  placeholder="From the Devpost testing notes"
+                  value={passcode}
+                  onChange={(e) => setPasscode(e.target.value)}
+                />
+              </div>
+            )}
             <button type="submit" className="btn-primary btn-lg justify-self-start" disabled={!ready || !open || submitting}>
               {submitting ? 'Starting…' : wantsRepair(source, repair) ? 'Check + repair' : 'Run check'}
             </button>
@@ -232,6 +235,7 @@ export function CheckPanel() {
         )}
         <p id={`${ids}-note`} className="-mt-3 text-xs text-ink-muted">
           {!open ? 'Checks are not available right now.' : ready ? `Ready. Nothing is sent until you press ${wantsRepair(source, repair) ? 'Check + repair' : 'Run check'}.` : `Still needed: ${missing.join(', ')}.`}
+          <span className="mt-0.5 block">The live server runs on a free plan: after 15 quiet minutes it sleeps, and the next check waits up to a minute while it wakes. A check then takes about a minute.</span>
         </p>
       </form>
     </section>

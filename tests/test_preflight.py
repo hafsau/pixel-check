@@ -103,9 +103,11 @@ def test_unreadable_gist_fails_without_the_token(tmp_path):
     assert not r["ok"] and "401" in r["detail"] and "tok-very-secret" not in json.dumps(res)
 
 
-def test_live_mode_on_render_needs_the_gist(tmp_path):
+def test_live_mode_on_render_without_a_gist_uses_a_file_and_says_it_resets(tmp_path):
+    """Hafsa (Oct 21): no gist — the passcode guards the credit; caps and daily spend restart when the free server
+    sleeps, and the preflight says so instead of failing."""
     r = by_name(P.run(env(tmp_path, RENDER="true"), static=False))["state store"]
-    assert not r["ok"] and "STATE_GIST_ID" in r["detail"]
+    assert r["ok"] and "file" in r["detail"] and "resets" in r["detail"]
     r = by_name(P.run(env(tmp_path), static=False))["state store"]       # local: a file is fine
     assert r["ok"] and "file" in r["detail"]
 

@@ -26,8 +26,8 @@ export function validateFrame(bp: LiveBp, f: FrameFacts): string | null {
   return checkFrameFile(bp, f); // any size within the bounds (lib/frames.ts mirrors orchestrator/frames.py)
 }
 
-export function framesReady(frames: Partial<Record<LiveBp, 'ok' | 'error' | 'empty'>>, passcode: string): boolean {
-  return LIVE_BPS.every((bp) => frames[bp] === 'ok') && passcode.trim().length > 0;
+export function framesReady(frames: Partial<Record<LiveBp, 'ok' | 'error' | 'empty'>>, passcode: string, needPasscode = true): boolean {
+  return LIVE_BPS.every((bp) => frames[bp] === 'ok') && (!needPasscode || passcode.trim().length > 0);
 }
 
 /** Decode a picked file to learn its pixel size (0×0 when it is not a decodable image). Browser only. */
@@ -204,8 +204,8 @@ export function validatePageUrl(raw: string): string | null {
   return null;
 }
 
-export function urlReady(url: string, owns: boolean, passcode: string): boolean {
-  return validatePageUrl(url) === null && owns && passcode.trim().length > 0;
+export function urlReady(url: string, owns: boolean, passcode: string, needPasscode = true): boolean {
+  return validatePageUrl(url) === null && owns && (!needPasscode || passcode.trim().length > 0);
 }
 
 const REFUSAL = /password or payment fields/i;

@@ -262,7 +262,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     from . import frames as _frames
     from . import state as _state
     from .tf_client import Ledger
-    s = {"enabled": config.LIVE_ENABLED, "passcode": config.LIVE_PASSCODE, "daily": config.LIVE_DAILY_RUNS,
+    s = {"enabled": config.LIVE_ENABLED, "open": config.LIVE_OPEN, "passcode": config.LIVE_PASSCODE, "daily": config.LIVE_DAILY_RUNS,
          "total": config.LIVE_TOTAL_RUNS, "origins": config.LIVE_ORIGINS, "per_ip": config.LIVE_PER_IP_DAILY,
          "trust_proxy": config.LIVE_TRUST_PROXY, "url_allow": config.LIVE_URL_ALLOW, "owned_hosts": config.OWNED_HOSTS,
          "daily_spend": config.LIVE_DAILY_SPEND_USD, "ledger": config.LEDGER_PATH}
@@ -304,6 +304,14 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                         "today_usd": float(day_usd or 0.0) if day == today() else 0.0})
     except (_state.StateError, json.JSONDecodeError, ValueError) as e:
         state_error = str(e)
+
+    def check_passcode(passcode: str):
+        """Open live mode (LIVE_OPEN=1, Hafsa Oct 21: nothing for judges to type) skips it; otherwise a passcode must be
+        set and match (constant-time; never logged or echoed). An unset passcode without LIVE_OPEN locks live runs."""
+        if s.get("open"):
+            return
+        if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
+            raise HTTPException(403, "wrong passcode")
 
     def live_ok() -> bool:
         return bool(s["enabled"]) and state_error is None
@@ -433,14 +441,13 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     @app.get("/api/health")
     def health():
         d, t = caps.left()
-        return {"live": live_ok(), "runs_left_today": d, "runs_left_total": t}
+        return {"live": live_ok(), "runs_left_today": d, "runs_left_total": t, "passcode": not s.get("open")}
 
     @app.post("/api/runs", status_code=202)
     async def start(request: Request, mobile: UploadFile = File(...), tablet: UploadFile = File(...),
                     desktop: UploadFile = File(...), passcode: str = Form("")):
         require_live()
-        if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
-            raise HTTPException(403, "wrong passcode")
+        check_passcode(passcode)
         frames, info, full = await _read_frames((("mobile", mobile), ("tablet", tablet), ("desktop", desktop)))
         take_run(request)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
@@ -453,8 +460,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
     @app.post("/api/runs/url", status_code=202)
     def start_url(request: Request, url: str = Form(""), owns: str = Form(""), passcode: str = Form("")):
         require_live()
-        if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
-            raise HTTPException(403, "wrong passcode")
+        check_passcode(passcode)
         if owns.strip().lower() not in ("true", "1", "yes", "on"):
             raise HTTPException(422, "confirm that you own this page or have permission to rebuild it")
         url = _check_url(url, resolve)
@@ -564,8 +570,7 @@ def create_app(pipeline=None, live_dir: Path | None = None, settings: dict | Non
                           desktop: UploadFile | None = File(None), url: str = Form(""), code: str = Form(""),
                           owns: str = Form(""), passcode: str = Form(""), repair: str = Form("")):
         require_live()
-        if not s["passcode"] or not hmac.compare_digest(passcode.encode(), str(s["passcode"]).encode()):
-            raise HTTPException(403, "wrong passcode")
+        check_passcode(passcode)
         if owns.strip().lower() not in ("true", "1", "yes", "on"):
             raise HTTPException(422, "confirm that you own this build or have permission to check it")
         url, has_code = url.strip(), bool(code.strip())

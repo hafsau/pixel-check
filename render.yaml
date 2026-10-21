@@ -1,7 +1,8 @@
 # Render blueprint for the PixelCheck live API — FREE plan (Docker). Secrets are set in the Render dashboard
 # (sync: false), never in this file. The free plan sleeps after 15 idle minutes (~1 min to wake) and loses its files
-# on every sleep or restart, so the run caps and the spend ledger are kept in a private GitHub gist (STATE_GIST_*);
-# run results live in /tmp and expire when the service sleeps (replays in the web app never do).
+# on every sleep or restart: run results, the run caps and the daily spend restart then (no gist — Hafsa, Oct 21).
+# Open live mode (no passcode, so judges type nothing): tight caps per wake-up period guard the credit instead —
+# 5 runs, 3 per visitor, $1 of spend, $0.30 per run. Replays in the web app never expire.
 services:
   - type: web
     name: pixelcheck-api
@@ -15,26 +16,22 @@ services:
         sync: false
       - key: NEBIUS_AI_PROJECT
         sync: false
-      - key: LIVE_PASSCODE
-        sync: false
       - key: LIVE_ORIGINS
         sync: false            # the web app's origin, e.g. https://pixelcheck.vercel.app (no trailing slash)
-      - key: STATE_GIST_ID
-        sync: false            # a private gist holding the caps + spend
-      - key: STATE_GIST_TOKEN
-        sync: false            # a GitHub token that can only edit gists
       - key: SPEND_CAP_USD
         sync: false            # what is left of the credit, minus headroom (see docs/DEPLOY.md)
       - key: LIVE_ENABLED
         value: "1"
+      - key: LIVE_OPEN
+        value: "1"             # no passcode (Hafsa, Oct 21)
       - key: LIVE_DAILY_RUNS
-        value: "10"
+        value: "5"
       - key: LIVE_TOTAL_RUNS
         value: "40"
       - key: LIVE_PER_IP_DAILY
         value: "3"
       - key: LIVE_DAILY_SPEND_USD
-        value: "4"
+        value: "1"
       - key: JOB_SLOTS
         value: "1"             # 512 MB: one heavy run at a time, the rest wait as "queued"
       - key: LIVE_TRUST_PROXY

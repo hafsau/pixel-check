@@ -9,6 +9,13 @@ export interface Health {
   live: boolean;
   runs_left_today: number;
   runs_left_total: number;
+  /** false: open live mode, no passcode (Oct 21); missing on older servers = needed */
+  passcode?: boolean;
+}
+
+/** Does the live server want a passcode? Yes unless it says otherwise. */
+export function passcodeNeeded(h: Health | null | undefined): boolean {
+  return h?.passcode !== false;
 }
 
 async function body(res: Response): Promise<unknown> {

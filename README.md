@@ -21,6 +21,8 @@ Factory Sandboxes (capture every build, then score it in a disposable run with t
 
 > Built solo for the Nebius × NVIDIA Global AI Hackathon (track: Coding and Agentic Engineering).
 > Demo: _(Vercel URL — added at deploy)_ · Video: _(YouTube — added at submission)_
+> The live server runs on Render's free plan: after 15 idle minutes it sleeps, and the first live request waits up to a
+> minute while it wakes ("Waking the live server…"). Replays load instantly and need no server.
 
 ---
 
