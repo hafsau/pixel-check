@@ -1,0 +1,1749 @@
+{
+ "type": "check",
+ "id": "lovable-dashboard-check",
+ "source": {
+  "url": "https://adaptable-hub-central.lovable.app/"
+ },
+ "report": {
+  "match": 38.49,
+  "mean": 54.72,
+  "worst": "mobile",
+  "breakpoints": {
+   "mobile": {
+    "score": 38.49,
+    "components": {
+     "structure": 0.4782,
+     "layout": 0.569,
+     "text": 0.8333,
+     "color": 0.7489,
+     "content_color": 0.4979,
+     "bg_match": 1.0
+    },
+    "weights": {
+     "structure": 0.57,
+     "layout": 0.43
+    },
+    "layout_precision": 0.8159,
+    "layout_recall": 0.8248,
+    "background": {
+     "target": [
+      254,
+      254,
+      254
+     ],
+     "render": [
+      254,
+      254,
+      254
+     ]
+    },
+    "regions": [
+     {
+      "kind": "extra",
+      "box": [
+       40,
+       528,
+       328,
+       176
+      ],
+      "area": 57728
+     },
+     {
+      "kind": "color",
+      "box": [
+       48,
+       424,
+       160,
+       200
+      ],
+      "area": 32000
+     },
+     {
+      "kind": "color",
+      "box": [
+       16,
+       208,
+       368,
+       80
+      ],
+      "area": 29440
+     },
+     {
+      "kind": "missing",
+      "box": [
+       72,
+       416,
+       296,
+       96
+      ],
+      "area": 28416
+     },
+     {
+      "kind": "color",
+      "box": [
+       48,
+       656,
+       128,
+       96
+      ],
+      "area": 12288
+     },
+     {
+      "kind": "color",
+      "box": [
+       32,
+       128,
+       336,
+       32
+      ],
+      "area": 10752
+     },
+     {
+      "kind": "missing",
+      "box": [
+       144,
+       8,
+       88,
+       88
+      ],
+      "area": 7744
+     },
+     {
+      "kind": "missing",
+      "box": [
+       128,
+       656,
+       160,
+       40
+      ],
+      "area": 6400
+     }
+    ],
+    "missing_text": [
+     "days",
+     "time logged",
+     "1h 20m"
+    ],
+    "offset_px": [
+     0,
+     0
+    ]
+   },
+   "tablet": {
+    "score": 61.13,
+    "components": {
+     "structure": 0.7671,
+     "layout": 0.8047,
+     "text": 0.963,
+     "color": 0.8714,
+     "content_color": 0.7428,
+     "bg_match": 1.0
+    },
+    "weights": {
+     "structure": 0.57,
+     "layout": 0.43
+    },
+    "layout_precision": 0.9537,
+    "layout_recall": 0.9715,
+    "background": {
+     "target": [
+      254,
+      254,
+      254
+     ],
+     "render": [
+      254,
+      254,
+      254
+     ]
+    },
+    "regions": [
+     {
+      "kind": "color",
+      "box": [
+       16,
+       32,
+       216,
+       64
+      ],
+      "area": 13824
+     },
+     {
+      "kind": "color",
+      "box": [
+       576,
+       592,
+       144,
+       96
+      ],
+      "area": 13824
+     },
+     {
+      "kind": "color",
+      "box": [
+       416,
+       624,
+       144,
+       80
+      ],
+      "area": 11520
+     },
+     {
+      "kind": "color",
+      "box": [
+       48,
+       256,
+       672,
+       16
+      ],
+      "area": 10752
+     },
+     {
+      "kind": "missing",
+      "box": [
+       168,
+       8,
+       80,
+       96
+      ],
+      "area": 7680
+     },
+     {
+      "kind": "color",
+      "box": [
+       432,
+       144,
+       160,
+       48
+      ],
+      "area": 7680
+     },
+     {
+      "kind": "extra",
+      "box": [
+       608,
+       960,
+       120,
+       40
+      ],
+      "area": 4800
+     },
+     {
+      "kind": "extra",
+      "box": [
+       256,
+       112,
+       504,
+       8
+      ],
+      "area": 4032
+     }
+    ],
+    "missing_text": [
+     "minutes moved each day"
+    ],
+    "offset_px": [
+     -20,
+     0
+    ]
+   },
+   "desktop": {
+    "score": 64.54,
+    "components": {
+     "structure": 0.7596,
+     "layout": 0.7939,
+     "text": 1.0,
+     "color": 0.88,
+     "content_color": 0.76,
+     "bg_match": 1.0
+    },
+    "weights": {
+     "structure": 0.57,
+     "layout": 0.43
+    },
+    "layout_precision": 0.9468,
+    "layout_recall": 0.9555,
+    "background": {
+     "target": [
+      254,
+      254,
+      254
+     ],
+     "render": [
+      254,
+      254,
+      254
+     ]
+    },
+    "regions": [
+     {
+      "kind": "color",
+      "box": [
+       288,
+       144,
+       736,
+       128
+      ],
+      "area": 94208
+     },
+     {
+      "kind": "color",
+      "box": [
+       736,
+       832,
+       248,
+       176
+      ],
+      "area": 43648
+     },
+     {
+      "kind": "color",
+      "box": [
+       768,
+       480,
+       160,
+       72
+      ],
+      "area": 11520
+     },
+     {
+      "kind": "color",
+      "box": [
+       400,
+       528,
+       112,
+       96
+      ],
+      "area": 10752
+     },
+     {
+      "kind": "missing",
+      "box": [
+       720,
+       1008,
+       328,
+       32
+      ],
+      "area": 10496
+     },
+     {
+      "kind": "extra",
+      "box": [
+       584,
+       1096,
+       120,
+       72
+      ],
+      "area": 8640
+     },
+     {
+      "kind": "color",
+      "box": [
+       544,
+       528,
+       128,
+       64
+      ],
+      "area": 8192
+     },
+     {
+      "kind": "extra",
+      "box": [
+       912,
+       1120,
+       144,
+       48
+      ],
+      "area": 6912
+     }
+    ],
+    "missing_text": [],
+    "offset_px": [
+     -14,
+     0
+    ]
+   }
+  },
+  "mode": "check",
+  "disqualified": false,
+  "between": {
+   "360": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 0,
+    "examples": [],
+    "overflowers": [],
+    "content": [
+     20,
+     348
+    ],
+    "centre_ratio": 0.511,
+    "left_ratio": 0.056,
+    "right_gap_ratio": 0.033,
+    "page_height": 2137,
+    "max_vertical_gap": 55,
+    "viewport_h": 844,
+    "background_covers": true
+   },
+   "375": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 0,
+    "examples": [],
+    "overflowers": [],
+    "content": [
+     20,
+     363
+    ],
+    "centre_ratio": 0.511,
+    "left_ratio": 0.053,
+    "right_gap_ratio": 0.032,
+    "page_height": 2146,
+    "max_vertical_gap": 55,
+    "viewport_h": 844,
+    "background_covers": true
+   },
+   "585": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 0,
+    "examples": [],
+    "overflowers": [],
+    "content": [
+     20,
+     573
+    ],
+    "centre_ratio": 0.507,
+    "left_ratio": 0.034,
+    "right_gap_ratio": 0.021,
+    "page_height": 2218,
+    "max_vertical_gap": 55,
+    "viewport_h": 844,
+    "background_covers": true
+   },
+   "920": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 0,
+    "examples": [],
+    "overflowers": [],
+    "content": [
+     24,
+     908
+    ],
+    "centre_ratio": 0.507,
+    "left_ratio": 0.026,
+    "right_gap_ratio": 0.013,
+    "page_height": 1988,
+    "max_vertical_gap": 73,
+    "viewport_h": 1024,
+    "background_covers": true
+   },
+   "1600": {
+    "overflow_px": 0,
+    "clipped_overflow_px": 0,
+    "text_overlaps": 0,
+    "examples": [],
+    "overflowers": [],
+    "content": [
+     74,
+     1588
+    ],
+    "centre_ratio": 0.519,
+    "left_ratio": 0.046,
+    "right_gap_ratio": 0.007,
+    "page_height": 1218,
+    "max_vertical_gap": 73,
+    "viewport_h": 900,
+    "background_covers": true
+   }
+  },
+  "fluidity": {
+   "pass": true,
+   "fails": [],
+   "widths": {
+    "360": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.001,
+     "max_gap": 55,
+     "bg_covers": true,
+     "ok": true
+    },
+    "375": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.001,
+     "max_gap": 55,
+     "bg_covers": true,
+     "ok": true
+    },
+    "585": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.003,
+     "max_gap": 55,
+     "bg_covers": true,
+     "ok": true
+    },
+    "920": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.001,
+     "max_gap": 73,
+     "bg_covers": true,
+     "ok": true
+    },
+    "1600": {
+     "overflow": 0,
+     "overlaps": 0,
+     "centre_drift": 0.013,
+     "max_gap": 73,
+     "bg_covers": true,
+     "ok": true
+    },
+    "mobile": {
+     "overflow": 0,
+     "max_gap": 55,
+     "bg_covers": true
+    },
+    "desktop": {
+     "overflow": 0,
+     "max_gap": 73,
+     "bg_covers": true
+    },
+    "tablet": {
+     "overflow": 0,
+     "max_gap": 73,
+     "bg_covers": true
+    }
+   }
+  },
+  "runtime_errors": [],
+  "warnings": [
+   "1600 px: the \"Edit with Lovable\" badge covers part of the \"Core Foundations 15 min\" button (a platform badge, not your layout)"
+  ]
+ },
+ "design": {
+  "mobile": "design/mobile.webp",
+  "tablet": "design/tablet.webp",
+  "desktop": "design/desktop.webp"
+ },
+ "build": {
+  "mobile": "build/mobile.webp",
+  "tablet": "build/tablet.webp",
+  "desktop": "build/desktop.webp"
+ },
+ "design_texts": {
+  "mobile": [
+   {
+    "text": "LEVEL 4 \u2022 ROOKIE",
+    "box": [
+     55,
+     32,
+     98,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "Welcome back, m",
+    "box": [
+     24,
+     59,
+     187,
+     22
+    ],
+    "size_px": 24
+   },
+   {
+    "text": "Keep the momentum going.",
+    "box": [
+     26,
+     90,
+     192,
+     15
+    ],
+    "size_px": 16
+   },
+   {
+    "text": "TODAY'S FOCUS",
+    "box": [
+     72,
+     186,
+     107,
+     10
+    ],
+    "size_px": 13
+   },
+   {
+    "text": "Show up for 15 minutes. That's a win.",
+    "box": [
+     48,
+     212,
+     288,
+     43
+    ],
+    "size_px": 19
+   },
+   {
+    "text": "12",
+    "box": [
+     98,
+     331,
+     21,
+     15
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Workouts",
+    "box": [
+     98,
+     356,
+     50,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "1,840",
+    "box": [
+     283,
+     331,
+     48,
+     18
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Calories",
+    "box": [
+     282,
+     356,
+     42,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "118",
+    "box": [
+     98,
+     425,
+     32,
+     15
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Avg BPM",
+    "box": [
+     97,
+     450,
+     48,
+     11
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "6/8",
+    "box": [
+     282,
+     425,
+     30,
+     16
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Hydration",
+    "box": [
+     283,
+     450,
+     51,
+     11
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "Current Streak",
+    "box": [
+     82,
+     538,
+     115,
+     14
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "4",
+    "box": [
+     49,
+     582,
+     27,
+     35
+    ],
+    "size_px": 48
+   },
+   {
+    "text": "Days",
+    "box": [
+     91,
+     598,
+     41,
+     18
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Time Logged",
+    "box": [
+     81,
+     784,
+     100,
+     17
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "1h 20m",
+    "box": [
+     52,
+     827,
+     109,
+     28
+    ],
+    "size_px": 36
+   }
+  ],
+  "tablet": [
+   {
+    "text": "Welcome back, m",
+    "box": [
+     24,
+     59,
+     187,
+     22
+    ],
+    "size_px": 24
+   },
+   {
+    "text": "Keep the momentum going.",
+    "box": [
+     26,
+     90,
+     192,
+     15
+    ],
+    "size_px": 16
+   },
+   {
+    "text": "TODAY'S FOCUS",
+    "box": [
+     72,
+     186,
+     106,
+     10
+    ],
+    "size_px": 14
+   },
+   {
+    "text": "Show up for 15 minutes. That's a win.",
+    "box": [
+     48,
+     212,
+     390,
+     22
+    ],
+    "size_px": 24
+   },
+   {
+    "text": "12",
+    "box": [
+     98,
+     307,
+     21,
+     15
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Workouts",
+    "box": [
+     98,
+     332,
+     50,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "1,840",
+    "box": [
+     466,
+     307,
+     48,
+     18
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Calories",
+    "box": [
+     466,
+     332,
+     42,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "118",
+    "box": [
+     98,
+     401,
+     32,
+     15
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Avg BPM",
+    "box": [
+     97,
+     426,
+     48,
+     11
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "6/8",
+    "box": [
+     466,
+     401,
+     30,
+     16
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Hydration",
+    "box": [
+     466,
+     426,
+     51,
+     11
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "Current Streak",
+    "box": [
+     82,
+     514,
+     115,
+     14
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "4",
+    "box": [
+     49,
+     558,
+     27,
+     35
+    ],
+    "size_px": 48
+   },
+   {
+    "text": "Days",
+    "box": [
+     91,
+     574,
+     41,
+     18
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Time Logged",
+    "box": [
+     81,
+     760,
+     100,
+     17
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "1h 20m",
+    "box": [
+     51,
+     803,
+     110,
+     28
+    ],
+    "size_px": 36
+   },
+   {
+    "text": "Weekly Activity",
+    "box": [
+     77,
+     974,
+     125,
+     16
+    ],
+    "size_px": 17
+   },
+   {
+    "text": "Minutes moved each day",
+    "box": [
+     50,
+     1003,
+     152,
+     12
+    ],
+    "size_px": 13
+   },
+   {
+    "text": "Morning Mobility",
+    "box": [
+     422,
+     757,
+     184,
+     22
+    ],
+    "size_px": 24
+   },
+   {
+    "text": "A gentle routine to wake up your joints and build consistent motion.",
+    "box": [
+     421,
+     794,
+     222,
+     38
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "ROOKIE",
+    "box": [
+     108,
+     32,
+     44,
+     10
+    ],
+    "size_px": 13
+   },
+   {
+    "text": "720 XP",
+    "box": [
+     630,
+     52,
+     46,
+     11
+    ],
+    "size_px": 15
+   },
+   {
+    "text": "280 to Level 5",
+    "box": [
+     600,
+     72,
+     74,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "Up Next",
+    "box": [
+     422,
+     513,
+     73,
+     18
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "15 mins",
+    "box": [
+     660,
+     515,
+     46,
+     10
+    ],
+    "size_px": 14
+   },
+   {
+    "text": "This week. Goal: 2h Om",
+    "box": [
+     49,
+     849,
+     142,
+     10
+    ],
+    "size_px": 13
+   }
+  ],
+  "desktop": [
+   {
+    "text": "Welcome back, m",
+    "box": [
+     24,
+     59,
+     187,
+     22
+    ],
+    "size_px": 24
+   },
+   {
+    "text": "Keep the momentum going.",
+    "box": [
+     26,
+     90,
+     192,
+     15
+    ],
+    "size_px": 16
+   },
+   {
+    "text": "TODAY'S FOCUS",
+    "box": [
+     72,
+     186,
+     107,
+     10
+    ],
+    "size_px": 19
+   },
+   {
+    "text": "Show up for 15 minutes. That's a win.",
+    "box": [
+     48,
+     212,
+     396,
+     22
+    ],
+    "size_px": 24
+   },
+   {
+    "text": "12",
+    "box": [
+     98,
+     307,
+     21,
+     15
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Workouts",
+    "box": [
+     98,
+     332,
+     50,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "1,840",
+    "box": [
+     358,
+     305,
+     50,
+     24
+    ],
+    "size_px": 27
+   },
+   {
+    "text": "Calories",
+    "box": [
+     357,
+     332,
+     42,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "118",
+    "box": [
+     618,
+     307,
+     32,
+     15
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Avg BPM",
+    "box": [
+     617,
+     332,
+     48,
+     11
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "6/8",
+    "box": [
+     877,
+     307,
+     30,
+     16
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Hydration",
+    "box": [
+     877,
+     332,
+     51,
+     11
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "Current Streak",
+    "box": [
+     82,
+     420,
+     115,
+     14
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "4",
+    "box": [
+     49,
+     464,
+     27,
+     35
+    ],
+    "size_px": 48
+   },
+   {
+    "text": "Days",
+    "box": [
+     91,
+     480,
+     41,
+     18
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Time Logged",
+    "box": [
+     81,
+     666,
+     100,
+     17
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "1h 20m",
+    "box": [
+     51,
+     709,
+     110,
+     28
+    ],
+    "size_px": 36
+   },
+   {
+    "text": "Weekly Activity",
+    "box": [
+     77,
+     880,
+     125,
+     16
+    ],
+    "size_px": 17
+   },
+   {
+    "text": "Minutes moved each day",
+    "box": [
+     50,
+     909,
+     152,
+     12
+    ],
+    "size_px": 13
+   },
+   {
+    "text": "Up Next",
+    "box": [
+     399,
+     419,
+     73,
+     18
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "15 mins",
+    "box": [
+     614,
+     421,
+     46,
+     10
+    ],
+    "size_px": 14
+   },
+   {
+    "text": "Morning Mobility",
+    "box": [
+     400,
+     650,
+     184,
+     22
+    ],
+    "size_px": 24
+   },
+   {
+    "text": "A gentle routine to wake up your joints and build consistent motion.",
+    "box": [
+     398,
+     687,
+     222,
+     38
+    ],
+    "size_px": 20
+   },
+   {
+    "text": "Achievements",
+    "box": [
+     775,
+     420,
+     113,
+     14
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "Habit Builders",
+    "box": [
+     731,
+     605,
+     112,
+     14
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "View all >",
+    "box": [
+     974,
+     606,
+     60,
+     11
+    ],
+    "size_px": 15
+   },
+   {
+    "text": "Desk Worker Fix",
+    "box": [
+     848,
+     685,
+     118,
+     12
+    ],
+    "size_px": 16
+   },
+   {
+    "text": "10 min",
+    "box": [
+     866,
+     712,
+     42,
+     10
+    ],
+    "size_px": 14
+   },
+   {
+    "text": "Core Foundations",
+    "box": [
+     848,
+     823,
+     125,
+     12
+    ],
+    "size_px": 16
+   },
+   {
+    "text": "15 min",
+    "box": [
+     866,
+     850,
+     42,
+     10
+    ],
+    "size_px": 14
+   },
+   {
+    "text": "Wind Down Stretch",
+    "box": [
+     847,
+     961,
+     140,
+     12
+    ],
+    "size_px": 16
+   },
+   {
+    "text": "12 min",
+    "box": [
+     866,
+     988,
+     42,
+     10
+    ],
+    "size_px": 14
+   },
+   {
+    "text": "Start Workout",
+    "box": [
+     479,
+     1020,
+     114,
+     14
+    ],
+    "size_px": 18
+   },
+   {
+    "text": "ROOKIE",
+    "box": [
+     108,
+     32,
+     44,
+     10
+    ],
+    "size_px": 13
+   },
+   {
+    "text": "720 XP",
+    "box": [
+     934,
+     52,
+     46,
+     11
+    ],
+    "size_px": 15
+   },
+   {
+    "text": "280 to Level 5",
+    "box": [
+     904,
+     72,
+     74,
+     9
+    ],
+    "size_px": 12
+   },
+   {
+    "text": "3-Day Streak",
+    "box": [
+     749,
+     526,
+     56,
+     9
+    ],
+    "size_px": 10
+   },
+   {
+    "text": "First",
+    "box": [
+     840,
+     527,
+     18,
+     7
+    ],
+    "size_px": 9
+   },
+   {
+    "text": "Goal Setter",
+    "box": [
+     896,
+     527,
+     49,
+     7
+    ],
+    "size_px": 9
+   },
+   {
+    "text": "10 Sessions",
+    "box": [
+     967,
+     527,
+     50,
+     7
+    ],
+    "size_px": 9
+   },
+   {
+    "text": "Workout",
+    "box": [
+     830,
+     540,
+     38,
+     8
+    ],
+    "size_px": 11
+   },
+   {
+    "text": "This week. Goal: 2h Om",
+    "box": [
+     49,
+     755,
+     142,
+     10
+    ],
+    "size_px": 13
+   }
+  ]
+ },
+ "usd": 0.0531,
+ "repair": null,
+ "brief": {
+  "source": "nemotron",
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "summary": [
+   {
+    "text": "The build uses Roboto instead of Lato across all sizes.",
+    "facts": [
+     "F1"
+    ]
+   }
+  ],
+  "fix": [
+   {
+    "text": "On mobile, increase the font size by about 12%.",
+    "facts": [
+     "F2"
+    ]
+   },
+   {
+    "text": "On mobile, increase vertical spacing by about 25%.",
+    "facts": [
+     "F3"
+    ]
+   },
+   {
+    "text": "On all sizes, change the font from Roboto to Lato.",
+    "facts": [
+     "F1"
+    ]
+   }
+  ],
+  "added": 0,
+  "dropped": 1,
+  "dropped_items": [
+   {
+    "text": "On mobile, text is too small and vertical spacing is too tight, causing multiple text elements to sit higher than designed.",
+    "why": "says more than the measurements (overclaim or cause)"
+   }
+  ],
+  "intro": "Please update this page so it matches my design frames at every screen size:",
+  "facts": [
+   {
+    "id": "F1",
+    "kind": "font",
+    "bp": null,
+    "text": "The build uses the Roboto font; the design uses Lato.",
+    "nums": []
+   },
+   {
+    "id": "F2",
+    "kind": "text_size",
+    "bp": "mobile",
+    "text": "On mobile, text is about 11% smaller than in the design (it needs to be about 12% larger).",
+    "nums": [
+     11,
+     12
+    ]
+   },
+   {
+    "id": "F3",
+    "kind": "drift",
+    "bp": "mobile",
+    "text": "On mobile, vertical spacing is about 20% tighter than in the design (it needs to grow about 25%): by the bottom of the screen, content sits 150 px higher.",
+    "nums": [
+     20,
+     25,
+     150
+    ]
+   },
+   {
+    "id": "F4",
+    "kind": "moved",
+    "bp": "mobile",
+    "text": "On mobile, \u201cdays\u201d sits 113 px higher than in the design.",
+    "nums": [
+     113
+    ],
+    "quote": "days",
+    "explained": true
+   },
+   {
+    "id": "F5",
+    "kind": "moved",
+    "bp": "mobile",
+    "text": "On mobile, \u201ctime logged\u201d sits 148 px higher than in the design.",
+    "nums": [
+     148
+    ],
+    "quote": "time logged",
+    "explained": true
+   },
+   {
+    "id": "F6",
+    "kind": "moved",
+    "bp": "mobile",
+    "text": "On mobile, \u201c1h 20m\u201d sits 152 px higher than in the design.",
+    "nums": [
+     152
+    ],
+    "quote": "1h 20m",
+    "explained": true
+   },
+   {
+    "id": "F7",
+    "kind": "below",
+    "bp": "tablet",
+    "text": "On tablet, \u201cminutes moved each day\u201d is pushed below the first screen.",
+    "nums": [],
+    "quote": "minutes moved each day",
+    "explained": true
+   },
+   {
+    "id": "F8",
+    "kind": "warning",
+    "bp": null,
+    "text": "At 1600 px, the \"Edit with Lovable\" badge covers part of the \"Core Foundations 15 min\" button.",
+    "nums": [
+     1600,
+     15
+    ],
+    "badge": true
+   }
+  ],
+  "notes": [
+   {
+    "text": "At 1600 px, the \"Edit with Lovable\" badge covers part of the \"Core Foundations 15 min\" button. It is the platform's badge, not your layout: hide it if your plan allows, or leave space at the bottom so content can scroll clear of it.",
+    "facts": [
+     "F8"
+    ]
+   }
+  ]
+ },
+ "fonts": {
+  "body": "Lato",
+  "kept": [
+   "Lato"
+  ]
+ },
+ "diagnostics": {
+  "mobile": {
+   "text": [
+    {
+     "text": "days",
+     "status": "moved",
+     "dy": -113,
+     "dx": -18
+    },
+    {
+     "text": "time logged",
+     "status": "moved",
+     "dy": -148,
+     "dx": 70
+    },
+    {
+     "text": "1h 20m",
+     "status": "moved",
+     "dy": -152,
+     "dx": 94
+    }
+   ],
+   "drift": {
+    "bands": [
+     {
+      "y0": 0,
+      "y1": 144,
+      "dy": -14
+     },
+     {
+      "y0": 144,
+      "y1": 290,
+      "dy": -28
+     },
+     {
+      "y0": 290,
+      "y1": 436,
+      "dy": null,
+      "unsure": true
+     },
+     {
+      "y0": 436,
+      "y1": 580,
+      "dy": -96
+     },
+     {
+      "y0": 580,
+      "y1": 724,
+      "dy": -126
+     },
+     {
+      "y0": 724,
+      "y1": 870,
+      "dy": -150
+     }
+    ],
+    "scale": 0.803
+   },
+   "lost": {
+    "layout": 42.46,
+    "color": 13.44,
+    "text": 5.61,
+    "offset": 0.0
+   },
+   "font": {
+    "design": "Lato",
+    "build": "Roboto"
+   },
+   "text_size": 0.89
+  },
+  "tablet": {
+   "text": [
+    {
+     "text": "minutes moved each day",
+     "status": "below",
+     "dy": 28,
+     "dx": 72
+    }
+   ],
+   "drift": {
+    "bands": [
+     {
+      "y0": 0,
+      "y1": 170,
+      "dy": 6
+     },
+     {
+      "y0": 170,
+      "y1": 342,
+      "dy": 10
+     },
+     {
+      "y0": 342,
+      "y1": 512,
+      "dy": 20
+     },
+     {
+      "y0": 512,
+      "y1": 682,
+      "dy": 20
+     },
+     {
+      "y0": 682,
+      "y1": 854,
+      "dy": 24
+     },
+     {
+      "y0": 854,
+      "y1": 1024,
+      "dy": 26
+     }
+    ],
+    "scale": 1.024
+   },
+   "lost": {
+    "layout": 19.29,
+    "color": 8.01,
+    "text": 1.47,
+    "offset": 10.1
+   },
+   "font": {
+    "design": "Lato",
+    "build": "Roboto"
+   },
+   "text_size": 1.0
+  },
+  "desktop": {
+   "text": [],
+   "drift": {
+    "bands": [
+     {
+      "y0": 0,
+      "y1": 196,
+      "dy": 6
+     },
+     {
+      "y0": 196,
+      "y1": 392,
+      "dy": 12
+     },
+     {
+      "y0": 392,
+      "y1": 588,
+      "dy": 20
+     },
+     {
+      "y0": 588,
+      "y1": 784,
+      "dy": 20
+     },
+     {
+      "y0": 784,
+      "y1": 980,
+      "dy": 22
+     },
+     {
+      "y0": 980,
+      "y1": 1176,
+      "dy": 36
+     }
+    ],
+    "scale": 1.027
+   },
+   "lost": {
+    "layout": 20.71,
+    "color": 7.64,
+    "text": 0.0,
+    "offset": 7.11
+   },
+   "font": {
+    "design": "Lato",
+    "build": "Roboto"
+   },
+   "text_size": 1.0
+  }
+ },
+ "sizes": {
+  "mobile": [
+   402,
+   870
+  ],
+  "tablet": [
+   768,
+   1024
+  ],
+  "desktop": [
+   1071,
+   1177
+  ]
+ },
+ "title": "Dashboard built by Lovable",
+ "label": "AI build \u00b7 check",
+ "publish_source": "owned:adaptable-hub-central.lovable.app",
+ "created": 1792519434.603415
+}

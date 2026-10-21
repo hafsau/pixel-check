@@ -34,7 +34,7 @@ export function RunList() {
       {s && s.static.length + s.interaction.length + s.group.length + s.check.length === 0 && <p className="mt-4 text-sm text-ink-muted">No runs exported yet.</p>}
       {s && s.check.length > 0 && (
         <Group id="checks" title="Build checks" intro="Real builds measured as they are deployed — every width from 360 to 1600 px, platform badges over content, text a phone loses. Audits have no designs, so no match score.">
-          {s.check.map((e) => (
+          {[...s.check].sort((a, b) => Number(a.mode === 'audit') - Number(b.mode === 'audit')).map((e) => (
             <CheckCard key={e.id} e={e} />
           ))}
         </Group>

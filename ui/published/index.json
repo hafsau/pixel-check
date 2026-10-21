@@ -79,5 +79,26 @@
   "vanished": 7,
   "thumb": "build/mobile.webp",
   "source": "owned:interview-sage--hafsausmani.replit.app"
+ },
+ {
+  "id": "lovable-dashboard-check",
+  "type": "check",
+  "mode": "check",
+  "title": "Dashboard built by Lovable",
+  "label": "AI build \u00b7 check",
+  "url": "https://adaptable-hub-central.lovable.app/",
+  "match": 38.49,
+  "per_bp": {
+   "mobile": 38.49,
+   "tablet": 61.13,
+   "desktop": 64.54
+  },
+  "created": 1792519434.603415,
+  "usd": 0.0531,
+  "fluid_pass": true,
+  "warnings": 1,
+  "vanished": 0,
+  "thumb": "build/mobile.webp",
+  "source": "owned:adaptable-hub-central.lovable.app"
  }
 ]

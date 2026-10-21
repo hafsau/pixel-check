@@ -7,13 +7,13 @@ Status tags: **[confirmed]** = experienced first-hand · **[to verify]** = seen 
 
 Usage behind these notes (Sep 28 – Oct 7, from our spend ledger): 410 Gemma 3 27B calls ($0.14), 401 Nemotron 3 Super calls ($1.06), 354 Nemotron 3 Ultra calls ($2.64), 62 calls to other vision models in a bake-off ($0.84), 436 sandbox runs recorded since Oct 5 ($8.46).
 
-_Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Hafsa can give._
+_Onboarding times below come from our commit history and spend ledger (dates and first calls), not stopwatch minutes._
 
 ---
 
 ## 1. Nebius Token Factory — account, billing, inference API
 
-**Used for:** all model calls (design reading, responsive-intent planning, region naming, the repair agent; earlier also code generation and critique) via the OpenAI-compatible endpoint `https://api.tokenfactory.nebius.com/v1/`. Note: check mode without repair calls only the vision model (Gemma) plus Sandboxes.
+**Used for:** all model calls (design reading, the fix brief on every check, responsive-intent planning, region naming, the repair agent; earlier also code generation and critique) via the OpenAI-compatible endpoint `https://api.tokenfactory.nebius.com/v1/`. A check calls Gemma 3 (reading the frames) and Nemotron 3 Super (the fix brief), plus Sandboxes.
 
 **Worked well**
 - 2026-09-25 [confirmed] Hackathon promo code `NEBIUS-DEVPOST-GLOBAL26` applied; $50 credit showed in the balance.
@@ -28,11 +28,11 @@ _Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Haf
 - 2026-10-07 [confirmed] Positive: cheap enough for agent loops — our whole build so far cost ~$4.70 in model calls for ~1,200 calls, and `GET /v1/models?verbose=true` gives live per-token prices that our spend cap uses directly.
 
 **Onboarding (zero → hello world)**
-- Sign-up → promo applied: __ min **(Hafsa)**
-- Sign-up → first successful chat completion: __ min **(Hafsa)**
-- Friction points during onboarding: __ **(Hafsa)**
+- Sign-up → promo applied: same day (Sep 25); the $50 credit showed in the balance at once.
+- First successful chat completions: Sep 29, in the first working session (gates G1–G2 committed that afternoon); the OpenAI-compatible endpoint worked with the standard `openai` client unchanged.
+- Friction: no spend alert (above); the model catalogue showed "0B" parameters for Nemotron 3 Super and Ultra (Sep 28); Gemma 3 listed as `text->text` though it reads images.
 
-**Build with it again? Why:** __ **(Hafsa)** — suggested points: OpenAI-compatible API made the switch trivial; live prices; missing billing alerts.
+**Build with it again? Why:** Yes. One key and one OpenAI-compatible endpoint gave us Nemotron and a vision model; live per-token prices fed our spend cap directly; ~1,800 calls cost under $5 of model time. We would want spend alerts and a sandbox-vs-inference split in the console.
 
 ---
 
@@ -66,16 +66,16 @@ _Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Haf
 - 2026-10-05 [confirmed] Useful for URL capture: a run with networking on can reach the public internet, and Playwright's request routing inside the sandbox let us block private / metadata addresses per request. We deliberately did not probe Nebius-internal addresses from inside a sandbox (not authorised); docs stating what a networking-on sandbox can reach would help builders reason about SSRF.
 
 **Onboarding (zero → hello world)**
-- Access granted → first `contree run`: __ min **(Hafsa)**
-- First custom image built with `contree build`: __ min **(Hafsa)**
+- Access granted (Sep 28) → first `contree run` and first API run with networking off: the next day (gate G4, Sep 29).
+- First custom image with `contree build sandbox/`: the same day, ~100 s for the first build, 6 s cached; 21 image versions since, the render selftest byte-identical from v13 to v21.
 
-**Build with it again? Why:** __ **(Hafsa)** — suggested points: checkpoints + forks + per-run network switch are the core of the product; stdout cap and network-on CLI default cost us time.
+**Build with it again? Why:** Yes — it is the backbone of PixelCheck. Checkpoints, disposable forks and the per-run network switch let a build be captured with the network on and then scored in a fork with the network off, where alone the design frames enter. What cost us time: the 64 KiB stdout cap that reports `truncated: false`, and the CLI's network-on default.
 
 ---
 
 ## 3. NVIDIA Nemotron 3 Super (via Token Factory)
 
-**Used for:** now (Oct 5+): naming page regions in every rebuild, and the experimental repair agent's class edits (JSON). Earlier (Sep 29 – Oct 2, development only): critique (fix strategies from measured diffs), class edits in the rebuild loop and early code generation — these loop branches added nothing over the compiler and are off in the demo.
+**Used for:** now: **writing the fix brief on every check** (Oct 20+: from numbered measured facts to a summary and a message to paste into an AI builder, each claim citing its facts), naming page regions in every rebuild, and the experimental repair agent's class edits (JSON). Earlier (Sep 29 – Oct 2, development only): critique (fix strategies from measured diffs), class edits in the rebuild loop and early code generation — these loop branches added nothing over the compiler and are off in the demo.
 
 **Worked well**
 - 2026-09-29 [confirmed] Structured output is reliable with reasoning off: 10/10 schema-valid JSON (G2), 0.7–1.2 s on short prompts; also valid in `low_effort` (3/3) and `reasoning_budget` 2048 (3/3) modes.
@@ -89,9 +89,12 @@ _Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Haf
 - 2026-10-01 [confirmed] Positive: naming page regions (header / nav / main / section / footer) from an indented outline of measured segments is reliable and cheap (52 calls, ~1.4–1.7 s each at `low_effort`); applied deterministically.
 - 2026-10-07 [confirmed] As a **repair agent** (class edits scoped to one screen size, JSON schema output, temperature 0.3 / 0.7 / 1.0 for three candidates): it follows structure hints well ("make this parent a 2-column grid at tablet"), but reads a measured offset "Δ +293 px" as "add `mt-[293px]`" and centres with left margins unless told otherwise; explicit rules (Δ is relative, ≤ 64 px margins, centre with `mx-auto` / `justify-center`) fixed most of it. Run-to-run variance is large: the same build and settings gave +9.0 and +4.5 points in two runs, so we pre-registered averaging over 3 runs for our benchmark.
 
-**Onboarding (zero → hello world):** first valid JSON response: __ min **(Hafsa)**
+- 2026-10-20 [confirmed] Positive: as the **fix-brief writer** (thinking off, temperature 0.3, ~600 input / ~400 output tokens): valid JSON on every call, ~7 s, ~$0.0005 per brief. With a verifier outside the model it is safe to show: on our first real briefs the verifier and our council caught what slipped — an instruction with no screen size ("increase the font size by about 12%" from a mobile-only fact), a whole-page finding narrowed to one size ("On mobile, use Lato"), overclaims ("obscures key text … and other labels", "making it inaccessible") and advice to move a platform badge. After tightening the prompt and the verifier, the Lovable brief kept 3 of 4 claims, each backed by a measurement, and the dropped one is shown with its reason.
+- 2026-10-20 [confirmed] Needs work: it does not reliably follow "start every instruction with the screen size" even when told; quoting style varies (single vs double quotes), so a verifier has to handle both.
 
-**Build with it again? Why:** __ **(Hafsa)**
+**Onboarding (zero → hello world):** first valid JSON response on Sep 29, the first working session (G2: 10/10 valid with thinking off).
+
+**Build with it again? Why:** Yes, for structured jobs with a deterministic check behind it — region names, class edits, and the fix brief. Not for pixel-precise code from numbers: our deterministic compiler beat it there.
 
 ---
 
@@ -109,8 +112,8 @@ _Fields marked **(Hafsa)** are first-hand onboarding times and opinions only Haf
 - 2026-09-29 [confirmed] `low_effort` reasoning: 2 of 3 code generations returned no code within 16,000 max tokens.
 - 2026-10-02 [confirmed] Wrote `bg-[#000000/0.9]` (invalid Tailwind arbitrary value) in 3 attempts in a row; nothing in the API helps catch it — our renderer now flags classes that produce no CSS and feeds that back.
 
-**Onboarding:** __ **(Hafsa)**
-**Build with it again? Why:** __ **(Hafsa)**
+**Onboarding:** same key and endpoint as Super; first call on Sep 29, no extra setup.
+**Build with it again? Why:** For one-off planning calls, yes (the intent plan costs $0.002–0.01 a page). As a code writer it beat Super (single-shot 39–47 vs ~15), but our deterministic compiler beat both, so its role is small.
 
 ---
 
@@ -136,8 +139,8 @@ ended up deterministic (measured scores and checks), so no step needed a fast mo
 - 2026-10-06 [confirmed] Latency tail: median 13 s, p90 41 s over 410 calls, worst 293 s (see §1). The answers themselves stayed good: on display fonts OCR could not read, Gemma still named the text, which our merge then placed.
 - 2026-10-07 [confirmed] It occasionally omits text cut off at the bottom edge of a frame and misreads clipped headlines ("USMANI" → "LISMANI"); we correct the spelling from the other frames.
 
-**Onboarding:** __ **(Hafsa)**
-**Build with it again? Why:** __ **(Hafsa)** — suggested points: best accuracy/price of 6 vision models we tried; no NVIDIA vision model on Public endpoints.
+**Onboarding:** same key and endpoint; first image read on Sep 29 (G3: 95.8 % text recall on 10 screenshots).
+**Build with it again? Why:** Yes — best accuracy for the price of the 6 vision models we tried. We would switch to an NVIDIA vision model if one were offered on Public endpoints.
 
 ---
 
