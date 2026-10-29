@@ -4,7 +4,7 @@
 to fix.**
 
 **[Live demo](https://pixel-check-peach.vercel.app)** · **[Example result](https://pixel-check-peach.vercel.app/check/lovable-dashboard-check/replay)** ·
-Video: _(YouTube — added at submission)_ · Track: Coding and Agentic Engineering · Nebius × NVIDIA Global AI Hackathon
+Video: [youtu.be/k2rHocKInfg](https://youtu.be/k2rHocKInfg) · Track: Coding and Agentic Engineering · Nebius × NVIDIA Global AI Hackathon
 
 PixelCheck is the **test step AI coding agents skip**: it runs AI-written UI code in **Nebius Token Factory Sandboxes**,
 tests it against the designer's phone, tablet and desktop frames at every width from 360 to 1600 px, and hands a
